@@ -1514,7 +1514,7 @@ extension L10n {
             "allApps": ("Все приложения", "All apps"), "repeats": ("По повторам", "Most repeated"), "recent": ("По времени", "Most recent"),
             "missedConversion": ("Пропущена замена", "Missed conversion"), "unwantedConversion": ("Лишняя замена", "Unwanted conversion"),
             "candidate": ("Нужно проверить", "Needs review"), "confirmed": ("Подтверждено", "Confirmed"),
-            "rejected": ("Отклонено", "Rejected"), "resolved": ("Правило применено", "Rule applied"),
+            "rejected": ("Отклонено", "Rejected"), "resolved": ("Разобрано", "Resolved"),
             "cases": ("случаев", "cases"), "pruned": ("старых удалено по лимиту", "older cases pruned"),
             "empty": ("Случаев пока нет. Включи сбор и отметь ошибку или добавь слово вручную.", "No cases yet. Enable collection and mark a mistake or add a word manually."),
             "rules": ("Глобальные правила", "Global rules"),

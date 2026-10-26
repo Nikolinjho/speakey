@@ -4,6 +4,8 @@ import AppKit
 if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
     let previewApp = NSApplication.shared
     previewApp.setActivationPolicy(.regular)
+    let previewAppearance: NSAppearance.Name = ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW_LIGHT"] == "1" ? .aqua : .darkAqua
+    previewApp.appearance = NSAppearance(named: previewAppearance)
     let suite = "keyboop-journal-preview-" + UUID().uuidString
     let defaults = UserDefaults(suiteName: suite)!
     defaults.set("ru", forKey: "language")
@@ -22,10 +24,10 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
     store.flush { _ in
         previewWindow = SettingsWindowController()
         previewWindow?.show(section: .layoutJournal)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+        previewWindow?.whenLayoutJournalReady {
             let environment = ProcessInfo.processInfo.environment
             if let path = environment["KEYBOOP_JOURNAL_PREVIEW_PNG"], let index = SettingsSection.sidebarCases.firstIndex(of: .layoutJournal) {
-                previewWindow?.dumpFullWindow(section: index, to: path, appearance: environment["KEYBOOP_JOURNAL_PREVIEW_LIGHT"] == "1" ? .aqua : .darkAqua)
+                previewWindow?.dumpFullWindow(section: index, to: path, appearance: previewAppearance, selectSection: false)
             }
             if environment["KEYBOOP_JOURNAL_PREVIEW_INTERACTIVE"] != "1" {
                 defaults.removePersistentDomain(forName: suite)

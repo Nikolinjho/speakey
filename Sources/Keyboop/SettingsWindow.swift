@@ -811,9 +811,16 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return img
     }
 
-    func dumpFullWindow(section i: Int, to path: String, appearance: NSAppearance.Name = .darkAqua) {
+    func whenLayoutJournalReady(_ completion: @escaping () -> Void) {
+        detail.whenLayoutJournalReady(completion)
+    }
+
+    func dumpFullWindow(section i: Int, to path: String, appearance: NSAppearance.Name = .darkAqua, selectSection: Bool = true) {
         window?.appearance = NSAppearance(named: appearance)
-        sidebar.select(i, animated: false)
+        if selectSection { sidebar.select(i, animated: false) }
+        if ProcessInfo.processInfo.environment["KEYBOOP_WINSHOT"] == "1" {
+            sidebar.view.layer?.backgroundColor = NSColor(white: appearance == .aqua ? 0.96 : 0.17, alpha: 1).cgColor
+        }
         // ⚠️ СОБИРАЕМ ИЗ ДВУХ КУСКОВ, А НЕ СНИМАЕМ КОРЕНЬ ЦЕЛИКОМ (задача 0d, починено 05.08.2026).
         //
         // Раньше здесь был cacheDisplay по `window.contentView`, и на macOS 26 он стал отдавать
@@ -1304,6 +1311,10 @@ final class DetailVC: NSViewController {
     /// Dev: PNG колонки через cacheDisplay — В ОТЛИЧИЕ от PDF рендерит NSControl
     /// (чекбоксы, segmented, popup) с реальным accent-цветом (coral). Композитим на
     /// белый фон, т.к. cacheDisplay оставляет прозрачные зоны там, где view не рисует фон.
+    func whenLayoutJournalReady(_ completion: @escaping () -> Void) {
+        (contentStack as? LayoutJournalView)?.whenReady(completion)
+    }
+
     func renderColumnPNG(extraRight: CGFloat = 0, forceWidth: CGFloat? = nil) -> Data? {
         var temp: NSLayoutConstraint?
         if let fw = forceWidth {                      // надёжно сузить колонку (ресайз окна в дампе асинхронен)
@@ -1311,6 +1322,9 @@ final class DetailVC: NSViewController {
             temp!.priority = .required
             temp!.isActive = true
         }
+        let dark = column.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let background = NSColor(white: dark ? 0.14 : 1, alpha: 1)
+        if ProcessInfo.processInfo.environment["KEYBOOP_WINSHOT"] == "1" { column.layer?.backgroundColor = background.cgColor }
         column.superview?.layoutSubtreeIfNeeded()
         column.layoutSubtreeIfNeeded()
         defer { temp?.isActive = false }
@@ -1323,7 +1337,7 @@ final class DetailVC: NSViewController {
         column.cacheDisplay(in: frame, to: rep)
         let out = NSImage(size: frame.size)
         out.lockFocus()
-        NSColor(white: 0.14, alpha: 1).setFill()   // тёмный фон (как реальное окно)
+        background.setFill()
         NSRect(origin: .zero, size: frame.size).fill()
         rep.draw(in: NSRect(origin: .zero, size: frame.size))
         if extraRight > 0 {                     // маркер правого края колонки

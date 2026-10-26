@@ -60,7 +60,11 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         }
         app.addItem(withTitle: L10n.journal("allApps")); configure(app, id: "app")
         app.widthAnchor.constraint(lessThanOrEqualToConstant: 150).isActive = true
-        addArrangedSubview(row([kind, app, status, sort]))
+        addArrangedSubview(row([kind, app]))
+        addArrangedSubview(row([status, sort]))
+        kind.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        status.widthAnchor.constraint(equalToConstant: 200).isActive = true
+        sort.widthAnchor.constraint(equalToConstant: 180).isActive = true
         message.textColor = .secondaryLabelColor; message.font = .systemFont(ofSize: 12)
         addArrangedSubview(message)
         body.orientation = .vertical; body.alignment = .leading; body.spacing = 12
@@ -95,7 +99,9 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     }
     @objc private func toggleCollection() { runtime.setEnabled(collection.state == .on); refresh() }
     @objc private func filterChanged() { page = 1; render() }
-    private func refresh() {
+    func whenReady(_ completion: @escaping () -> Void) { refresh(completion: completion) }
+
+    private func refresh(completion: (() -> Void)? = nil) {
         guard window != nil else { return }
         guard !runtime.journalEditing else { pendingRefresh = true; return }
         runtime.store.snapshot { [weak self] snapshot in
@@ -104,13 +110,14 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
             self.snapshot = snapshot
             let selectedApp = self.app.indexOfSelectedItem > 0 ? self.appIDs[self.app.indexOfSelectedItem - 1] : nil
             self.appIDs = Array(Set(snapshot.cases.map(\.bundleID))).sorted()
-            self.app.removeAllItems(); self.app.addItem(withTitle: L10n.journal("allApps")); self.app.addItems(withTitles: self.appIDs)
+            self.app.removeAllItems(); self.app.addItem(withTitle: L10n.journal("allApps")); self.app.addItems(withTitles: self.appIDs.map(self.appName))
             if let selectedApp, let index = self.appIDs.firstIndex(of: selectedApp) { self.app.selectItem(at: index + 1) }
             self.collection.state = self.runtime.enabled ? .on : .off
             self.addButton?.isEnabled = self.runtime.enabled && !self.busy
             if self.operationFailed || snapshot.loadError != nil || self.runtime.lastError != nil { self.showError() }
             else { self.message.textColor = .secondaryLabelColor; self.message.stringValue = "\(snapshot.cases.count) " + L10n.journal("cases") + " · \(snapshot.prunedCount) " + L10n.journal("pruned") }
             self.render()
+            DispatchQueue.main.async { completion?() }
         }
     }
     private func render() {
@@ -123,7 +130,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         for item in cases.prefix(page * 30) {
             let select = JournalButton("\(item.typed)  →  \(item.produced ?? "—")  →  \(item.expected)", id: "journal.case.\(item.id)") { [weak self] in self?.selectedID = item.id; self?.render() }
             select.contentTintColor = NSColor(srgbRed: 1, green: 122/255, blue: 89/255, alpha: 1)
-            var views: [NSView] = [label("columns", secondary: true), select, text("\(item.bundleID) · \(item.count) × · \(L10n.journal(item.kind.rawValue)) · \(L10n.journal(item.status.rawValue))", secondary: true)]
+            var views: [NSView] = [label("columns", secondary: true), select, text("\(appName(item.bundleID)) · \(item.count) × · \(L10n.journal(item.kind.rawValue)) · \(L10n.journal(item.status.rawValue))", secondary: true)]
             if selectedID == item.id { views += detail(item) }
             body.addArrangedSubview(card(views))
         }
@@ -150,11 +157,11 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         confirm.isEnabled = !locked && !busy; reject.isEnabled = !locked && !busy
         var result: [NSView] = [HairlineView(), label("expected"), field, row([confirm, reject])]
         if locked { result.append(label("locked", secondary: true)) }
-        if let evidence = item.evidence.last {
-            let o = evidence.observation
-            result.append(text("\(L10n.journal("source")): \(evidence.source.rawValue)\n\(L10n.journal("decision")): \(o.reason.rawValue) · \(o.path.rawValue) · \(o.submission.rawValue)", secondary: true))
-        }
         let formatter = DateFormatter(); formatter.timeZone = TimeZone(secondsFromGMT: 3 * 3600); formatter.dateFormat = "dd.MM.yyyy HH:mm:ss 'MSK'"
+        for evidence in item.evidence.suffix(5) {
+            let o = evidence.observation
+            result.append(text("\(formatter.string(from: evidence.createdAt)) · \(L10n.journal("source")): \(evidence.source.rawValue)\n\(L10n.journal("decision")): \(o.reason.rawValue) · \(o.path.rawValue) · \(o.submission.rawValue)", secondary: true))
+        }
         result.append(text(formatter.string(from: item.firstSeen) + " — " + formatter.string(from: item.lastSeen), secondary: true))
         result += [label("global", secondary: true)]
         if !locked && !runtime.canApply(item, action: .keep) && !runtime.canApply(item, action: .force) {
@@ -192,7 +199,10 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     private func clear() {
         let alert = NSAlert(); alert.messageText = L10n.journal("clearQuestion"); alert.informativeText = L10n.journal("clearHelp")
         alert.addButton(withTitle: L10n.journal("clear")); alert.addButton(withTitle: L10n.journal("cancel"))
-        if alert.runModal() == .alertFirstButtonReturn { operate { runtime.store.clear(completion: $0) } }
+        if alert.runModal() == .alertFirstButtonReturn {
+            runtime.clearTemporaryState()
+            operate { runtime.store.clear(completion: $0) }
+        }
     }
     private func export(_ confirmed: Bool) {
         let panel = NSSavePanel(); panel.allowedContentTypes = [.json]; panel.nameFieldStringValue = "layout-journal.json"
@@ -205,7 +215,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         let stack = NSStackView(); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         let recent = NSPopUpButton(); recent.addItem(withTitle: L10n.journal("manual"))
         let frozen = runtime.frozenRecent
-        recent.addItems(withTitles: frozen.map { "\($0.bundleID): \($0.typed) → \($0.proposed ?? "—")" })
+        recent.addItems(withTitles: frozen.map { "\(appName($0.bundleID)): \($0.typed) → \($0.proposed ?? "—")" })
         let typed = input("", placeholder: "typed", id: "journal.manual.typed")
         let expected = input("", placeholder: "expected", id: "journal.manual.expected")
         let application = NSPopUpButton()
@@ -242,6 +252,12 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
             guard Self.valid(typed.stringValue), application.indexOfSelectedItem > 0 else { showError(); return }
             runtime.controller.addManualCase(typed: typed.stringValue, expected: expected.stringValue, bundleID: applications[application.indexOfSelectedItem - 1].1, kind: errorKind)
         }
+    }
+    private func appName(_ bundleID: String) -> String {
+        guard let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID), let bundle = Bundle(url: url) else { return bundleID }
+        return (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
+            ?? url.deletingPathExtension().lastPathComponent
     }
     private static func valid(_ value: String) -> Bool { !value.isEmpty && value.count <= 128 && !value.contains(where: { $0.isWhitespace }) }
     private func input(_ value: String, placeholder: String, id: String) -> NSTextField {
