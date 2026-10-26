@@ -59,6 +59,22 @@ enum TrackerTests: DiagnosticSuite {
         terminal.setSubmission(observationID: pending.id, submitted: true)
         tests.check("Повторный callback не меняет окончательный отказ",
                     terminal.snapshot(uptime: 1).first?.submission == .rejected)
+        let interrupted = LayoutFeedbackTracker()
+        interrupted.record(pending)
+        _ = interrupted.observeRetyping(occurrenceID: pending.occurrenceID, contextID: pending.contextID,
+                                        current: "other", uptime: 0.1)
+        interrupted.setSubmission(observationID: pending.id, submitted: true)
+        tests.check("Подтверждение отправки не оживляет связь после постороннего ввода",
+                    manual(interrupted, pending, from: "руддщ", to: "hello", time: 0.2) == nil)
+        for current in [pending.typed, pending.proposed!] {
+            let waiting = LayoutFeedbackTracker()
+            waiting.record(pending)
+            _ = waiting.observeRetyping(occurrenceID: pending.occurrenceID, contextID: pending.contextID,
+                                        current: current, uptime: 0.1)
+            waiting.setSubmission(observationID: pending.id, submitted: true)
+            tests.check("Ожидание callback сохраняет исходный или предложенный текст: \(current)",
+                        manual(waiting, pending, from: "руддщ", to: "hello", time: 0.2)?.kind == .unwantedConversion)
+        }
 
         let stale = LayoutFeedbackTracker()
         stale.record(keep)

@@ -67,6 +67,13 @@ final class LayoutFeedbackTracker {
             if current.lowercased() != event.typed.lowercased() { entries[index].consumed = true }
             return nil
         }
+        if event.submission != .submitted {
+            let value = current.lowercased()
+            if value != event.typed.lowercased(), value != event.proposed?.lowercased() {
+                entries[index].consumed = true
+            }
+            return nil
+        }
         guard event.action == .replace, event.submission == .submitted,
               let produced = event.proposed, !produced.isEmpty else { return nil }
         let value = current.lowercased()
