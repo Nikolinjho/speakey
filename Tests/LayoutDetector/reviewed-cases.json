@@ -1,0 +1,4 @@
+[
+  {"name":"Ошибочная конверсия: подтверждённая защита", "typed":"ghbdtn", "expected":"ghbdtn", "action":"keep", "before":"ru", "applied":"keep"},
+  {"name":"Пропуск конверсии: подтверждённый force", "typed":"hello", "expected":"руддщ", "action":"force", "before":"keep", "applied":"ru"}
+]

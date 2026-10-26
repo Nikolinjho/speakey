@@ -52,6 +52,7 @@ do {
     if CommandLine.arguments[1] != "baseline" {
         UserDefaults.standard.removeVolatileDomain(forName: UserDefaults.argumentDomain)
         RuleDetectorTests.run(tests)
+        try RuleDetectorTests.reviewed(tests, url: URL(fileURLWithPath: CommandLine.arguments[2]).deletingLastPathComponent().appendingPathComponent("reviewed-cases.json"))
     }
 } catch {
     fputs("Не удалось прочитать набор: \(error)\n", stderr)

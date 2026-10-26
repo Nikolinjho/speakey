@@ -3187,6 +3187,9 @@ final class DetailVC: NSViewController {
     /// обновлять). Зависимость: «Ставить сразу без вопросов» требует включённой проверки, поэтому при
     /// нём тумблер «Проверять обновления» форсится ВКЛ и НЕДОСТУПЕН (нельзя выключить, не сняв silent).
     private func buildUpdates() -> NSView {
+        guard LocalBuildPolicy.updatesAllowed else {
+            return vstack([blockTitle("upd.title"), sub("Локальная сборка: обновления отключены. Новую версию можно собрать из исходников.")])
+        }
         let checkBtn = NSButton(title: L10n.t("upd.check"), target: self, action: #selector(checkForUpdates))
         checkBtn.bezelStyle = .rounded; checkBtn.controlSize = .regular
 

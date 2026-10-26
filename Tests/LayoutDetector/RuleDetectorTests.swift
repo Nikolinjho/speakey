@@ -14,6 +14,45 @@ enum RuleDetectorTests {
         guard let value else { fatalError("Не дождались записи правила") }
         return value
     }
+    struct ReviewedCase: Decodable {
+        let name: String
+        let typed: String
+        let expected: String
+        let action: String
+        let before: String
+        let applied: String
+    }
+    static func reviewed(_ t: DiagnosticTests, url: URL) throws {
+        let cases = try JSONDecoder().decode([ReviewedCase].self, from: Data(contentsOf: url))
+        guard !cases.isEmpty else { throw CocoaError(.fileReadCorruptFile) }
+        func decision(_ value: String) throws -> SwapDecision {
+            switch value {
+            case "keep": return .keep
+            case "ru": return .convert(toCyrillic: true)
+            case "en": return .convert(toCyrillic: false)
+            default: throw CocoaError(.fileReadCorruptFile)
+            }
+        }
+        for fixture in cases {
+            let suite = "keyboop-reviewed-\(UUID().uuidString)"
+            let defaults = UserDefaults(suiteName: suite)!
+            defer { defaults.removePersistentDomain(forName: suite) }
+            for key in ["didSeedExcExamples", "didSeedExcVkLatin", "didUnseedExcSpotlight"] { defaults.set(true, forKey: key) }
+            let exceptions = ExceptionStore(defaults: defaults)
+            let backend = ExceptionLayoutRuleBackend(exceptions: exceptions)
+            guard ["keep", "force"].contains(fixture.action) else { throw CocoaError(.fileReadCorruptFile) }
+            let before = try decision(fixture.before)
+            let applied = try decision(fixture.applied)
+            t.check(fixture.name + " — до", LayoutDetector.decide(word: fixture.typed, exceptions: exceptions) == before)
+            let receipt = try LayoutRuleService.prepare(case: item(fixture.typed, fixture.expected), action: fixture.action == "keep" ? .keep : .force, backend: backend)
+            try LayoutRuleService.applyPrepared(receipt, backend: backend)
+            t.check(fixture.name + " — после применения", LayoutDetector.decide(word: fixture.typed, exceptions: exceptions) == applied)
+            let restarted = ExceptionStore(defaults: defaults)
+            t.check(fixture.name + " — после пересоздания", LayoutDetector.decide(word: fixture.typed, exceptions: restarted) == applied)
+            try LayoutRuleService.restore(receipt, backend: backend)
+            t.check(fixture.name + " — после удаления", LayoutDetector.decide(word: fixture.typed, exceptions: exceptions) == before)
+        }
+    }
     static func run(_ t: DiagnosticTests) {
         let suite = "keyboop-rule-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!

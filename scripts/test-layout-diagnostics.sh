@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-diagnostics.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 sources=(Tests/LayoutDiagnostics/TestSupport.swift)
-for name in LayoutObservation LayoutDecision LayoutDecisionExplainer LayoutFeedbackTracker LayoutDiagnosticsController KeystrokeBuffer LayoutJournalStore LayoutRuleService LayoutJournalPresenter; do
+for name in LocalBuildPolicy LayoutObservation LayoutDecision LayoutDecisionExplainer LayoutFeedbackTracker LayoutDiagnosticsController KeystrokeBuffer LayoutJournalStore LayoutRuleService LayoutJournalPresenter; do
     source="Sources/Keyboop/$name.swift"
     [ ! -f "$source" ] || sources+=("$source")
 done

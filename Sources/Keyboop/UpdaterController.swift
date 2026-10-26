@@ -26,7 +26,7 @@ final class UpdaterController: NSObject, SPUUpdaterDelegate {
     var onUpdateReady: ((String) -> Void)?
 
     func start() {
-        guard controller == nil else { return }
+        guard LocalBuildPolicy.updatesAllowed, controller == nil else { return }
         controller = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: self, userDriverDelegate: nil)
         // ⚠️ В dev-режиме отладки апдейтера (KEYBOOP_UPDATER=1) скачивание ЗАПРЕЩЕНО: пусть Sparkle
         // спрашивает фид и пишет в лог, но не приносит прод-DMG в dev-бандл (инцидент 23.07).
@@ -62,8 +62,9 @@ final class UpdaterController: NSObject, SPUUpdaterDelegate {
 
     /// Мастер-тумблер «Проверять обновления» (Sparkle хранит стейт в UserDefaults сам).
     var automaticChecks: Bool {
-        get { controller?.updater.automaticallyChecksForUpdates ?? true }
+        get { LocalBuildPolicy.updatesAllowed && (controller?.updater.automaticallyChecksForUpdates ?? true) }
         set {
+            guard LocalBuildPolicy.updatesAllowed else { return }
             controller?.updater.automaticallyChecksForUpdates = newValue
             controller?.updater.automaticallyDownloadsUpdates = newValue
         }
@@ -74,6 +75,7 @@ final class UpdaterController: NSObject, SPUUpdaterDelegate {
     /// в доке: без явной активации это окно НЕ выходит вперёд, и юзеру кажется, что «ничего не произошло»
     /// (фидбэк 16.06). Поэтому активируем приложение прямо перед проверкой.
     func checkNow() {
+        guard LocalBuildPolicy.updatesAllowed else { return }
         // ⚠️ ЗАПИСЬ О САМОМ НАЖАТИИ, ДО ВСЯКОЙ ЛОГИКИ (13.09.2026, отзыв #268). Человек пишет:
         // «нажимаешь обновить, ничего не происходит; заходишь в раздел Обновления, жмёшь проверить
         // сейчас, тоже ничего». В его диагностике за всё окно лога НЕТ НИ ОДНОЙ строки про

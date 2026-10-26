@@ -21,13 +21,40 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
     runtime.controller.addManualCase(typed: "ghbdtn", expected: "привёт", bundleID: "com.apple.TextEdit", kind: .missedConversion)
     runtime.controller.addManualCase(typed: "hello", expected: "hello", bundleID: "com.apple.Safari", kind: .unwantedConversion)
     var previewWindow: SettingsWindowController?
-    store.flush { _ in
+    // Ограничивает также ожидание начальной загрузки и отрисовки.
+    if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW_INTERACTIVE"] != "1" ||
+        ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW_CHECK"] == "1" {
+    DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
+        fputs("FAIL: preview не завершился за 30 секунд\n", stderr)
+        defaults.removePersistentDomain(forName: suite)
+        try? FileManager.default.removeItem(at: directory)
+        exit(1)
+    }
+    }
+    store.flush { result in
+        if case .failure(let error) = result {
+            fputs("FAIL: \(error)\n", stderr)
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+            exit(1)
+        }
         previewWindow = SettingsWindowController()
         previewWindow?.show(section: .layoutJournal)
         previewWindow?.whenLayoutJournalReady {
             let environment = ProcessInfo.processInfo.environment
             if let path = environment["KEYBOOP_JOURNAL_PREVIEW_PNG"], let index = SettingsSection.sidebarCases.firstIndex(of: .layoutJournal) {
                 previewWindow?.dumpFullWindow(section: index, to: path, appearance: previewAppearance, selectSection: false)
+            }
+            if environment["KEYBOOP_JOURNAL_PREVIEW_CHECK"] == "1", let window = previewWindow {
+                Task { @MainActor in
+                    var status: Int32 = 0
+                    do { _ = try await LayoutJournalPreviewCheck.run(window: window, runtime: runtime) }
+                    catch { fputs("FAIL: \(error)\n", stderr); status = 1 }
+                    defaults.removePersistentDomain(forName: suite)
+                    try? FileManager.default.removeItem(at: directory)
+                    exit(status)
+                }
+                return
             }
             if environment["KEYBOOP_JOURNAL_PREVIEW_INTERACTIVE"] != "1" {
                 defaults.removePersistentDomain(forName: suite)

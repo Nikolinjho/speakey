@@ -371,6 +371,8 @@ sed -i '' "s/__BUILD_STAMP__/$BUILD_STAMP/" "$APP/Contents/Info.plist"
 # ПОСЛЕ heredoc (он single-quoted, переменные не раскрывает) и ДО codesign (иначе порвём seal подписи).
 # Заодно у dev снимаем SUFeedURL — пусть dev-сборка вообще не ходит за боевым appcast.
 if [ "${KEYBOOP_RELEASE:-}" != "1" ]; then
+  /usr/libexec/PlistBuddy -c "Set :SUEnableAutomaticChecks false" "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Add :KeyboopLocalBuild bool true" "$APP/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ru.keyboop.app.dev" "$APP/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleName Keyboop Dev" "$APP/Contents/Info.plist" 2>/dev/null || true
   /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Keyboop Dev" "$APP/Contents/Info.plist" 2>/dev/null || true

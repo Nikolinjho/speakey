@@ -51,7 +51,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         let tools = row([add,
                          button("export") { [weak self] in self?.export(false) },
                          button("exportConfirmed") { [weak self] in self?.export(true) },
-                         button("clear") { [weak self] in self?.clear() }])
+                         button("clear", id: "journal.clear") { [weak self] in self?.clear() }])
         addArrangedSubview(tools)
         for (popup, titles, id) in [(kind, ["allKinds","missedConversion","unwantedConversion"], "kind"),
                                      (status, ["allStatuses","candidate","confirmed","rejected","resolved"], "status"),
