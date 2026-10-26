@@ -191,7 +191,7 @@ enum JournalStoreTests: DiagnosticSuite {
         let _: Result<Void, Error> = wait { protected.record(originalFeedback, completion: $0) }
         let protectedCase = wait { protected.snapshot(completion: $0) }.cases[0]
         let protectedReceipt = LayoutRuleReceipt(sourceCaseID: protectedCase.id, typed: protectedCase.typed, expected: protectedCase.expected,
-            before: ["ghbdtn": LayoutRuleMembership()], written: ["ghbdtn": LayoutRuleMembership(ignored: true)])
+            before: ["ghbdtn": LayoutRuleMembership()], written: ["ghbdtn": LayoutRuleMembership(ignored: true)], createdAt: date)
         let _: Result<Void, Error> = wait { protected.prepareRule(protectedReceipt, completion: $0) }
         let journalURL = protectedDirectory.appendingPathComponent("layout-journal-v1.json")
         let originalBytes = try! Data(contentsOf: journalURL)
