@@ -24,6 +24,20 @@ final class Engine: EventTapHandler {
             proposed: proposed, path: path, reason: reason, action: action, complete: completed || path == .enter)
     }
 
+    private func clearForAntiResonance(word: String, proposed: String, path: LayoutPath, completed: Bool) {
+        let occurrence = completed ? buffer.lastOccurrenceID : buffer.currentOccurrenceID
+        let canRecord = !pendingContextClear && !pendingSoftReset && !diagnostics.bypassesJournal(bundleID: frontAppBID)
+        let incomplete = diagnostics.recent.contains {
+            $0.occurrenceID == occurrence && !$0.isCompleteWord && $0.action == .replace
+        }
+        liveFixLast = ""
+        buffer.clear()
+        guard canRecord, let occurrence else { return }
+        _ = diagnostics.controller.record(occurrenceID: occurrence, bundleID: frontAppBID, typed: word,
+            proposed: proposed, path: path, reason: .antiResonance, action: .blocked,
+            complete: (completed || path == .enter) && !incomplete)
+    }
+
     private func submissionHandler(_ event: LayoutObservation?) -> ((Bool) -> Void) {
         { [weak self] submitted in
             guard let event else { return }
@@ -1109,7 +1123,8 @@ final class Engine: EventTapHandler {
             let convTail = Keymap.convert(tail, toCyrillic: true)
             guard convTail != tail, !(convTail.hasCyrillic && convTail.hasLatinLetter) else { return }
             guard antiResonance.allow(word: word, produced: prefix + convTail) else {
-                liveFixLast = ""; buffer.clear(); return
+                clearForAntiResonance(word: word, proposed: prefix + convTail, path: .pauseLive, completed: false)
+                return
             }
             let diagnosticEvent = recordDecision(word: word, proposed: prefix + convTail, path: .pauseLive,
                 reason: .detectorConvert, action: .replace, completed: false)
@@ -1136,7 +1151,8 @@ final class Engine: EventTapHandler {
         }
         guard converted != word else { return }
         guard antiResonance.allow(word: word, produced: converted) else {
-            liveFixLast = ""; buffer.clear(); return
+            clearForAntiResonance(word: word, proposed: converted, path: .pauseLive, completed: false)
+            return
         }
         if UndoLearner.shared.shouldSuppress(current: word) || UndoLearner.shared.isSessionProtected(word) { return }
         let diagnosticEvent = recordDecision(word: word, proposed: converted, path: .pauseLive,
@@ -1194,7 +1210,8 @@ final class Engine: EventTapHandler {
         }
         guard converted != candidate else { return false }
         guard antiResonance.allow(word: candidate, produced: converted) else {
-            liveFixLast = ""; buffer.clear(); return false
+            clearForAntiResonance(word: candidate, proposed: converted, path: .inlineLive, completed: false)
+            return false
         }
         if UndoLearner.shared.shouldSuppress(current: candidate)
             || UndoLearner.shared.isSessionProtected(candidate) { return false }
@@ -1263,7 +1280,8 @@ final class Engine: EventTapHandler {
             guard convTail != tail, !(convTail.hasCyrillic && convTail.hasLatinLetter) else { return }
             // Предохранитель от резонанса: если это место уже мелькало туда-сюда — стоп, чистим буфер.
             guard antiResonance.allow(word: word, produced: prefix + convTail) else {
-                liveFixLast = ""; buffer.clear(); return
+                clearForAntiResonance(word: word, proposed: prefix + convTail, path: .live, completed: false)
+                return
             }
             muted = true
             layout.selectLayout(cyrillic: true)
@@ -1289,7 +1307,8 @@ final class Engine: EventTapHandler {
         guard converted != word else { return }
         // Предохранитель от резонанса: осцилляция этого места → стоп, разрываем цикл (чистим буфер).
         guard antiResonance.allow(word: word, produced: converted) else {
-            liveFixLast = ""; buffer.clear(); return
+            clearForAntiResonance(word: word, proposed: converted, path: .live, completed: false)
+            return
         }
         // Фантомный предохранитель (24.07): экран уже показывает converted → буфер отстал от жизни
         // (стейл-переводы), замена дала бы только звук и мигание. Выравниваем модель и молчим.
@@ -1903,7 +1922,8 @@ final class Engine: EventTapHandler {
         // (юзер решает сам, резонировать не может). Осцилляция → стоп, чистим буфер, разрываем цикл.
         if !manual, !antiResonance.allow(word: word, produced: converted) {
             silentLog("resonance", "авто молчит: анти-резонанс заморозил конверсию (len \(word.count))")
-            liveFixLast = ""; buffer.clear(); return
+            clearForAntiResonance(word: word, proposed: converted, path: .boundary, completed: true)
+            return
         }
 
         // ДВОЙНОЙ ПРОБЕЛ → ТОЧКА (задача #190). Если main задержал boundary-конверсию, второй
@@ -2404,7 +2424,8 @@ final class Engine: EventTapHandler {
         // раскладки выше + анти-резонансом ниже; его фантомный риск низкий (слово не завершено,
         // модель им ещё владеет).
         guard antiResonance.allow(word: word, produced: prop.text) else {
-            liveFixLast = ""; buffer.clear(); return false   // резонанс — разрываем цикл, Enter пропускаем
+            clearForAntiResonance(word: word, proposed: prop.text, path: .enter, completed: false)
+            return false   // резонанс — разрываем цикл, Enter пропускаем
         }
         muted = true
         kbLog("\(prop.rescue ? "mixed-rescue" : "convert-word")(enter-pre): \(word.count) симв. → \(prop.toCyrillic ? "RU" : "EN")")   // без контента

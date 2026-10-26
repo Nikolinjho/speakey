@@ -58,6 +58,24 @@ enum ControllerTests: DiagnosticSuite {
             controller.manualConverted(occurrenceID: id, contextID: observation.contextID, from: "руддщ", to: "hello", submitted: true)
             tests.check("Поздние callback не создают случай после сброса: \(reset)", feedback.count == before && controller.recent.isEmpty)
         }
+        for path in [LayoutPath.boundary, .enter, .inlineLive, .pauseLive, .live] {
+            let blockedBuffer = KeystrokeBuffer()
+            blockedBuffer.onContextReset = { controller.resetContext() }
+            blockedBuffer.append("hello")
+            let occurrence = blockedBuffer.currentOccurrenceID!
+            if path == .boundary { blockedBuffer.boundary(" ") }
+            let oldContext = controller.contextID
+            blockedBuffer.clear()
+            let event = controller.record(occurrenceID: occurrence, bundleID: "test", typed: "hello",
+                proposed: "руддщ", path: path, reason: .antiResonance, action: .blocked,
+                complete: path == .boundary || path == .enter)!
+            tests.check("Блокировка сохраняется после сброса буфера: \(path.rawValue)", controller.recent.last == event && event.contextID != oldContext && event.occurrenceID == occurrence && event.submission == .notNeeded)
+            let before = feedback.count
+            controller.manualConverted(occurrenceID: occurrence, contextID: event.contextID, from: "hello", to: "руддщ", submitted: true)
+            tests.check("Антирезонанс не считается ошибкой автоисправления: \(path.rawValue)", feedback.count == before)
+            controller.clearTemporaryState()
+            tests.check("Очистка удаляет блокировку: \(path.rawValue)", controller.recent.isEmpty)
+        }
         let buffer = KeystrokeBuffer()
         buffer.onContextReset = { controller.resetContext() }
         buffer.append("hello")
