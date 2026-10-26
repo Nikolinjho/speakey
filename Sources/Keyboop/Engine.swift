@@ -743,6 +743,8 @@ final class Engine: EventTapHandler {
                 buffer.clear(); UndoLearner.shared.resetContext()
             } else if settings.arrowsCancel {
                 buffer.clear(); UndoLearner.shared.resetContext()
+            } else {
+                diagnostics.controller.resetContext()
             }
         case 53, 117, 115, 116, 119, 121:
             // Esc, Fwd-Delete, Home/End/PageUp/PageDown → навигация, всегда сбрасываем контекст

@@ -76,6 +76,17 @@ enum ControllerTests: DiagnosticSuite {
             controller.clearTemporaryState()
             tests.check("Очистка удаляет блокировку: \(path.rawValue)", controller.recent.isEmpty)
         }
+        let navigationBuffer = KeystrokeBuffer()
+        navigationBuffer.append("hello")
+        let navigationID = navigationBuffer.currentOccurrenceID!
+        let beforeNavigation = controller.record(occurrenceID: navigationID, bundleID: "test", typed: "hello",
+            proposed: "руддщ", path: .live, reason: .detectorConvert, action: .replace, complete: false)!
+        let feedbackBeforeNavigation = feedback.count
+        controller.resetContext()
+        tests.check("Навигация без очистки буфера разрывает диагностический контекст", navigationBuffer.currentWord == "hello" && navigationBuffer.currentOccurrenceID == navigationID && controller.recent.isEmpty && controller.contextID != beforeNavigation.contextID)
+        controller.submission(observationID: beforeNavigation.id, contextID: beforeNavigation.contextID, submitted: true)
+        controller.manualConverted(occurrenceID: navigationID, contextID: beforeNavigation.contextID, from: "руддщ", to: "hello", submitted: true)
+        tests.check("Позднее исправление после навигации не связывается со старым решением", feedback.count == feedbackBeforeNavigation && controller.recent.isEmpty)
         let buffer = KeystrokeBuffer()
         buffer.onContextReset = { controller.resetContext() }
         buffer.append("hello")
