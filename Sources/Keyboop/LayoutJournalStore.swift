@@ -15,7 +15,7 @@ struct LayoutJournalSnapshot {
 }
 
 enum LayoutJournalError: Error {
-    case unsupportedSchema, invalidWord, missingCase, conflictingCase, missingReceipt, duplicateReceipt, sizeLimit
+    case unsupportedSchema, invalidWord, missingCase, conflictingCase, missingReceipt, duplicateReceipt, sizeLimit, invalidExportDestination
 }
 
 final class LayoutJournalStore {
@@ -161,8 +161,11 @@ final class LayoutJournalStore {
 
     func export(to url: URL, confirmedOnly: Bool, completion: @escaping Completion = { _ in }) {
         queue.async {
-            self.refreshRetention()
             let result = Result<Void, Error> {
+                let destination = url.standardizedFileURL.resolvingSymlinksInPath().standardizedFileURL
+                let journal = self.file.standardizedFileURL.resolvingSymlinksInPath().standardizedFileURL
+                guard destination != journal else { throw LayoutJournalError.invalidExportDestination }
+                self.refreshRetention()
                 if let error = self.storageError { throw error }
                 let cases = self.state.cases.filter { !confirmedOnly || (($0.status == .confirmed || $0.status == .resolved) && $0.isCompleteWord) }
                 let ids = Set(cases.flatMap(\.receiptIDs))

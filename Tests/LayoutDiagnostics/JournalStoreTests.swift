@@ -185,6 +185,34 @@ enum JournalStoreTests: DiagnosticSuite {
         let overlongReloaded = LayoutJournalStore(directory: cappedDirectory, now: { date })
         let overlongSnapshot: LayoutJournalSnapshot = wait { overlongReloaded.snapshot(completion: $0) }
         t.check("Загруженное длинное слово удаляется без усечения", overlongSnapshot.cases.isEmpty && overlongSnapshot.prunedCount == 1)
+        let protectedDirectory = directory.appendingPathComponent("protected-export")
+        let protected = LayoutJournalStore(directory: protectedDirectory, now: { date })
+        let originalFeedback = feedback()
+        let _: Result<Void, Error> = wait { protected.record(originalFeedback, completion: $0) }
+        let protectedCase = wait { protected.snapshot(completion: $0) }.cases[0]
+        let protectedReceipt = LayoutRuleReceipt(sourceCaseID: protectedCase.id, typed: protectedCase.typed, expected: protectedCase.expected,
+            before: ["ghbdtn": LayoutRuleMembership()], written: ["ghbdtn": LayoutRuleMembership(ignored: true)])
+        let _: Result<Void, Error> = wait { protected.prepareRule(protectedReceipt, completion: $0) }
+        let journalURL = protectedDirectory.appendingPathComponent("layout-journal-v1.json")
+        let originalBytes = try! Data(contentsOf: journalURL)
+        let originalState = wait { protected.snapshot(completion: $0) }
+        let linkedDirectory = directory.appendingPathComponent("linked-export")
+        try! FileManager.default.createSymbolicLink(at: linkedDirectory, withDestinationURL: protectedDirectory)
+        let linkedFile = directory.appendingPathComponent("linked-journal.json")
+        try! FileManager.default.createSymbolicLink(at: linkedFile, withDestinationURL: journalURL)
+        let destinations = [journalURL, protectedDirectory.appendingPathComponent("../protected-export/layout-journal-v1.json"),
+            linkedDirectory.appendingPathComponent("layout-journal-v1.json"), linkedFile]
+        for (index, destination) in destinations.enumerated() {
+            let result: Result<Void, Error> = wait { protected.export(to: destination, confirmedOnly: false, completion: $0) }
+            t.check("Экспорт поверх журнала отклонён: путь \(index)", (try? result.get()) == nil)
+            t.check("Неудачный экспорт сохраняет байты журнала: путь \(index)", (try? Data(contentsOf: journalURL)) == originalBytes)
+        }
+        let afterExport = wait { protected.snapshot(completion: $0) }
+        let protectedReloaded = LayoutJournalStore(directory: protectedDirectory, now: { date })
+        let afterRestart = wait { protectedReloaded.snapshot(completion: $0) }
+        t.check("Самоэкспорт сохраняет состояние и pending-квитанцию после перезапуска", afterExport.cases == originalState.cases && afterExport.rules == originalState.rules && afterRestart.loadError == nil && afterRestart.cases == originalState.cases && afterRestart.rules == originalState.rules)
+        let _: Result<Void, Error> = wait { protectedReloaded.record(originalFeedback, completion: $0) }
+        t.check("Самоэкспорт не теряет идентификаторы наблюдений", wait { protectedReloaded.snapshot(completion: $0) }.cases[0].count == 1)
         let exportURL = directory.appendingPathComponent("export.json")
         let export: Result<Void, Error> = wait { store.export(to: exportURL, confirmedOnly: true, completion: $0) }
         t.check("Экспорт подтверждённых исключает кандидатов", (try? export.get()) != nil && (try? decoder().decode(LayoutJournalSnapshot.Export.self, from: Data(contentsOf: exportURL)))?.cases.isEmpty == true)
