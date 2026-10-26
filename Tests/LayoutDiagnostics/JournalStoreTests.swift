@@ -18,6 +18,12 @@ enum JournalStoreTests: DiagnosticSuite {
         return LayoutFeedback(observationID: observation.id, observation: observation, expected: expected, kind: .missedConversion, source: .explicit, createdAt: date)
     }
 
+    static func decoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }
+
     static func run(_ t: DiagnosticTests) {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -39,6 +45,18 @@ enum JournalStoreTests: DiagnosticSuite {
         let review: Result<Void, Error> = wait { store.review(caseID: conflict.id, expected: "привет", status: .confirmed, completion: $0) }
         t.check("Правка ожидания не сливает случаи молча", (try? review.get()) == nil && snapshot().cases.count == 2)
         for _ in 0..<7 { _ = record(feedback()) }
+        let afterEvidenceRestart = LayoutJournalStore(directory: directory, now: { date })
+        let beforeReplay: LayoutJournalSnapshot = wait { afterEvidenceRestart.snapshot(completion: $0) }
+        let replay: Result<Void, Error> = wait { afterEvidenceRestart.record(first, completion: $0) }
+        let afterReplay: LayoutJournalSnapshot = wait { afterEvidenceRestart.snapshot(completion: $0) }
+        t.check("Старое наблюдение не дублируется после вытеснения из свидетельств и перезапуска", (try? replay.get()) != nil && beforeReplay.cases == afterReplay.cases)
+        let persisted = try! JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("layout-journal-v1.json"))) as! [String: Any]
+        let persistedCases = persisted["cases"] as! [[String: Any]]
+        let persistedEvidence = persistedCases[0]["evidence"] as! [[String: Any]]
+        let persistedObservation = persistedEvidence[0]["observation"] as! [String: Any]
+        let formatter = ISO8601DateFormatter()
+        let dateFields = [persistedCases[0]["firstSeen"], persistedCases[0]["lastSeen"], persistedEvidence[0]["createdAt"], persistedObservation["recordedAt"]]
+        t.check("Даты журнала записаны строками ISO8601", dateFields.allSatisfy { ($0 as? String).flatMap(formatter.date(from:)) != nil })
         t.check("Сохранены последние пять свидетельств", snapshot().cases.first { $0.expected == "привет" }?.evidence.count == 5)
         t.check("Слишком длинное слово отклонено", !record(feedback(String(repeating: "a", count: 129))))
         var longProduced = feedback()
@@ -95,12 +113,15 @@ enum JournalStoreTests: DiagnosticSuite {
         for item in exportCases.cases {
             let _: Result<Void, Error> = wait { exports.review(caseID: item.id, expected: item.expected, status: item.typed == "rejected" ? .rejected : .confirmed, completion: $0) }
         }
-                let resolved = exportCases.cases.first { $0.typed == "complete" }!
+        let resolved = exportCases.cases.first { $0.typed == "complete" }!
         let _: Result<Void, Error> = wait { exports.review(caseID: resolved.id, expected: resolved.expected, status: .resolved, completion: $0) }
         for confirmed in [false, true] {
             let url = directory.appendingPathComponent("export-\(confirmed).json")
             let result: Result<Void, Error> = wait { exports.export(to: url, confirmedOnly: confirmed, completion: $0) }
-            let content = try? JSONDecoder().decode(LayoutJournalSnapshot.Export.self, from: Data(contentsOf: url))
+            let content = try? decoder().decode(LayoutJournalSnapshot.Export.self, from: Data(contentsOf: url))
+            let exported = try! JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+            let exportedCases = exported["cases"] as! [[String: Any]]
+            t.check("Даты экспорта записаны строками ISO8601", exportedCases.allSatisfy { ($0["firstSeen"] as? String).flatMap(formatter.date(from:)) != nil })
             t.check("Экспорт учитывает подтверждение и полноту слова", (try? result.get()) != nil && content?.cases.count == (confirmed ? 1 : 3))
         }
         var clock = date
@@ -166,6 +187,6 @@ enum JournalStoreTests: DiagnosticSuite {
         t.check("Загруженное длинное слово удаляется без усечения", overlongSnapshot.cases.isEmpty && overlongSnapshot.prunedCount == 1)
         let exportURL = directory.appendingPathComponent("export.json")
         let export: Result<Void, Error> = wait { store.export(to: exportURL, confirmedOnly: true, completion: $0) }
-        t.check("Экспорт подтверждённых исключает кандидатов", (try? export.get()) != nil && (try? JSONDecoder().decode(LayoutJournalSnapshot.Export.self, from: Data(contentsOf: exportURL)))?.cases.isEmpty == true)
+        t.check("Экспорт подтверждённых исключает кандидатов", (try? export.get()) != nil && (try? decoder().decode(LayoutJournalSnapshot.Export.self, from: Data(contentsOf: exportURL)))?.cases.isEmpty == true)
     }
 }

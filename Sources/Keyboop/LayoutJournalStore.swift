@@ -29,6 +29,16 @@ final class LayoutJournalStore {
         var observationIDs: [String: [UUID]] = [:]
     }
 
+    private let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
+    private let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
     private let queue = DispatchQueue(label: "keyboop.layout-journal", qos: .utility)
     private let directory: URL
     private let file: URL
@@ -150,7 +160,7 @@ final class LayoutJournalStore {
                 let ids = Set(cases.flatMap(\.receiptIDs))
                 let rules = self.state.rules.filter { !confirmedOnly || ids.contains($0.id) }
                 let export = LayoutJournalSnapshot.Export(schemaVersion: 1, cases: cases, rules: rules, prunedCount: self.state.prunedCount)
-                try self.write(JSONEncoder().encode(export), to: url)
+                try self.write(self.encoder.encode(export), to: url)
             }
             DispatchQueue.main.async { completion(result) }
         }
@@ -184,9 +194,9 @@ final class LayoutJournalStore {
         do {
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file.path)
             let data = try Data(contentsOf: file)
-            let header = try JSONDecoder().decode(Header.self, from: data)
+            let header = try decoder.decode(Header.self, from: data)
             guard header.schemaVersion == 1 else { throw LayoutJournalError.unsupportedSchema }
-            state = try JSONDecoder().decode(Envelope.self, from: data)
+            state = try decoder.decode(Envelope.self, from: data)
         } catch {
             loadError = error
             let backup = directory.appendingPathComponent("layout-journal-v1.json.corrupt.\(UUID().uuidString)")
@@ -211,10 +221,10 @@ final class LayoutJournalStore {
 
     private func retainedData(_ next: inout Envelope) throws -> Data {
         prune(&next)
-        var data = try JSONEncoder().encode(next)
+        var data = try encoder.encode(next)
         while data.count > maxBytes && !next.cases.isEmpty {
             removeOldest(&next)
-            data = try JSONEncoder().encode(next)
+            data = try encoder.encode(next)
         }
         guard data.count <= maxBytes else { throw LayoutJournalError.sizeLimit }
         return data
