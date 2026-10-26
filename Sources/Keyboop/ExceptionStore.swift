@@ -4,7 +4,7 @@ import Foundation
 /// и слова, которые ВСЕГДА переключать (forceSwap). Хранятся в UserDefaults.
 final class ExceptionStore {
     static let shared = ExceptionStore()
-    private let d = UserDefaults.standard
+    private let d: UserDefaults
     private let ignoredKey = "ignoredWords"
     private let forceKey = "forceSwapWords"
     private let appModesKey = "appExceptionModes"
@@ -40,7 +40,8 @@ final class ExceptionStore {
     /// молча обнулила бы у всех список исключений при обновлении.
     private(set) var appLayouts: [String: String]
 
-    private init() {
+    init(defaults: UserDefaults = .standard) {
+        d = defaults
         ignored = Set((d.array(forKey: ignoredKey) as? [String]) ?? [])
         forceSwap = Set((d.array(forKey: forceKey) as? [String]) ?? [])
         learned = Set((d.array(forKey: learnedKey) as? [String]) ?? [])
@@ -207,6 +208,14 @@ final class ExceptionStore {
     }
     func clearLearned() { learned.removeAll(); save() }
     var learnedSorted: [String] { learned.sorted() }
+
+    func setWordMembership(_ word: String, ignored shouldIgnore: Bool, learned shouldLearn: Bool, forceSwap shouldForce: Bool) {
+        let key = word.lowercased()
+        if shouldIgnore { ignored.insert(key) } else { ignored.remove(key) }
+        if shouldLearn { learned.insert(key) } else { learned.remove(key) }
+        if shouldForce { forceSwap.insert(key) } else { forceSwap.remove(key) }
+        save()
+    }
 
     private func save() {
         d.set(Array(ignored), forKey: ignoredKey)

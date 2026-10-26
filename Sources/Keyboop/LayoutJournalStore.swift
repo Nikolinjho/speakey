@@ -116,6 +116,10 @@ final class LayoutJournalStore {
         mutate(completion) { next in
             try self.validate(receipt.typed, receipt.expected)
             guard !next.rules.contains(where: { $0.id == receipt.id }) else { throw LayoutJournalError.duplicateReceipt }
+            guard !next.rules.contains(where: { existing in
+                existing.status != .removed && (existing.sourceCaseID == receipt.sourceCaseID ||
+                    !Set(existing.written.keys).isDisjoint(with: receipt.written.keys))
+            }) else { throw LayoutJournalError.conflictingCase }
             guard let index = next.cases.firstIndex(where: { $0.id == receipt.sourceCaseID }) else { throw LayoutJournalError.missingCase }
             var pending = receipt
             pending.status = .pending
@@ -130,6 +134,10 @@ final class LayoutJournalStore {
 
     func removeRule(id: UUID, completion: @escaping Completion = { _ in }) {
         updateRule(id: id, status: .removed, completion: completion)
+    }
+
+    func markRuleConflict(id: UUID, completion: @escaping Completion = { _ in }) {
+        updateRule(id: id, status: .conflict, completion: completion)
     }
 
     private func updateRule(id: UUID, status: LayoutRuleReceiptStatus, completion: @escaping Completion) {

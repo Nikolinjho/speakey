@@ -6,7 +6,7 @@ struct DetectorCase: Decodable {
     let decision: String
 }
 
-guard CommandLine.arguments.count == 3, CommandLine.arguments[1] == "baseline" else {
+guard CommandLine.arguments.count == 3, ["baseline", "rules", "all"].contains(CommandLine.arguments[1]) else {
     fputs("Ожидался набор baseline и путь к данным\n", stderr)
     exit(2)
 }
@@ -37,6 +37,7 @@ do {
         }
         tests.check("Ресурс \(name).json существует и содержит данные", loaded)
     }
+    if CommandLine.arguments[1] != "rules" {
     for item in cases {
         let expected: SwapDecision
         switch item.decision {
@@ -46,6 +47,11 @@ do {
         default: fputs("Неизвестное ожидание: \(item.decision)\n", stderr); exit(2)
         }
         tests.check(item.name, LayoutDetector.decide(word: item.word, exceptions: .shared) == expected)
+    }
+    }
+    if CommandLine.arguments[1] != "baseline" {
+        UserDefaults.standard.removeVolatileDomain(forName: UserDefaults.argumentDomain)
+        RuleDetectorTests.run(tests)
     }
 } catch {
     fputs("Не удалось прочитать набор: \(error)\n", stderr)

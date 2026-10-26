@@ -275,7 +275,7 @@ enum LayoutDetector {
 
     /// Решение для режима «чинить на лету» (мид-слово). Срабатывает только когда сочетание
     /// букв в текущем языке практически невозможно, а в другом — нормально. Без словаря-«авось».
-    static func liveDecide(word raw: String) -> SwapDecision {
+    static func liveDecide(word raw: String, exceptions: ExceptionStore = .shared) -> SwapDecision {
         let letterCore = Self.letterCore(of: raw)
         let typed = Keymap.core(of: letterCore).lowercased()
         var coreSub = Substring(letterCore)   // срезаем ведущие/концевые скобки/кавычки/тире
@@ -286,13 +286,13 @@ enum LayoutDetector {
         // Полное исключение проверяем ДО языкового решения: запись `1ghbdtn` не равна ядру
         // `ghbdtn`. На live-пути нужен и префикс, иначе слово успеет переключиться ещё до границы.
         // Для обычного слова typed == w, и второй одинаковый линейный обход малых Set'ов не нужен.
-        if typed != w, Self.isExceptionOrPrefix(typed, cyrillic: typed.hasCyrillic) { return .keep }
+        if typed != w, Self.isExceptionOrPrefix(typed, cyrillic: typed.hasCyrillic, exceptions: exceptions) { return .keep }
         // `it.` — это настоящее EN `it` + точка, хотя полное чтение тех же клавиш даёт RU `шею`.
         // Live-fix обязан применить тот же strict-gate, что и boundary, иначе успеет испортить более
         // длинные варианты (`uhf,`, `cdt;`) ещё до пробела.
         if Self.hasValidSourceBeforeTrailingPunctuation(
             core,
-            forcedSource: ExceptionStore.shared.forceSwap
+            forcedSource: exceptions.forceSwap
         ) { return .keep }
         guard w.count >= 4, w.allSatisfy(Self.isLayoutLetter) else { return .keep }
         let sourceCyrillic = w.hasCyrillic, sourceLatin = w.hasLatinLetter
@@ -308,7 +308,7 @@ enum LayoutDetector {
         // Решение принимается на НЕПОЛНОМ слове, поэтому ловим и префикс: иначе live-fix мечется, пока
         // дописываешь слово-исключение («гифк»→en на 4-й букве, затем «гифки»→ru — щёлканье туда-сюда).
         // Полный словарь не префиксуем (он Set), его ПОЛНЫЕ слова уже ловит wordsRu/wordsEn выше.
-        if Self.isExceptionOrPrefix(w, cyrillic: sourceCyrillic) { return .keep }
+        if Self.isExceptionOrPrefix(w, cyrillic: sourceCyrillic, exceptions: exceptions) { return .keep }
         let orig = data.plausibility(w, cyrillic: sourceCyrillic)
         let swap = data.plausibility(swapped, cyrillic: toCyrillic)
         if orig <= liveImpossible && swap > orig + liveMargin {
@@ -322,13 +322,13 @@ enum LayoutDetector {
     /// «гифк»→en→«гифки»→ru). Проверяем лишь МАЛЫЕ keep-наборы (исключения пользователя + extra-словарь
     /// брендов/слов); полный словарь — Set без префиксных запросов, а его полные слова и так держит
     /// wordsRu/wordsEn.contains. Дёшево: наборы по сотне слов, short-circuit, зовётся только при count≥4.
-    static func isExceptionOrPrefix(_ w: String, cyrillic: Bool) -> Bool {
+    static func isExceptionOrPrefix(_ w: String, cyrillic: Bool, exceptions: ExceptionStore = .shared) -> Bool {
         guard w.count >= 2 else { return false }
         func hit(_ set: Set<String>) -> Bool {
             if set.contains(w) { return true }                              // точное слово-исключение
             return set.contains { $0.count > w.count && $0.hasPrefix(w) }   // w — префикс исключения
         }
-        let exc = ExceptionStore.shared
+        let exc = exceptions
         // Пользовательские исключения и бренды — в обе стороны (слово точное, язык не важен).
         if hit(exc.learned) || hit(exc.ignored) || hit(ExtraWords.defaultKeep) { return true }
         return cyrillic
