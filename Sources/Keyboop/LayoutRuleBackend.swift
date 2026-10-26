@@ -21,7 +21,8 @@ final class ExceptionLayoutRuleBackend: LayoutRuleBackend {
         let normalized = word.lowercased()
         let latin = normalized.unicodeScalars.allSatisfy { (97...122).contains(Int($0.value)) }
         let cyrillic = normalized.unicodeScalars.allSatisfy { (1072...1103).contains(Int($0.value)) || $0.value == 1105 }
-        guard !word.isEmpty, !ExtraWords.defaultKeep.contains(normalized), latin != cyrillic else { return nil }
+        guard !word.isEmpty, !LayoutDetector.isEmoticon(word),
+              !ExtraWords.defaultKeep.contains(normalized), latin != cyrillic else { return nil }
         let target = Keymap.convert(word, toCyrillic: latin)
         guard target.allSatisfy({ $0.isLetter }), target != word,
               Keymap.convert(target, toCyrillic: !latin) == word else { return nil }

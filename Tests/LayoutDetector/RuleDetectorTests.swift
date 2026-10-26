@@ -46,6 +46,14 @@ enum RuleDetectorTests {
         for pair in [("ghbdtn.", "приветю"), ("ghbdtn", "привет."), ("hello1", "руддщ1"), ("heлlo", "руддщ"), ("ghbdtn", "мир"), ("ок", "jr")] {
             t.check("Неподдерживаемая пара \(pair.0) / \(pair.1) отклонена", (try? LayoutRuleService.prepare(case: item(pair.0, pair.1), action: .force, backend: backend)) == nil)
         }
+        for source in ["xd", "XD", "xD", "Xd"] {
+            let target = Keymap.convert(source, toCyrillic: true)
+            exceptions.addForceSwap(target)
+            t.check("Ранний guard смайлика \(source) сильнее force", decide(source) == .keep)
+            exceptions.removeForceSwap(target)
+            let rejected = try? LayoutRuleService.prepare(case: item(source, target), action: .force, backend: backend)
+            t.check("Force для смайлика \(source) отклоняется без мёртвой настройки", rejected == nil && !exceptions.forceSwap.contains(target.lowercased()))
+        }
         t.check("Keymap сохраняет регистр пары", backend.opposite(of: "HELLO") == "РУДДЩ")
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
