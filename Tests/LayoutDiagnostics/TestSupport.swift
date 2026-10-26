@@ -40,6 +40,11 @@ enum DiagnosticTestRegistry {
     }
 
     static func run(_ name: String) -> Never {
+        if name == "all" {
+            let tests = DiagnosticTests()
+            for key in suites.keys.sorted() { suites[key]?(tests) }
+            tests.finish()
+        }
         guard let suite = suites[name] else {
             fputs("Неизвестный или пустой набор: \(name)\n", stderr)
             exit(2)
