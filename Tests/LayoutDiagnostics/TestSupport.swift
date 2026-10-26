@@ -54,3 +54,5 @@ enum DiagnosticTestRegistry {
         tests.finish()
     }
 }
+
+func kbLog(_ message: String) {}

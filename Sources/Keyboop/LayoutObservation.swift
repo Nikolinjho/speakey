@@ -6,7 +6,7 @@ enum LayoutPath: String, Codable, Equatable {
 
 enum LayoutReason: String, Codable, Equatable {
     case detectorKeep, detectorConvert, mixedRescue, sessionProtected, softShort, softGap
-    case notReady, unsupportedScript, appDisabled, developerMode, autoDisabled
+    case notReady, unsupportedScript, appDisabled, developerMode, autoDisabled, triggerDisabled
     case antiResonance, writeNotSubmitted, explicit
 }
 

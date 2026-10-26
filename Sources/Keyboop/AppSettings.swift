@@ -54,6 +54,11 @@ final class AppSettings {
     static let shared = AppSettings()
     private let d = UserDefaults.standard
 
+    var layoutDiagnosticsEnabled: Bool {
+        get { d.bool(forKey: "layoutDiagnosticsEnabled") }
+        set { d.set(newValue, forKey: "layoutDiagnosticsEnabled") }
+    }
+
     private enum Key {
         static let auto = "autoEnabled"
         static let sound = "soundEnabled"
@@ -135,7 +140,10 @@ final class AppSettings {
         }
     }
 
-    var autoEnabled: Bool { get { d.bool(forKey: Key.auto) } set { d.set(newValue, forKey: Key.auto) } }
+    var autoEnabled: Bool { get { d.bool(forKey: Key.auto) } set {
+        if !newValue { LayoutDiagnosticsRuntime.shared.clearTemporaryState() }
+        d.set(newValue, forKey: Key.auto)
+    } }
     /// Чинить раскладку НА ЛЕТУ (мид-слово), как только сочетание невозможно в текущем языке.
     /// История дефолта: ВЫКЛ → ВКЛ 21.07 («отстоялась») → снова ВЫКЛ 24.07 (стабилизация: усиливала
     /// стейл-рассинхроны буфера с экраном до слышимых фантомов; подробности в
@@ -375,7 +383,10 @@ final class AppSettings {
     /// игра, чужой ноутбук). Перезапуск не повод передумать за человека.
     var pausedUntil: Double {
         get { d.double(forKey: "pausedUntil") }
-        set { d.set(newValue, forKey: "pausedUntil") }
+        set {
+            if newValue > 0 { LayoutDiagnosticsRuntime.shared.clearTemporaryState() }
+            d.set(newValue, forKey: "pausedUntil")
+        }
     }
 
     /// Сейчас на паузе? Единственный источник правды для всех потребителей.

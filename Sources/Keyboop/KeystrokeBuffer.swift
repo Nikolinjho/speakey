@@ -4,6 +4,10 @@ import Foundation
 /// Храним текущее слово + последнее завершённое слово и хвост (пробел/таб после него).
 /// Буфер сбрасывается на навигации/клике/смене окна, чтобы не чинить чужой текст.
 final class KeystrokeBuffer {
+    private(set) var currentOccurrenceID: UUID?
+    private(set) var lastOccurrenceID: UUID?
+    private(set) var retypingOccurrenceID: UUID?
+    var onContextReset: (() -> Void)?
     private(set) var currentWord = ""
     private(set) var lastWord = ""
     private(set) var lastTail = ""
@@ -47,6 +51,7 @@ final class KeystrokeBuffer {
         // Пауза считается только МЕЖДУ буквами одного слова: перед первой буквой человек думал,
         // и эта пауза про предыдущее слово, а не про это.
         if !currentWord.isEmpty { currentWordGap = max(currentWordGap, now.timeIntervalSince(lastActivity)) }
+        if currentWord.isEmpty { currentOccurrenceID = UUID() }
         currentWord += s
         lastActivity = now
     }
@@ -56,6 +61,9 @@ final class KeystrokeBuffer {
         if !currentWord.isEmpty {
             currentWord.removeLast()
             if currentWord.isEmpty {
+                retypingOccurrenceID = currentOccurrenceID
+                currentOccurrenceID = nil
+                lastOccurrenceID = nil
                 // слово стёрто целиком — контекст предыдущего слова больше не достоверен
                 lastWord = ""
                 lastTail = ""
@@ -83,6 +91,8 @@ final class KeystrokeBuffer {
             // в currentWord, чтобы дальнейшая правка шла по ВСЕМУ слову, а не теряла префикс. Раньше тут
             // был clear() (буфер забывал слово) → на границе конвертилось ЛИШЬ дописанное окончание —
             // баг «переключается только окончание» (workflow-диагностика 2026-06-28).
+            currentOccurrenceID = lastOccurrenceID
+            lastOccurrenceID = nil
             currentWord = lastWord
             currentWordGap = lastWordGap   // слово вернулось из завершённых — вместе со своим ритмом
             if !sessionWords.isEmpty { sessionWords.removeLast() }
@@ -92,6 +102,8 @@ final class KeystrokeBuffer {
             lastTailDoubleSpaceGap = nil
             currentWord.removeLast()
             if currentWord.isEmpty {
+                retypingOccurrenceID = currentOccurrenceID
+                currentOccurrenceID = nil
                 lastWord = ""; lastTail = ""; sessionWords.removeAll(); currentWordGap = 0
                 lastTailFirstSpaceAt = nil; lastTailDoubleSpaceGap = nil
             }
@@ -107,6 +119,9 @@ final class KeystrokeBuffer {
         lastActivity = Date()
         if !currentWord.isEmpty {
             sessionWords.append((currentWord, whitespace))
+            lastOccurrenceID = currentOccurrenceID
+            currentOccurrenceID = nil
+            retypingOccurrenceID = nil
             lastWord = currentWord
             lastTail = whitespace
             lastTailFirstSpaceAt = whitespace == " " ? eventTime : nil
@@ -145,6 +160,10 @@ final class KeystrokeBuffer {
     /// Пустой буфер чистят постоянно и это шум, поэтому пишем только когда чистить БЫЛО ЧТО.
     /// Аргументы по умолчанию подставляют МЕСТО ВЫЗОВА, а не место объявления.
     func clear(_ caller: String = #function, _ line: Int = #line) {
+        currentOccurrenceID = nil
+        lastOccurrenceID = nil
+        retypingOccurrenceID = nil
+        onContextReset?()
         if !currentWord.isEmpty || !lastWord.isEmpty {
             kbLog("буфер очищен из \(caller):\(line) — было «\(currentWord.count) симв. + завершённое \(lastWord.count)»")
         }
@@ -164,6 +183,10 @@ final class KeystrokeBuffer {
     /// набираемое окончание (буфер забывал префикс → на пробеле конвертилось лишь дописанное, баг
     /// «переключается только окончание» / «ть»→«nm», workflow-диагностика 2026-06-29).
     func softContextReset() {
+        lastOccurrenceID = nil
+        retypingOccurrenceID = nil
+        currentOccurrenceID = currentWord.isEmpty ? nil : UUID()
+        onContextReset?()
         lastWord = ""
         lastTail = ""
         lastTailFirstSpaceAt = nil
@@ -241,6 +264,10 @@ final class KeystrokeBuffer {
     /// граница (проглоченный пробел/таб/Enter печатается нами). На экране: раскрытие + разделитель,
     /// курсор в начале нового слова. Зовётся синхронно, чтобы дальнейший ввод видел верный буфер.
     func commitSnippet(expansion: String, whitespace: String) {
+        onContextReset?()
+        currentOccurrenceID = nil
+        lastOccurrenceID = nil
+        retypingOccurrenceID = nil
         currentWord = expansion
         boundary(whitespace)
     }

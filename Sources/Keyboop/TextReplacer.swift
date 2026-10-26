@@ -259,6 +259,7 @@ enum TextReplacer {
 
     static func replace(deleteCount: Int, with text: String,
                         firstKeySettleMicros: UInt32? = nil, thenReturn: Bool = false,
+                        onSubmission: ((Bool) -> Void)? = nil,
                         completion: (() -> Void)? = nil) {
         // СВОЁ ОКНО — ЗАМЕНЯЕМ НАПРЯМУЮ, БЕЗ СИНТЕТИКИ (30.07).
         //
@@ -272,7 +273,7 @@ enum TextReplacer {
         // симптом убрала, но вместе с ним и пользу — автор сразу заметил, что в «Написать
         // разработчику» перестало работать авто-переключение. Это возврат пользы без синтетики.
         if replaceInOwnField(deleteCount: deleteCount, with: text) {
-            if let completion { DispatchQueue.main.async(execute: completion) }
+            DispatchQueue.main.async { onSubmission?(true); completion?() }
             return
         }
         // Замер пути (репорт 23.07: «конвертация стала чуть дольше»): ожидание очереди + синтез.
@@ -284,7 +285,7 @@ enum TextReplacer {
                 // Глотаем ВСЁ задание, включая thenReturn: синтетический Enter в диалог
                 // аутентификации мог бы его подтвердить — потерянный Enter безопаснее.
                 kbLog("synth: писать нельзя — replace(-\(deleteCount)+\(text.count)) пропущен")
-                if let completion { DispatchQueue.main.async(execute: completion) }
+                DispatchQueue.main.async { onSubmission?(false); completion?() }
                 return
             }
             // privateState — чтобы не наследовать зажатые пользователем модификаторы (⌥⇧ хоткея).
@@ -293,26 +294,28 @@ enum TextReplacer {
             // и без неё пропадал бы первый Backspace — тот самый «gривет» из комментария ниже.
             let n = max(0, deleteCount)
             let settle = firstKeySettleMicros ?? settleMicros
+            var submitted = true
             if n > 0 {
                 // Пауза перед ПЕРВЫМ Backspace — иначе он иногда теряется, прилетая слишком рано
                 // после клавиши-триггера, и первый символ остаётся в старой раскладке («gривет»).
                 usleep(settle)
                 killSpotlightSuggestion(source: src)
                 for _ in 0..<n {
-                    postKey(backspaceKey, source: src)
+                    submitted = postKey(backspaceKey, source: src) && submitted
                     usleep(1800)
                 }
             }
-            typeUnicode(text, source: src)
+            submitted = typeUnicode(text, source: src) && submitted
             if thenReturn {
                 usleep(1800)   // дать полю принять замену, затем настоящий Return (keyCode, не "\n")
-                postKey(returnKey, source: src)
+                submitted = postKey(returnKey, source: src) && submitted
             }
             let tEnd = ProcessInfo.processInfo.systemUptime
             // Пауза в логе — чтобы по репорту «остался первый символ» сразу было видно, сработала ли
             // удлинённая пауза для Electron, а не гадать по названию приложения.
             kbLog("synth: replace −\(n)+\(text.count) · очередь \(Int((tStart - tEnq) * 1000))мс · синтез \(Int((tEnd - tStart) * 1000))мс · пауза \(settle / 1000)мс")
-            if let completion { DispatchQueue.main.async(execute: completion) }
+            let didSubmit = submitted && (n > 0 || !text.isEmpty || thenReturn)
+            DispatchQueue.main.async { onSubmission?(didSubmit); completion?() }
         }
     }
 
@@ -399,18 +402,21 @@ enum TextReplacer {
 
     /// `mods` — модификаторы для отправки (авто-Enter: разные приложения шлют по разным сочетаниям).
     /// Пустые по умолчанию: это же postKey используют Backspace'ы, которым модификаторы противопоказаны.
-    private static func postKey(_ key: CGKeyCode, source: CGEventSource?, mods: CGEventFlags = []) {
+    @discardableResult
+    private static func postKey(_ key: CGKeyCode, source: CGEventSource?, mods: CGEventFlags = []) -> Bool {
+        var submitted = true
         if let down = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true) {
             down.flags = mods
             down.setIntegerValueField(.eventSourceUserData, value: kbSyntheticMarker)   // «это наше»
             down.post(tap: synthPostTap)
-        }
+        } else { submitted = false }
         usleep(900)   // короткое «удержание» down→up — некоторые поля не видят мгновенный тап
         if let up = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: false) {
             up.flags = mods
             up.setIntegerValueField(.eventSourceUserData, value: kbSyntheticMarker)
             up.post(tap: synthPostTap)
-        }
+        } else { submitted = false }
+        return submitted
     }
 
     /// ⚠️ ЖЕРТВЕННОЕ ПЕРВОЕ СОБЫТИЕ ДЛЯ CHROMIUM/ELECTRON (Figma, отзыв @alpus, доказано 08.09.2026).
@@ -544,27 +550,32 @@ enum TextReplacer {
     private static let escapeKey: CGKeyCode = 53
 
     /// Печать строки как Unicode. Лимит ~20 UTF-16 единиц на событие → бьём по 12.
-    private static func typeUnicode(_ string: String, source: CGEventSource?) {
+    @discardableResult
+    private static func typeUnicode(_ string: String, source: CGEventSource?) -> Bool {
         let units = Array(string.utf16)
-        guard !units.isEmpty else { return }
+        guard !units.isEmpty else { return true }
         var i = 0
+        var submitted = true
         let chunkSize = 12
         while i < units.count {
             let chunk = Array(units[i..<min(i + chunkSize, units.count)])
-            postUnicodeChunk(chunk, keyDown: true, source: source)
-            postUnicodeChunk(chunk, keyDown: false, source: source)
+            submitted = postUnicodeChunk(chunk, keyDown: true, source: source) && submitted
+            submitted = postUnicodeChunk(chunk, keyDown: false, source: source) && submitted
             i += chunkSize
             usleep(800)
         }
+        return submitted
     }
 
-    private static func postUnicodeChunk(_ chunk: [UniChar], keyDown: Bool, source: CGEventSource?) {
-        guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: keyDown) else { return }
+    @discardableResult
+    private static func postUnicodeChunk(_ chunk: [UniChar], keyDown: Bool, source: CGEventSource?) -> Bool {
+        guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: keyDown) else { return false }
         event.flags = []
         event.setIntegerValueField(.eventSourceUserData, value: kbSyntheticMarker)   // «это наше»
         chunk.withUnsafeBufferPointer { buf in
             event.keyboardSetUnicodeString(stringLength: buf.count, unicodeString: buf.baseAddress)
         }
         event.post(tap: synthPostTap)
+        return true
     }
 }
