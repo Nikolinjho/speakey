@@ -1,0 +1,102 @@
+diff --git a/Sources/FluidAudio/DownloadUtils.swift b/Sources/FluidAudio/DownloadUtils.swift
+index 8fcf38a..e4b1920 100644
+--- a/Sources/FluidAudio/DownloadUtils.swift
++++ b/Sources/FluidAudio/DownloadUtils.swift
+@@ -3,6 +3,19 @@ import Foundation
+ 
+ /// HuggingFace model downloader using URLSession
+ public class DownloadUtils {
++    private static let offlineLock = NSLock()
++    nonisolated(unsafe) private static var offline = true
++
++    /// Запрещает сеть в рантайме. Отключается только для явного скачивания модели.
++    public static var enforceOffline: Bool {
++        get { offlineLock.lock(); defer { offlineLock.unlock() }; return offline }
++        set { offlineLock.lock(); defer { offlineLock.unlock() }; offline = newValue }
++    }
++
++    private static func requireNetwork() throws {
++        if enforceOffline { throw URLError(.notConnectedToInternet) }
++    }
++
+ 
+     private static let logger = AppLogger(category: "DownloadUtils")
+ 
+@@ -35,6 +48,7 @@ public class DownloadUtils {
+     /// Use this for API calls that need auth tokens for private repos or higher rate limits
+     public static func fetchWithAuth(from url: URL) async throws -> (Data, URLResponse) {
+         let request = authorizedRequest(url: url)
++        try requireNetwork()
+         return try await sharedSession.data(for: request)
+     }
+ 
+@@ -127,6 +141,7 @@ public class DownloadUtils {
+                 directory: directory, computeUnits: computeUnits, variant: variant,
+                 progressHandler: progressHandler)
+         } catch {
++            if enforceOffline { throw error }
+             logger.warning("First load failed: \(error.localizedDescription)")
+             logger.info("Deleting cache and re-downloading…")
+             let repoPath = directory.appendingPathComponent(repo.folderName)
+@@ -303,6 +318,7 @@ public class DownloadUtils {
+         additionalModelNames: Set<String> = [],
+         progressHandler: ProgressHandler? = nil
+     ) async throws {
++        try requireNetwork()
+         logger.info("Downloading \(repo.folderName) from HuggingFace...")
+ 
+         let repoPath = directory.appendingPathComponent(repo.folderName)
+@@ -330,6 +346,7 @@ public class DownloadUtils {
+             let dirURL = try ModelRegistry.apiModels(repo.remotePath, apiPath)
+             let request = authorizedRequest(url: dirURL)
+ 
++            try requireNetwork()
+             let (dirData, response) = try await sharedSession.data(for: request)
+ 
+             if let httpResponse = response as? HTTPURLResponse {
+@@ -452,6 +469,7 @@ public class DownloadUtils {
+                     }
+                 )
+             } else {
++                try requireNetwork()
+                 let (url, response) = try await sharedSession.download(for: request)
+                 guard let resp = response as? HTTPURLResponse else {
+                     throw HuggingFaceDownloadError.invalidResponse
+@@ -571,6 +589,7 @@ public class DownloadUtils {
+         )
+         defer { session.finishTasksAndInvalidate() }
+ 
++        try requireNetwork()
+         let (tempURL, response) = try await session.download(for: request)
+ 
+         guard let httpResponse = response as? HTTPURLResponse else {
+@@ -602,6 +621,7 @@ public class DownloadUtils {
+         progressHandler: ProgressHandler? = nil,
+         shouldSkip: (@Sendable (String) -> Bool)? = nil
+     ) async throws {
++        try requireNetwork()
+         progressHandler?(DownloadProgress(fractionCompleted: 0.0, phase: .listing))
+         var filesToDownload: [(path: String, size: Int)] = []
+ 
+@@ -683,6 +703,7 @@ public class DownloadUtils {
+             let fileURL = try ModelRegistry.resolveModel(repo.remotePath, encodedPath)
+             let request = authorizedRequest(url: fileURL)
+ 
++            try requireNetwork()
+             let (tempURL, response) = try await sharedSession.download(for: request)
+             guard let httpResponse = response as? HTTPURLResponse else {
+                 throw HuggingFaceDownloadError.invalidResponse
+@@ -727,11 +748,13 @@ public class DownloadUtils {
+         maxAttempts: Int = 4,
+         minBackoff: TimeInterval = 1.0
+     ) async throws -> Data {
++        try requireNetwork()
+         var lastError: Error?
+         let request = authorizedRequest(url: url)
+ 
+         for attempt in 1...maxAttempts {
+             do {
++                try requireNetwork()
+                 let (data, response) = try await sharedSession.data(for: request)
+ 
+                 guard let httpResponse = response as? HTTPURLResponse else {
