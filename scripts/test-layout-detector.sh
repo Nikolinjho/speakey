@@ -11,4 +11,4 @@ done
 swiftc -swift-version 5 -framework Carbon "${sources[@]}" \
     Tests/LayoutDiagnostics/TestSupport.swift Tests/LayoutDetector/main.swift -o "$work/tests"
 # Отдельное имя executable изолирует UserDefaults от установленного приложения.
-KEYBOOP_DATA_DIR="$PWD/Sources/Keyboop/Resources" "$work/tests" baseline "$PWD/Tests/LayoutDetector/baseline.json"
+KEYBOOP_DATA_DIR="${KEYBOOP_DATA_DIR:-$PWD/Sources/Keyboop/Resources}" "$work/tests" baseline "$PWD/Tests/LayoutDetector/baseline.json"

@@ -22,9 +22,21 @@ do {
     let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     let cases = try JSONDecoder().decode([DetectorCase].self, from: data)
     guard !cases.isEmpty else { exit(2) }
-    tests.check("Загружены русские и английские словари и триграммы",
-                !LayoutData.shared.wordsRu.isEmpty && !LayoutData.shared.wordsEn.isEmpty
-                && !LayoutData.shared.trigramsRu.isEmpty && !LayoutData.shared.trigramsEn.isEmpty)
+    let resourceDirectory = ProcessInfo.processInfo.environment["KEYBOOP_DATA_DIR"] ?? ""
+    for name in ["words_ru", "words_en", "trigrams_ru", "trigrams_en"] {
+        let resource = URL(fileURLWithPath: resourceDirectory).appendingPathComponent("\(name).json")
+        let loaded: Bool
+        if let data = try? Data(contentsOf: resource) {
+            if name.hasPrefix("words_") {
+                loaded = (try? JSONDecoder().decode([String].self, from: data)).map { !$0.isEmpty } ?? false
+            } else {
+                loaded = (try? JSONDecoder().decode([String: Double].self, from: data)).map { !$0.isEmpty } ?? false
+            }
+        } else {
+            loaded = false
+        }
+        tests.check("Ресурс \(name).json существует и содержит данные", loaded)
+    }
     for item in cases {
         let expected: SwapDecision
         switch item.decision {

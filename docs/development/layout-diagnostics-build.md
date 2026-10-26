@@ -9,6 +9,7 @@
 ```bash
 bash scripts/test-layout-detector.sh baseline
 bash scripts/test-layout-diagnostics.sh harness
+bash scripts/test-layout-baseline-contracts.sh
 ```
 
 Первый стенд компилирует настоящие `Keymap`, `DynamicKeymap`, `LayoutData`,
@@ -88,8 +89,28 @@ URLSession проверяет актуальный флаг. Публичные 
 загрузки и возможность разрешить явное скачивание. Распознавание с настоящей
 моделью этим стендом не проверяется.
 
-Повторный запуск setup проверяет исходные SHA и применённость патча,
+Повторный запуск setup проверяет исходные SHA и точное совпадение изменений
+с офлайн-патчем. Другие изменения и неизвестные файлы останавливают сборку.
+`--check-only` проверяет checkout и применяет патч без пересборки.
+Стенд `test-layout-baseline-contracts.sh` проверяет отсутствие файлов словарей,
+изменения Package.swift, дополнительные изменения DownloadUtils и неизвестный
+файл на временных копиях checkout.
+
+Setup
 не сбрасывает существующие checkout. Без `KEYBOOP_SIGN_ID=-` сборка ожидает локальный сертификат `Keyboop Dev`.
 Для изолированного bundle используется ad-hoc подпись.
 Подпись и сборочный bundle проверяются
 отдельной командой выше. Запуск и установка приложения не входят в проверку.
+
+## Результат полной сборки
+
+Проверка выполнена с `KEYBOOP_SIGN_ID=-` и отдельным bundle в `/tmp`.
+Лог `/tmp/keyboop-app-baseline.log` заканчивается:
+
+```text
+проверка: codesign --deep --strict OK
+✓ Готово: /private/tmp/Keyboop-layout-baseline.app
+```
+
+`codesign --verify --deep --strict /tmp/Keyboop-layout-baseline.app` завершился
+с кодом 0. Приложение не запускалось и не устанавливалось.
