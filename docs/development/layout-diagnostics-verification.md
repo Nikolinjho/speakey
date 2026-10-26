@@ -5,7 +5,7 @@
 ## Локальная сборка
 
 Готовое приложение: `Keyboop_local.app` в корне этого рабочего дерева. Bundle ID –
-`ru.keyboop.app.dev`. Настройки изолированы от `ru.keyboop.app`, журнал находится в
+`ru.keyboop.app.dev`, имя приложения в macOS – `Keyboop_local`. Настройки изолированы от `ru.keyboop.app`, журнал находится в
 `~/Library/Application Support/ru.keyboop.app.dev/LayoutDiagnostics/`.
 
 Обновления локальной сборки отключены: `SUEnableAutomaticChecks=false`,
@@ -23,7 +23,18 @@ codesign --verify --deep --strict Keyboop_local.app
 
 Финальная сборка завершилась с exit 0, обе проверки подписи – с exit 0.
 Лог сборки: `logs/layout-build.log`. SHA-256 исполняемого файла:
-`960c7e3a376a000a1112198aaaf41873f439179da9ac4d91f78abe933f8a2d24`.
+`7d50b56c15f28b0724da1b6d4c747510a302044f2683f813de47564eafc1bb57`.
+
+После проверок имя bundle и оба поля `CFBundleName`/`CFBundleDisplayName`
+изменены на `Keyboop_local`. Исполняемый файл и Bundle ID сохранены.
+Внешняя подпись обновлена той же командой с `Keyboop-dev.entitlements`:
+
+```bash
+codesign --force --sign - --entitlements Keyboop-dev.entitlements --timestamp=none Keyboop_local.app
+codesign --verify --deep --strict Keyboop_local.app
+```
+
+Проверка подписи переименованного приложения завершилась с exit 0.
 
 Сборка содержит прежние предупреждения Swift в остальных модулях. В ограниченной
 среде проверка процессов требует запуска build-app.sh с доступом к метаданным
