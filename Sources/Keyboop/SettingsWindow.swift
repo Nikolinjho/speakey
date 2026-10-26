@@ -63,7 +63,7 @@ enum SettingsSection: Int, CaseIterable {
     /// функции, потом система, потом «про нас». Голосовой набор стоит третьим, а не пятым: это
     /// второй двигатель приложения и первая тема по числу отзывов (21 из 73 содержательных).
     /// `rawValue` нигде не сохраняется, поэтому переставлять здесь безопасно.
-    case switching, exceptions, ambiguous, voice, snippets, translate, general, updates, privacy, about
+    case switching, exceptions, layoutJournal, ambiguous, voice, snippets, translate, general, updates, privacy, about
 
     /// Что показываем в левом меню. «Спорные слова» — подстраница «Исключений» (кнопка внутри):
     /// в меню это был бы одиннадцатый пункт ради списка, который открывают раз в жизни.
@@ -79,6 +79,7 @@ enum SettingsSection: Int, CaseIterable {
     var l10nKey: String {
         switch self {
         case .switching: return "sec.switching"
+        case .layoutJournal: return "sec.layoutJournal"
         case .exceptions: return "sec.exceptions"
         case .ambiguous:  return "sec.ambiguous"
         case .snippets:   return "sec.snippets"
@@ -93,6 +94,7 @@ enum SettingsSection: Int, CaseIterable {
     var symbol: String {
         switch self {
         case .switching: return "keyboard"
+        case .layoutJournal: return "list.bullet.rectangle"
         case .exceptions: return "tag"
         case .ambiguous:  return "arrow.left.arrow.right"
         case .snippets:   return "wand.and.stars"
@@ -809,8 +811,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return img
     }
 
-    func dumpFullWindow(section i: Int, to path: String) {
-        window?.appearance = NSAppearance(named: .darkAqua)
+    func dumpFullWindow(section i: Int, to path: String, appearance: NSAppearance.Name = .darkAqua) {
+        window?.appearance = NSAppearance(named: appearance)
         sidebar.select(i, animated: false)
         // ⚠️ СОБИРАЕМ ИЗ ДВУХ КУСКОВ, А НЕ СНИМАЕМ КОРЕНЬ ЦЕЛИКОМ (задача 0d, починено 05.08.2026).
         //
@@ -1096,7 +1098,7 @@ final class DetailVC: NSViewController {
     var onLanguageChanged: (() -> Void)?
     private let settings = AppSettings.shared
     private let exceptions = ExceptionStore.shared
-    private let snippets = SnippetStore.shared
+    private lazy var snippets = SnippetStore.shared
 
     private var ignoredChips: ChipFlowView?
     private var learnedChips: ChipFlowView?
@@ -1341,6 +1343,7 @@ final class DetailVC: NSViewController {
         switch section {
         case .switching:  built = buildSwitching()
         case .exceptions: built = buildExceptions()
+        case .layoutJournal: built = LayoutJournalView(runtime: .shared)
         case .ambiguous:  built = buildAmbiguous()
         case .snippets:   built = buildSnippets()
         case .translate:  built = buildTranslate()

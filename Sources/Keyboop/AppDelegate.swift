@@ -173,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         engine = Engine()
         menuBar = MenuBarController(layout: engine.layout)
+        menuBar.onOpenLayoutJournal = { [weak self] in self?.openSettings(section: .layoutJournal) }
         menuBar.onOpenSettings = { [weak self] in self?.openSettings() }
         menuBar.onOpenPrivacy = { [weak self] in self?.openSettings(section: .privacy) }
         menuBar.onShowVoiceHistory = { [weak self] in self?.openVoiceHistory() }

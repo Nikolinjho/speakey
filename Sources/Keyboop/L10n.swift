@@ -72,6 +72,7 @@ enum L10n {
     }
 
     private static let strings: [String: [Lang: String]] = [
+        "sec.layoutJournal": [.ru: "Журнал раскладки", .en: "Layout journal"],
         "tagline":        [.ru: "wrong layout? keyboop.", .en: "wrong layout? keyboop."],
 
         "menu.edit":      [.ru: "Правка",       .en: "Edit"],
@@ -1492,4 +1493,51 @@ enum L10n {
         "about.nuance":   [.ru: "Работает в фоне (значок у часов). При исправлении слов не трогает буфер обмена — печатает символы напрямую. Из твоего ввода и голоса наружу не уходит ничего; в сеть — только за моделями и обновлениями. Нужен доступ к «Универсальному доступу» (Accessibility), чтобы видеть и исправлять ввод.",
                            .en: "Runs in the background (menu-bar icon). Doesn’t touch the clipboard when fixing words — it types characters directly. Nothing from your input or voice ever leaves the Mac; the network is used only for models and updates. Needs Accessibility access to see and fix input."]
     ]
+}
+
+extension L10n {
+    static func journal(_ key: String) -> String {
+        let values: [String: (String, String)] = [
+            "confirmFirst": ("Сначала подтверди ожидаемое слово. Это сохранит проверку, но не включит правило.", "Confirm the expected word first. This saves the review without enabling a rule."),
+            "incomplete": ("Это часть слова. Для правила добавь полное слово вручную.", "This is part of a word. Add the complete word manually to create a rule."),
+            "protected": ("Автокоррекция была отключена или защищала ввод. Правило для этого решения недоступно.", "Autocorrection was disabled or protecting input. This decision cannot become a rule."),
+            "unsupported": ("Для сохранения ожидание должно совпадать с исходным словом. Для замены нужна точная пара русской и английской раскладок из букв.", "To keep a word, the expectation must match the source. Conversion needs an exact letter-only Russian/English keyboard pair."),
+            "loadingRules": ("Правила ещё загружаются. Подожди немного.", "Rules are still loading. Please wait."),
+            "chooseApp": ("Выбери приложение", "Choose an app"),
+            "otherApp": ("Другое приложение…", "Other app…"),
+            "columns": ("Исходное · результат · ожидание", "Source · produced · expected"),
+            "collection": ("Собирать ошибки раскладки", "Collect layout mistakes"),
+            "privacy": ("Выключено по умолчанию. Слова хранятся только на этом Mac. Подтверждение случая не меняет автокоррекцию.", "Off by default. Words stay on this Mac. Reviewing a case does not change autocorrection."),
+            "add": ("Отметить ошибку…", "Mark mistake…"), "export": ("Экспорт JSON…", "Export JSON…"),
+            "exportConfirmed": ("Подтверждённые…", "Confirmed…"), "clear": ("Очистить", "Clear"),
+            "allKinds": ("Все ошибки", "All mistakes"), "allStatuses": ("Все статусы", "All statuses"),
+            "allApps": ("Все приложения", "All apps"), "repeats": ("По повторам", "Most repeated"), "recent": ("По времени", "Most recent"),
+            "missedConversion": ("Пропущена замена", "Missed conversion"), "unwantedConversion": ("Лишняя замена", "Unwanted conversion"),
+            "candidate": ("Нужно проверить", "Needs review"), "confirmed": ("Подтверждено", "Confirmed"),
+            "rejected": ("Отклонено", "Rejected"), "resolved": ("Правило применено", "Rule applied"),
+            "cases": ("случаев", "cases"), "pruned": ("старых удалено по лимиту", "older cases pruned"),
+            "empty": ("Случаев пока нет. Включи сбор и отметь ошибку или добавь слово вручную.", "No cases yet. Enable collection and mark a mistake or add a word manually."),
+            "rules": ("Глобальные правила", "Global rules"),
+            "global": ("Отдельное действие: правило для исходного слова во всех приложениях с автокоррекцией.", "Separate action: a rule for the source word in every app with autocorrection."),
+            "keep": ("Всегда сохранять исходное слово", "Always keep source word"), "force": ("Всегда менять раскладку исходного слова", "Always convert source word"),
+            "expected": ("Ожидаемое слово", "Expected word"), "typed": ("Исходное слово", "Typed word"),
+            "confirm": ("Подтвердить ожидание", "Confirm expected word"), "reject": ("Отклонить", "Reject"),
+            "locked": ("Сначала удали связанное правило, чтобы изменить этот случай.", "Remove the linked rule before editing this case."),
+            "source": ("Источник", "Source"), "decision": ("Решение", "Decision"),
+            "remove": ("Удалить правило", "Remove rule"), "retryRemove": ("Повторить удаление", "Retry removal"),
+            "conflictHelp": ("Настройки слова изменены отдельно. Можно сохранить их и забыть это правило.", "Word settings changed separately. You can keep those settings and forget this rule."),
+            "forget": ("Забыть правило, сохранив настройки", "Forget rule, keep settings"),
+            "pending": ("Восстанавливается", "Recovering"), "active": ("Действует", "Active"), "conflict": ("Настройки изменены", "Settings changed"),
+            "more": ("Показать ещё 30", "Show 30 more"),
+            "error": ("Не удалось сохранить или прочитать журнал. Проверь файл и свободное место. Слова должны быть без пробелов, до 128 символов. Совпадающий случай или изменённое правило нужно проверить отдельно.", "Could not save or read the journal. Check the file and free disk space. Words must have no spaces and be at most 128 characters. Review duplicate cases or changed rules separately."),
+            "clearQuestion": ("Очистить журнал?", "Clear journal?"), "clearHelp": ("Случаи удалятся. Глобальные правила останутся.", "Cases will be deleted. Global rules will remain."),
+            "cancel": ("Отмена", "Cancel"), "save": ("Сохранить", "Save"),
+            "enableFirst": ("Сначала включи сбор ошибок.", "Enable mistake collection first."),
+            "manual": ("Добавить вручную", "Add manually"), "bundle": ("Приложение: bundle ID", "App: bundle ID"),
+            "recentHelp": ("Недавнее решение доступно 10 секунд. Для ручного случая заполни исходное слово и приложение.", "A recent decision is available for 10 seconds. For a manual case, fill in the typed word and app."),
+            "expired": ("Недавнее решение устарело. Добавь случай вручную.", "Recent decision expired. Add the case manually.")
+        ]
+        guard let value = values[key] else { return key }
+        return current == .ru ? value.0 : value.1
+    }
 }

@@ -18,6 +18,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var waveTimer: Timer?
 
     var onOpenSettings: (() -> Void)?
+    var onOpenLayoutJournal: (() -> Void)?
     /// Открыть настройки сразу на «Приватности» — туда ведёт строка про скрытый ввод.
     var onOpenPrivacy: (() -> Void)?
     var onShowVoiceHistory: (() -> Void)?
@@ -574,6 +575,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     var recheckPermissions: (() -> Void)?
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        LayoutDiagnosticsRuntime.shared.freezeRecent()
         recheckPermissions?()
         menu.removeAllItems()
         populate(menu)
@@ -775,6 +777,9 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(.separator())
 
         // Настройки — отдельной группой между двумя разделителями: системная шестерёнка не задевает соседей.
+        let journal = NSMenuItem(title: L10n.t("sec.layoutJournal") + "…", action: #selector(openLayoutJournal), keyEquivalent: "")
+        journal.target = self
+        menu.addItem(journal)
         let prefs = NSMenuItem(title: L10n.t("menu.settings"), action: #selector(openSettings), keyEquivalent: ",")
         prefs.target = self
         // Шестерёнку ставим САМИ, хотя macOS 26 рисует её пункту настроек и без нас (наблюдение 16.06):
@@ -905,6 +910,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     @objc private func selectMic(_ s: NSMenuItem) {
         if let uid = s.representedObject as? String { settings.voiceMicUID = uid; buildMenu() }
     }
+    @objc private func openLayoutJournal() { onOpenLayoutJournal?() }
+
     @objc private func openSettings() { onOpenSettings?() }
     @objc private func showVoiceHistory() { onShowVoiceHistory?() }
     @objc private func checkUpdatesItem() { onCheckUpdates?() }

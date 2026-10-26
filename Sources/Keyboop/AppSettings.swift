@@ -51,8 +51,13 @@ extension Notification.Name {
 
 /// Настройки в UserDefaults.
 final class AppSettings {
-    static let shared = AppSettings()
-    private let d = UserDefaults.standard
+    private static var override: AppSettings?
+    private static let live = AppSettings()
+    static var shared: AppSettings {
+        get { override ?? live }
+        set { override = newValue }
+    }
+    private let d: UserDefaults
 
     var layoutDiagnosticsEnabled: Bool {
         get { d.bool(forKey: "layoutDiagnosticsEnabled") }
@@ -71,7 +76,8 @@ final class AppSettings {
         static let arrowsCancel = "arrowsCancel"
     }
 
-    private init() {
+    init(defaults: UserDefaults = .standard) {
+        d = defaults
         // ⌥⇧ по умолчанию (modifier-only: keyCode = -1).
         let defaultMods = Int(CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskShift.rawValue)
         d.register(defaults: [

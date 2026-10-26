@@ -5,7 +5,12 @@ extension Notification.Name {
 }
 
 final class LayoutDiagnosticsRuntime {
-    static let shared = LayoutDiagnosticsRuntime()
+    private static var override: LayoutDiagnosticsRuntime?
+    private static let live = LayoutDiagnosticsRuntime()
+    static var shared: LayoutDiagnosticsRuntime {
+        get { override ?? live }
+        set { override = newValue }
+    }
     let store: LayoutJournalStore
     let rules: LayoutRuleService
     let controller: LayoutDiagnosticsController
@@ -17,15 +22,22 @@ final class LayoutDiagnosticsRuntime {
     }
     let ownBundleID: String
 
-    private init() {
+    private let settings: AppSettings
+    private let backend: LayoutRuleBackend
+
+    init(store injectedStore: LayoutJournalStore? = nil, settings: AppSettings = .shared, backend: LayoutRuleBackend = ExceptionLayoutRuleBackend()) {
+        self.settings = settings
+        self.backend = backend
         ownBundleID = Bundle.main.bundleIdentifier ?? "com.keyboop.app"
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-        let store = LayoutJournalStore(directory: support.appendingPathComponent(ownBundleID).appendingPathComponent("LayoutDiagnostics"))
+        let store = injectedStore ?? LayoutJournalStore(directory: support.appendingPathComponent(ownBundleID).appendingPathComponent("LayoutDiagnostics"))
         self.store = store
-        rules = LayoutRuleService(store: store, backend: ExceptionLayoutRuleBackend())
-        controller = LayoutDiagnosticsController(enabled: AppSettings.shared.layoutDiagnosticsEnabled, sink: { feedback in
-            store.record(feedback) { result in Self.shared.finished(result) }
+        rules = LayoutRuleService(store: store, backend: backend)
+        var recorded: ((Result<Void, Error>) -> Void)?
+        controller = LayoutDiagnosticsController(enabled: settings.layoutDiagnosticsEnabled, sink: { feedback in
+            store.record(feedback) { result in recorded?(result) }
         })
+        recorded = { [weak self] result in self?.finished(result) }
         controller.onChange = { [weak self] in self?.notifyChange() }
         store.snapshot { [weak self] snapshot in
             if let error = snapshot.loadError { self?.lastError = error; self?.notifyChange() }
@@ -37,11 +49,15 @@ final class LayoutDiagnosticsRuntime {
         }
     }
 
+    func canApply(_ item: LayoutCase, action: LayoutRuleAction) -> Bool {
+        rulesReady && (try? LayoutRuleService.prepare(case: item, action: action, backend: backend)) != nil
+    }
+
     var enabled: Bool { controller.enabled }
     var recent: [LayoutObservation] { controller.recent }
     var frozenRecent: [LayoutObservation] { controller.frozenRecent }
     func setEnabled(_ enabled: Bool) {
-        AppSettings.shared.layoutDiagnosticsEnabled = enabled
+        settings.layoutDiagnosticsEnabled = enabled
         controller.setEnabled(enabled)
         notifyChange()
     }

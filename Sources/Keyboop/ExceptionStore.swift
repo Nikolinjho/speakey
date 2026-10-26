@@ -3,7 +3,12 @@ import Foundation
 /// Пользовательские исключения: слова, которые НЕ переключать (ignored),
 /// и слова, которые ВСЕГДА переключать (forceSwap). Хранятся в UserDefaults.
 final class ExceptionStore {
-    static let shared = ExceptionStore()
+    private static var override: ExceptionStore?
+    private static let live = ExceptionStore()
+    static var shared: ExceptionStore {
+        get { override ?? live }
+        set { override = newValue }
+    }
     private let d: UserDefaults
     private let ignoredKey = "ignoredWords"
     private let forceKey = "forceSwapWords"
