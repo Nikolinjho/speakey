@@ -436,15 +436,17 @@ private let d: UserDefaults
 **Goal:** Дать пользователю просмотреть кандидатов, подтвердить ожидаемый результат и осознанно применить правило.
 
 **Files:**
-- `Sources/Keyboop/LayoutJournalWindow.swift`
+- `Sources/Keyboop/LayoutJournalView.swift`
 - `Sources/Keyboop/LayoutJournalPresenter.swift`
 - `Sources/Keyboop/MenuBarController.swift`
+- `Sources/Keyboop/SettingsWindow.swift`
+- `Sources/Keyboop/main.swift`
 - `Sources/Keyboop/AppDelegate.swift`
 - `Sources/Keyboop/L10n.swift`
 - `Tests/LayoutDiagnostics/PresenterTests.swift`
 
 **Acceptance Criteria:**
-- [ ] Меню «Журнал раскладки…» открывает отдельное окно и показывает состояние сбора.
+- [ ] Меню «Журнал раскладки…» открывает раздел существующих настроек и показывает состояние сбора.
 - [ ] Есть фильтры по типу ошибки, приложению и статусу, сортировка по повторениям и времени.
 - [ ] Ручная разметка использует замороженный снимок решений исходного приложения, а не ввод в самом журнале.
 - [ ] Подтверждение случая не меняет детектор. Применение глобального правила – отдельное действие.
@@ -460,13 +462,15 @@ private let d: UserDefaults
 
 - [ ] Написать тестовые примеры: одинаковый typed с двумя expected не схлопывается, сортировка count убывает с устойчивым lastSeen/id tie-breaker, фильтр не теряет applied-случай, candidate после review остаётся без активного receipt до отдельного apply. Ожидается FAIL до реализации Presenter и PASS после.
 
-- [ ] Создать отдельное окно на AppKit по образцу жизненного цикла `VoiceHistoryWindowController`: один экземпляр, повторное открытие активирует существующее окно. Использовать простую таблицу и панель деталей. Колонки: исходное, результат Keyboop, ожидаемое, приложение, повторения, статус. В деталях – причина уровня Engine, путь и отправлена ли замена. Время показывать в MSK.
+- [ ] Встроить раздел `.layoutJournal` в существующий SettingsSection и DetailVC.buildSection. Новый `LayoutJournalView: NSStackView` использует DS, CardView, HairlineView и DetailVC.eyebrowLabel. Контент имеет существующую ширину 600 pt и скролл DetailVC. Подписки включать только после попадания в window, а не при создании временного view для измерения sectionHeight. Использовать список карточек случаев и панель деталей. Колонки: исходное, результат Keyboop, ожидаемое, приложение, повторения, статус. В деталях – причина уровня Engine, путь и отправлена ли замена. Время показывать в MSK.
 
-- [ ] Меню вызывает `onShowLayoutJournal`. В `menuNeedsUpdate` сохранить последние наблюдения до смены приложения. В AppDelegate связать callback с Controller snapshot и window controller. Во вкладке «Последние решения» позволить выбрать конкретное вхождение, задать expected и сохранить explicit feedback. После TTL не угадывать связь: создать отдельный manual case с введёнными пользователем typed/expected, без выдуманного пути выполнения.
+- [ ] Меню вызывает `onOpenLayoutJournal`. В `menuNeedsUpdate` сохранить последние наблюдения до смены приложения. В AppDelegate связать callback с Controller snapshot и `openSettings(section: .layoutJournal)`. Сохранить гостевой переход в подробные настройки из простого режима без записи simpleMode. Во вкладке «Последние решения» позволить выбрать конкретное вхождение, задать expected и сохранить explicit feedback. После TTL не угадывать связь: создать отдельный manual case с введёнными пользователем typed/expected, без выдуманного пути выполнения.
 
 - [ ] Отдельные действия: «Подтвердить случай», «Отклонить», «Всегда оставлять глобально», «Всегда переключать глобально», «Удалить правило», «Очистить журнал», «Экспортировать JSON», «Экспортировать подтверждённые примеры». Для глобального правила показать исходное слово и область «во всех приложениях, где включено автопереключение». После ошибки сохранения не показывать успешный тост.
 
 - [ ] Переключатель сбора хранить в AppSettings под новым ключом `layoutJournalEnabled`, default=false. При его смене немедленно обновлять Controller. Добавить локализации ru/en в существующий L10n. Пояснения интерфейса описывают действия пользователя, не классы и не внутреннюю архитектуру.
+
+- [ ] Для снимка интерфейса добавить ранний preview-режим до GlobeGuard/AppDelegate в main.swift. Он создаёт только NSApplication и SettingsWindowController, открывает .layoutJournal с временными демонстрационными данными и рендерит dumpFullWindow. Обычный event tap, singleton и системные resource guards не запускаются. Существующие KEYBOOP_DUMP/KEYBOOP_WINSHOT без такого раннего входа не являются безопасным UI-only запуском.
 
 - [ ] Экспорт через NSSavePanel не копирует содержимое в clipboard и не отправляет в FeedbackAttachmentCore. Сначала получить URL, только затем вызвать store.export. Ошибки доступа, corrupt-файл и `prunedCount` показывать в окне. Подтверждённый export не должен молча включать rejected и incomplete.
 
@@ -475,15 +479,17 @@ private let d: UserDefaults
 ```json:metadata
 {
   "files": [
-    "Sources/Keyboop/LayoutJournalWindow.swift",
+    "Sources/Keyboop/LayoutJournalView.swift",
     "Sources/Keyboop/LayoutJournalPresenter.swift",
     "Sources/Keyboop/MenuBarController.swift",
     "Sources/Keyboop/AppDelegate.swift",
     "Sources/Keyboop/L10n.swift",
-    "Tests/LayoutDiagnostics/PresenterTests.swift"
+    "Tests/LayoutDiagnostics/PresenterTests.swift",
+    "Sources/Keyboop/SettingsWindow.swift",
+    "Sources/Keyboop/main.swift"
   ],
   "acceptanceCriteria": [
-    "Меню «Журнал раскладки…» открывает отдельное окно и показывает состояние сбора.",
+    "Меню «Журнал раскладки…» открывает раздел существующих настроек и показывает состояние сбора.",
     "Есть фильтры по типу ошибки, приложению и статусу, сортировка по повторениям и времени.",
     "Ручная разметка использует замороженный снимок решений исходного приложения, а не ввод в самом журнале.",
     "Подтверждение случая не меняет детектор. Применение глобального правила – отдельное действие.",
