@@ -138,5 +138,19 @@
       "qualityReview": "approved"
     }
   ],
-  "lastUpdated": "2026-10-27T15:38:35.973788+03:00"
+  "lastUpdated": "2026-10-27T15:41:29.614609+03:00",
+  "finalReview": {
+    "baseCommit": "dbeaf8f",
+    "reviewedCommit": "f5fa85e",
+    "result": "approved",
+    "findings": 0
+  },
+  "delivery": {
+    "branch": "feat/layout-diagnostics",
+    "worktreePreserved": true,
+    "bundle": "/private/tmp/Keyboop_rightlayout.app",
+    "installed": false,
+    "profileEnabled": false,
+    "effectiveSavedAssistMode": "observe"
+  }
 }
