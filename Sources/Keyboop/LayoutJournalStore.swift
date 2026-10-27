@@ -5,12 +5,14 @@ struct LayoutJournalSnapshot {
     let rules: [LayoutRuleReceipt]
     let prunedCount: Int
     let loadError: Error?
+    var observations: [LayoutObservation] = []
 
     struct Export: Codable {
         let schemaVersion: Int
         let cases: [LayoutCase]
         let rules: [LayoutRuleReceipt]
         let prunedCount: Int
+        var observations: [LayoutObservation] = []
     }
 }
 
@@ -26,7 +28,24 @@ final class LayoutJournalStore {
         var cases: [LayoutCase] = []
         var rules: [LayoutRuleReceipt] = []
         var prunedCount = 0
+        var observations: [LayoutObservation] = []
         var observationIDs: [String: [UUID]] = [:]
+
+        init() {}
+
+        private enum CodingKeys: String, CodingKey {
+            case schemaVersion, cases, rules, prunedCount, observationIDs, observations
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+            cases = try values.decode([LayoutCase].self, forKey: .cases)
+            rules = try values.decode([LayoutRuleReceipt].self, forKey: .rules)
+            prunedCount = try values.decode(Int.self, forKey: .prunedCount)
+            observationIDs = try values.decode([String: [UUID]].self, forKey: .observationIDs)
+            observations = try values.decodeIfPresent([LayoutObservation].self, forKey: .observations) ?? []
+        }
     }
 
     private let encoder: JSONEncoder = {
@@ -63,10 +82,26 @@ final class LayoutJournalStore {
         queue.async { self.load() }
     }
 
+    func recordObservation(_ observation: LayoutObservation, completion: @escaping Completion = { _ in }) {
+        mutate(completion) { next in
+            try self.validate(observation.typed, observation.typed)
+            if let proposed = observation.proposed { try self.validate(proposed, proposed) }
+            if let alternative = observation.alternative { try self.validate(alternative, alternative) }
+            if let index = next.observations.firstIndex(where: { $0.id == observation.id }) {
+                let previous = next.observations[index]
+                guard previous.submission != .submitted && previous.submission != .rejected else { return }
+                next.observations[index] = observation
+            } else {
+                next.observations.append(observation)
+            }
+        }
+    }
+
     func record(_ feedback: LayoutFeedback, completion: @escaping Completion = { _ in }) {
         mutate(completion) { next in
             try self.validate(feedback.observation.typed, feedback.expected)
             if let proposed = feedback.observation.proposed { try self.validate(proposed, feedback.expected) }
+            if let alternative = feedback.observation.alternative { try self.validate(alternative, feedback.expected) }
             if next.observationIDs.values.contains(where: { $0.contains(feedback.observationID) }) { return }
             let observation = feedback.observation
             let key = self.key(typed: observation.typed, expected: feedback.expected, kind: feedback.kind,
@@ -93,7 +128,8 @@ final class LayoutJournalStore {
         queue.async {
             self.refreshRetention()
             let snapshot = LayoutJournalSnapshot(cases: self.state.cases, rules: self.state.rules,
-                                                 prunedCount: self.state.prunedCount, loadError: self.loadError)
+                                                 prunedCount: self.state.prunedCount, loadError: self.loadError,
+                                                 observations: self.state.observations)
             DispatchQueue.main.async { completion(snapshot) }
         }
     }
@@ -151,6 +187,7 @@ final class LayoutJournalStore {
     func clear(completion: @escaping Completion = { _ in }) {
         mutate(completion) { next in
             next.cases.removeAll()
+            next.observations.removeAll()
             next.observationIDs.removeAll()
         }
     }
@@ -170,7 +207,8 @@ final class LayoutJournalStore {
                 let cases = self.state.cases.filter { !confirmedOnly || (($0.status == .confirmed || $0.status == .resolved) && $0.isCompleteWord) }
                 let ids = Set(cases.flatMap(\.receiptIDs))
                 let rules = self.state.rules.filter { !confirmedOnly || ids.contains($0.id) }
-                let export = LayoutJournalSnapshot.Export(schemaVersion: 1, cases: cases, rules: rules, prunedCount: self.state.prunedCount)
+                let export = LayoutJournalSnapshot.Export(schemaVersion: 1, cases: cases, rules: rules, prunedCount: self.state.prunedCount,
+                                                          observations: confirmedOnly ? [] : self.state.observations)
                 try self.write(self.encoder.encode(export), to: url)
             }
             DispatchQueue.main.async { completion(result) }
@@ -233,8 +271,9 @@ final class LayoutJournalStore {
     private func retainedData(_ next: inout Envelope) throws -> Data {
         prune(&next)
         var data = try encoder.encode(next)
-        while data.count > maxBytes && !next.cases.isEmpty {
-            removeOldest(&next)
+        while data.count > maxBytes && (!next.observations.isEmpty || !next.cases.isEmpty) {
+            if !next.observations.isEmpty { removeOldestObservation(&next) }
+            else { removeOldest(&next) }
             data = try encoder.encode(next)
         }
         guard data.count <= maxBytes else { throw LayoutJournalError.sizeLimit }
@@ -261,7 +300,7 @@ final class LayoutJournalStore {
     private func prune(_ next: inout Envelope) {
         for item in next.cases {
             let words = [item.typed, item.expected] + [item.produced].compactMap { $0 }
-                + item.evidence.flatMap { [$0.observation.typed, $0.expected] + [$0.observation.proposed].compactMap { $0 } }
+                + item.evidence.flatMap { [$0.observation.typed, $0.expected] + [$0.observation.proposed, $0.observation.alternative].compactMap { $0 } }
             if words.contains(where: { $0.isEmpty || $0.count > maxWordLength }) {
                 remove(item.id, from: &next)
             }
@@ -270,8 +309,25 @@ final class LayoutJournalStore {
             next.cases[index].evidence = Array(next.cases[index].evidence.suffix(5))
         }
         let cutoff = now().addingTimeInterval(-maxAge)
+        let count = next.observations.count
+        next.observations.removeAll { observation in
+            let words = [observation.typed] + [observation.proposed, observation.alternative].compactMap { $0 }
+            return observation.recordedAt < cutoff || words.contains { $0.isEmpty || $0.count > maxWordLength }
+        }
+        next.prunedCount += count - next.observations.count
         for item in next.cases.filter({ $0.lastSeen < cutoff }) { remove(item.id, from: &next) }
-        while next.cases.count > maxCases { removeOldest(&next) }
+        while next.cases.count + next.observations.count > maxCases {
+            if !next.observations.isEmpty { removeOldestObservation(&next) }
+            else { removeOldest(&next) }
+        }
+    }
+
+    private func removeOldestObservation(_ next: inout Envelope) {
+        guard let index = next.observations.indices.min(by: {
+            next.observations[$0].recordedAt < next.observations[$1].recordedAt
+        }) else { return }
+        next.observations.remove(at: index)
+        next.prunedCount += 1
     }
 
     private func removeOldest(_ next: inout Envelope) {

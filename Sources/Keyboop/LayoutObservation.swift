@@ -1,13 +1,13 @@
 import Foundation
 
 enum LayoutPath: String, Codable, Equatable {
-    case boundary, enter, inlineLive, pauseLive, live, manual
+    case boundary, enter, inlineLive, pauseLive, live, manual, editing
 }
 
 enum LayoutReason: String, Codable, Equatable {
     case detectorKeep, detectorConvert, mixedRescue, sessionProtected, softShort, softGap
     case notReady, unsupportedScript, appDisabled, developerMode, autoDisabled, triggerDisabled
-    case antiResonance, writeNotSubmitted, explicit
+    case antiResonance, writeNotSubmitted, explicit, editingObserved
 }
 
 enum LayoutAction: String, Codable, Equatable { case keep, replace, blocked }
@@ -17,6 +17,8 @@ enum LayoutReviewStatus: String, Codable, Equatable { case candidate, confirmed,
 enum LayoutFeedbackSource: String, Codable, Equatable { case manualFlip, retype, explicit }
 enum LayoutRuleReceiptStatus: String, Codable, Equatable { case pending, active, removed, conflict }
 
+enum LayoutDictionaryMatch: String, Codable, Equatable { case source, alternative, both, neither, unavailable }
+
 struct LayoutObservation: Codable, Equatable, Identifiable {
     var id = UUID()
     var occurrenceID: UUID
@@ -24,6 +26,8 @@ struct LayoutObservation: Codable, Equatable, Identifiable {
     var bundleID: String
     var typed: String
     var proposed: String?
+    var alternative: String? = nil
+    var dictionaryMatch: LayoutDictionaryMatch? = nil
     var path: LayoutPath
     var reason: LayoutReason
     var action: LayoutAction
