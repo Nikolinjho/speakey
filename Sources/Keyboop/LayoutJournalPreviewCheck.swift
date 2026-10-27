@@ -174,7 +174,7 @@ enum LayoutJournalPreviewCheck {
 
 final class PreviewNeuralLayoutBackend: NeuralLayoutBackend {
     func predict(_ word: String) throws -> NeuralLayoutScores {
-        try NeuralLayoutScores(logits: [0, 0, 0, 10, 0, 0, 0, 0, 0])
+        try NeuralLayoutScores(logits: word == "дд" ? [0, 0, 0, 0, 0, 10, 0, 0, 0] : [0, 0, 0, 10, 0, 0, 0, 0, 0])
     }
 }
 
@@ -206,6 +206,22 @@ extension LayoutJournalPreviewCheck {
             }
         }
         try await waitReady()
+        let initial = await withCheckedContinuation { continuation in diagnostics.store.snapshot { continuation.resume(returning: $0) } }
+        guard let original = initial.observations.first(where: { $0.typed == "дд" }) else {
+            throw Failure(description: "Нет исходного решения для модели")
+        }
+        neural.observe(occurrenceID: original.occurrenceID, word: original.typed, bundleID: original.bundleID, layoutCode: "preview.ru", collecting: true)
+        let request = neural.request(occurrenceID: original.occurrenceID, word: original.typed, bundleID: original.bundleID, layoutCode: "preview.ru")
+        diagnostics.bindNeuralObservation(original, to: request)
+        neural.bind(request, detectorCyrillic: nil)
+        var emitted: NeuralLayoutEvidence?
+        let deadline = Date().addingTimeInterval(5)
+        while emitted == nil && Date() < deadline {
+            let snapshot = await withCheckedContinuation { continuation in diagnostics.store.snapshot { continuation.resume(returning: $0) } }
+            emitted = snapshot.observations.first(where: { $0.id == original.id })?.neural
+            if emitted == nil { try await Task.sleep(nanoseconds: 10_000_000) }
+        }
+        try check("Настоящие runtime и policy сохраняют отказ профиля и независимое предложение", emitted?.block == .profile && emitted?.mode == .assist && emitted?.proposedCyrillic == false && emitted?.classScores?.count == 9)
         window.show(section: .switching)
         let assist = try control("neural.mode.assist", NSButton.self)
         let status = try control("neural.status", NSTextField.self)

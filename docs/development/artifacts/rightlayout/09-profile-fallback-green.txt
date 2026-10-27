@@ -1,0 +1,59 @@
+2026-10-27 15:13:23.431 tests[29011:5389061] Keyboop: LayoutData loaded=true ru-tri=11458 en-tri=8110 ru-w=163283 en-w=59506
+PASS: Незаполненный layout cache не читает системную раскладку
+PASS: Отсутствующий режим означает observe
+PASS: Неизвестный режим выключает модель
+PASS: Смена режима сохраняется и уведомляет один раз
+PASS: Runtime сохраняет проверенный профиль backend
+PASS: Off очищает загруженный профиль
+PASS: Off не загружает модель
+PASS: До готовности ввод не ждёт worker
+PASS: Граница снимает право замены
+PASS: Последний снимок до ready сохраняет точный ключ после границы
+PASS: Observe сохраняет предложение модели
+PASS: JSON экспорт содержит SHA и все девять исходных оценок
+PASS: Отключённый сбор не создаёт evidence и request журнала
+PASS: Смена контекста отбрасывает поздний callback
+PASS: Off инвалидирует выполняющийся результат
+PASS: Повторное включение создаёт backend заново
+PASS: Реальный детектор даёт одинаковые действия off и observe
+PASS: Ошибка загрузки доступна без вмешательства в детектор
+PASS: Вытесненный до ready запрос не получает оценки следующего слова
+PASS: Поздний результат дополняет исходный id после следующей буквы
+PASS: Одинаковое слово другого occurrence не получает evidence
+PASS: Production очередь создаёт и освобождает backend вне main
+PASS: Смена поля того же приложения меняет epoch для того же слова
+PASS: Доступность AX tracking явно доступна
+PASS: Смена PID и остановка освобождают AX регистрации
+PASS: Недоступный AX tracking не выдаёт разрешение assistance
+PASS: Policy Engine сохраняется в evidence до emit
+PASS: Policy не стирает независимое предложение raw scores
+PASS: Реальная policy сохраняет fallback-причину disabled
+PASS: Presenter получает fallback отдельно от предложения и keep disabled
+PASS: Реальная policy сохраняет fallback-причину mismatch
+PASS: Presenter получает fallback отдельно от предложения и keep mismatch
+PASS: Реальная policy сохраняет fallback-причину missing
+PASS: Presenter получает fallback отдельно от предложения и keep missing
+PASS: Реальная policy сохраняет fallback-причину observe
+PASS: Presenter получает fallback отдельно от предложения и keep observe
+PASS: Карантин сохраняет baseline buffer, но запрещает snapshot: фокус другого поля
+PASS: Новое естественное occurrence разрешает observation: фокус другого поля
+PASS: Soft reset с новым id и прежним префиксом также остаётся в карантине: фокус другого поля
+PASS: Полный clear снимает карантин: фокус другого поля
+PASS: Backspace в старое завершённое occurrence не обходит карантин: фокус другого поля
+PASS: Карантин сохраняет baseline buffer, но запрещает snapshot: стрелка при arrowsCancel=false
+PASS: Новое естественное occurrence разрешает observation: стрелка при arrowsCancel=false
+PASS: Soft reset с новым id и прежним префиксом также остаётся в карантине: стрелка при arrowsCancel=false
+PASS: Полный clear снимает карантин: стрелка при arrowsCancel=false
+PASS: Backspace в старое завершённое occurrence не обходит карантин: стрелка при arrowsCancel=false
+PASS: Карантин сохраняет baseline buffer, но запрещает snapshot: смена раскладки
+PASS: Новое естественное occurrence разрешает observation: смена раскладки
+PASS: Soft reset с новым id и прежним префиксом также остаётся в карантине: смена раскладки
+PASS: Полный clear снимает карантин: смена раскладки
+PASS: Backspace в старое завершённое occurrence не обходит карантин: смена раскладки
+PASS: Карантин сохраняет baseline buffer, но запрещает snapshot: смена режима
+PASS: Новое естественное occurrence разрешает observation: смена режима
+PASS: Soft reset с новым id и прежним префиксом также остаётся в карантине: смена режима
+PASS: Полный clear снимает карантин: смена режима
+PASS: Backspace в старое завершённое occurrence не обходит карантин: смена режима
+PASS: Смена процесса того же bundle инвалидирует контекст ровно при смене PID
+57 проверок, 0 ошибок

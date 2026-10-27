@@ -36,3 +36,14 @@ AppKit journal/localization parse and git diff --check: exit 0.
 Full classScores now chooses independent proposal + exact winner score for all nine class winners, preserving refusal separately.
 Legacy explicit conversion direction remains reliable; nil-direction with ambiguous unsupported sum shows unknown with no winner score, while provable RU/EN winner shows keep.
 Tests cover Hebrew winner 0.92 under unsupported/stale/modifiers/editing, all nine winners, ambiguous legacy aggregate and clear legacy keep.
+
+Task 9 review fix: preserve assistance profile fallback in emitted evidence
+Root cause: real policy returns observe for assist with disabled/mismatched/missing profile; runtime only copied blocked policy results, so emitted evidence silently lost quality refusal.
+RED: bash scripts/test-neural-layout.sh integration, exit 1, 57 checks / 6 failures (09-profile-fallback-red.txt).
+GREEN: same command, exit 0, 57 checks / 0 failures (09-profile-fallback-green.txt).
+Regression: settings, exit 0, 13 checks / 0 failures; diagnostics all, exit 0, 295 checks / 0 failures.
+Changed main/preview parse and git diff --check: exit 0.
+Runtime maps recorded observe policy with selected assist to profile refusal, retaining ordinary observe without quality refusal. No fingerprinted policy/type/detector/profile files changed.
+Actual-runtime tests invoke real policy for disabled matching, SHA mismatched and absent profiles, bind current request, emit evidence and inspect Presenter proposal/action/refusal independently. Plain observe is a control case.
+Native preview no longer manually constructs profile-refusal evidence: actual temporary fake runtime invokes real policy, then existing diagnostics correlation writes emitted evidence to the original keep observation. Native assertions require emitted profile refusal, assist selection, opposite proposal and all nine scores before inspecting journal UI.
+Native execution still belongs to Task10 after full build.

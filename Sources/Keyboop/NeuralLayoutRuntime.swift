@@ -202,7 +202,11 @@ final class NeuralLayoutRuntime {
         let direction: Bool? = winner == .ruFromEn ? true : (winner == .enFromRu ? false : nil)
         let unsupported = [.he, .heFromEn, .enFromHe, .heFromRu, .ruFromHe].map { scores[$0] }.reduce(0, +)
         let policyBlock: NeuralLayoutBlock?
-        if case .blocked(let block) = entry.policy { policyBlock = block } else { policyBlock = nil }
+        switch entry.policy {
+        case .blocked(let block): policyBlock = block
+        case .observe where entry.mode == .assist: policyBlock = .profile
+        default: policyBlock = nil
+        }
         var saved = NeuralLayoutEvidence(modelID: modelID, modelSHA256: modelSHA256, mode: entry.mode,
             ru: scores[.ru], en: scores[.en], ruFromEn: scores[.ruFromEn], enFromRu: scores[.enFromRu],
             unsupported: unsupported, durationMs: result.durationMs, proposedCyrillic: direction,

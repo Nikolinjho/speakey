@@ -20,10 +20,17 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" || Proc
     let neuralCheck = ProcessInfo.processInfo.environment["KEYBOOP_NEURAL_PREVIEW_CHECK"] == "1"
     let neuralPresentation = NeuralLayoutPresentationStore()
     if neuralCheck { AppSettings.shared.neuralLayoutMode = .assist }
-    let neuralPreview = NeuralLayoutRuntime(mode: neuralCheck ? .assist : .off, presentation: neuralPresentation, factory: {
+    var neuralPreview: NeuralLayoutRuntime!
+    neuralPreview = NeuralLayoutRuntime(mode: neuralCheck ? .assist : .off, presentation: neuralPresentation, factory: {
         let sha = String(repeating: "a", count: 64)
         let profile = try NeuralLayoutProfile(modelSHA256: sha, enabled: false, minimumScore: 0.99, minimumMargin: 0.5)
         return NeuralLayoutLoadedBackend(backend: PreviewNeuralLayoutBackend(), modelID: "preview", sha256: sha, profile: profile)
+    }, note: { runtime.noteNeuralRequest($0) }, evidence: { request, value in
+        runtime.acceptNeuralResult(request, evidence: value)
+    }, result: { result in
+        let admission = NeuralLayoutAdmission(mode: neuralPreview.mode, modelSHA256: neuralPreview.modelSHA256, profile: neuralPreview.profile,
+            fresh: neuralPreview.isCurrent(result.request), block: nil, wordLength: result.request.word.count, sourceCyrillic: result.request.word == "дд")
+        neuralPreview.recordPolicy(NeuralLayoutPolicy.evaluate(scores: result.scores, admission: admission), for: result.request)
     })
     let neuralObserver = NotificationCenter.default.addObserver(forName: .neuralLayoutModeChanged, object: nil, queue: .main) { _ in
         neuralPreview.setMode(AppSettings.shared.neuralLayoutMode)
@@ -44,11 +51,6 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" || Proc
         typed: "дд", proposed: nil, alternative: missing.alternative, dictionaryMatch: missing.dictionaryMatch,
         path: .boundary, reason: .detectorKeep, action: .keep, submission: .notNeeded,
         isCompleteWord: true, uptime: ProcessInfo.processInfo.systemUptime - 60)
-    if neuralCheck {
-        oldObservation.neural = NeuralLayoutEvidence(modelID: "preview", modelSHA256: String(repeating: "a", count: 64), mode: .assist,
-            ru: 0.01, en: 0.01, ruFromEn: 0.01, enFromRu: 0.96, unsupported: 0.01, durationMs: 1,
-            proposedCyrillic: false, block: .profile, disagreesWithDetector: true)
-    }
     oldObservation.recordedAt = Date().addingTimeInterval(-60)
     store.recordObservation(oldObservation)
     let punctuation = facts("[kt,")

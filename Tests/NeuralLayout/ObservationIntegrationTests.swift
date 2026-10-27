@@ -118,6 +118,7 @@ enum ObservationIntegrationTests: DiagnosticSuite {
         checkLifetime(t)
         checkFocus(t)
         checkPolicyEvidence(t)
+        checkProfileFallbackEvidence(t)
         checkRetainedOccurrence(t)
     }
     private static func wait(_ ready: () -> Bool) -> Bool {
@@ -246,6 +247,41 @@ enum ObservationIntegrationTests: DiagnosticSuite {
         t.check("Policy не стирает независимое предложение raw scores", saved?.proposedCyrillic == true && runtime.modelSHA256 == String(repeating: "d", count: 64))
         runtime.stop()
         runtime = nil
+    }
+
+    private static func checkProfileFallbackEvidence(_ t: DiagnosticTests) {
+        let sha = String(repeating: "a", count: 64)
+        let disabled = try! NeuralLayoutProfile(modelSHA256: sha, enabled: false, minimumScore: 0.99, minimumMargin: 0.5)
+        let mismatch = try! NeuralLayoutProfile(modelSHA256: String(repeating: "b", count: 64), enabled: true, minimumScore: 0.99, minimumMargin: 0.5)
+        for (name, mode, profile) in [("disabled", NeuralLayoutMode.assist, disabled as NeuralLayoutProfile?),
+                                     ("mismatch", .assist, mismatch), ("missing", .assist, nil), ("observe", .observe, disabled)] {
+            let queues = IntegrationQueues()
+            var saved: NeuralLayoutEvidence?
+            var evaluated: NeuralLayoutPolicyResult?
+            var runtime: NeuralLayoutRuntime!
+            runtime = NeuralLayoutRuntime(mode: mode, factory: {
+                NeuralLayoutLoadedBackend(backend: IntegrationBackend(), modelID: "fallback", sha256: sha, profile: profile)
+            }, work: { queues.work.append($0) }, deliver: { queues.delivery.append($0) }, evidence: { _, value in saved = value }, result: { result in
+                let admission = NeuralLayoutAdmission(mode: runtime.mode, modelSHA256: runtime.modelSHA256, profile: runtime.profile,
+                    fresh: runtime.isCurrent(result.request), block: nil, wordLength: result.request.word.count, sourceCyrillic: false)
+                let policy = NeuralLayoutPolicy.evaluate(scores: result.scores, admission: admission)
+                evaluated = policy
+                runtime.recordPolicy(policy, for: result.request)
+            })
+            queues.run(); queues.deliver()
+            let occurrence = UUID()
+            runtime.observe(occurrenceID: occurrence, word: "ghbdtn", bundleID: "editor", layoutCode: "source.id", collecting: true)
+            let request = runtime.request(occurrenceID: occurrence, word: "ghbdtn", bundleID: "editor", layoutCode: "source.id")
+            runtime.bind(request, detectorCyrillic: nil)
+            queues.run(); queues.deliver()
+            let expected: NeuralLayoutBlock? = mode == .assist ? .profile : nil
+            t.check("Реальная policy сохраняет fallback-причину \(name)", evaluated == .observe && saved?.block == expected && saved?.proposedCyrillic == true)
+            let observation = LayoutObservation(occurrenceID: occurrence, contextID: UUID(), bundleID: "editor", typed: "ghbdtn", proposed: nil,
+                neural: saved, path: .boundary, reason: .detectorKeep, action: .keep, submission: .notNeeded, isCompleteWord: true, uptime: 1)
+            let details = LayoutJournalPresenter().neuralDetails(for: observation)
+            t.check("Presenter получает fallback отдельно от предложения и keep \(name)", details?.block == expected && details?.proposal == .ru && details?.action == .keep)
+            runtime.stop(); runtime = nil
+        }
     }
 
     private static func checkRetainedOccurrence(_ t: DiagnosticTests) {

@@ -25,7 +25,7 @@ if [ "$suite" = policy ] || [ "$suite" = all ]; then
     options+=(-D POLICY_TESTS)
 fi
 if [ "$suite" = integration ] || [ "$suite" = all ]; then
-    for name in NeuralLayoutCoordinator NeuralLayoutRuntime NeuralLayoutPresentation NeuralLayoutPolicy NeuralFocusMonitor NeuralOccurrenceFence KeystrokeBuffer KeyboardLayoutCache NeuralLayoutModeSettings NeuralLayoutEvidence NeuralLayoutEvidenceBuffer LayoutDiagnosticsController LayoutFeedbackTracker LayoutJournalStore LayoutObservation Keymap DynamicKeymap LayoutData ExtraWords ExceptionStore LayoutDetector; do
+    for name in NeuralLayoutCoordinator NeuralLayoutRuntime NeuralLayoutPresentation NeuralLayoutPolicy NeuralFocusMonitor NeuralOccurrenceFence KeystrokeBuffer KeyboardLayoutCache NeuralLayoutModeSettings NeuralLayoutEvidence NeuralLayoutEvidenceBuffer LayoutJournalPresenter LayoutDiagnosticsController LayoutFeedbackTracker LayoutJournalStore LayoutObservation Keymap DynamicKeymap LayoutData ExtraWords ExceptionStore LayoutDetector; do
         file="Sources/Keyboop/$name.swift"
         if [[ " ${sources[*]} " != *" $file "* ]]; then sources+=("$file"); fi
     done
