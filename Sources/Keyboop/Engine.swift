@@ -16,7 +16,11 @@ final class Engine: EventTapHandler {
             guard let self, self.diagnostics.enabled, !Pause.active,
                   !self.diagnostics.bypassesJournal(bundleID: self.frontAppBID) else { return }
             self.diagnostics.acceptNeuralResult(request, evidence: evidence)
-        })
+        }, result: { [weak self] result in self?.evaluateNeuralResult(result) })
+    private lazy var neuralFocus = NeuralFocusMonitor(install: AXNeuralFocusSource.install) { [weak self] in
+        self?.invalidateNeuralContext()
+    }
+    var neuralFocusTrackingAvailable: Bool { neuralFocus.available }
     private var neuralModeObserver: NSObjectProtocol?
     private var proposalReason: LayoutReason = .detectorKeep
 
@@ -37,21 +41,33 @@ final class Engine: EventTapHandler {
 
     private func invalidateNeuralContext() { neural.invalidateContext() }
 
+    private func evaluateNeuralResult(_ result: NeuralLayoutResult) {
+        let request = result.request
+        let admission = NeuralLayoutAdmission(mode: neural.mode, modelSHA256: neural.modelSHA256, profile: nil,
+            fresh: neural.session.matches(request, occurrenceID: buffer.currentOccurrenceID,
+                bundleID: frontAppBID, layoutCode: KeyboardLayoutCache.cachedSourceID ?? "", word: buffer.currentWord),
+            block: neuralFocus.available ? nil : .unavailable, wordLength: request.word.count,
+            sourceCyrillic: request.word.hasCyrillic)
+        let policy = NeuralLayoutPolicy.evaluate(scores: result.scores, admission: admission)
+        neural.recordPolicy(policy, for: request)
+    }
+
     private func neuralRequest() -> NeuralLayoutRequest? {
         guard !secureInputWasOn, !Pause.active, neural.mode != .off, !diagnostics.journalEditing,
               frontAppMode != "off", frontAppMode != "soft", !(settings.developerMode && frontAppIsDev),
-              let occurrence = buffer.currentOccurrenceID else { return nil }
+              let occurrence = buffer.currentOccurrenceID, let sourceID = KeyboardLayoutCache.cachedSourceID else { return nil }
         return neural.request(occurrenceID: occurrence, word: buffer.currentWord,
-                              bundleID: frontAppBID, layoutCode: layout.currentIsCyrillicOpinion() ? "RU" : "EN")
+                              bundleID: frontAppBID, layoutCode: sourceID)
     }
 
     private func observeNeuralInput() {
         guard !secureInputWasOn, !Pause.active, neural.mode != .off, !diagnostics.journalEditing,
               !diagnostics.bypassesJournal(bundleID: frontAppBID),
               frontAppMode != "off", frontAppMode != "soft",
-              !(settings.developerMode && frontAppIsDev), let occurrence = buffer.currentOccurrenceID else { return }
+              !(settings.developerMode && frontAppIsDev), let occurrence = buffer.currentOccurrenceID,
+              let sourceID = KeyboardLayoutCache.cachedSourceID else { return }
         neural.observe(occurrenceID: occurrence, word: buffer.currentWord, bundleID: frontAppBID,
-                       layoutCode: layout.currentIsCyrillicOpinion() ? "RU" : "EN", collecting: diagnostics.enabled)
+                       layoutCode: sourceID, collecting: diagnostics.enabled)
     }
 
     private func recordDecision(word: String, proposed: String? = nil, path: LayoutPath,
@@ -904,6 +920,7 @@ final class Engine: EventTapHandler {
     /// пути, а bundle id уже посчитан строкой ниже и стоит ноль.
     private var frontAppBID = ""
     func refreshFrontmostAppCache() {
+        neuralFocus.track(pid: NSWorkspace.shared.frontmostApplication?.processIdentifier)
         let bid = Engine.frontmostBundleID()
         if bid != frontAppBID {
             if bid == diagnostics.ownBundleID { diagnostics.freezeRecent() }

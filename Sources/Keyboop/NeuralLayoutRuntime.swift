@@ -33,11 +33,12 @@ final class NeuralLayoutRuntime {
     private var pending: NeuralLayoutRequest?
     private var generation: UInt64 = 0
     private var modelID = ""
-    private var sha256 = ""
+    private(set) var modelSHA256 = ""
     private struct Entry {
         let mode: NeuralLayoutMode
         var result: NeuralLayoutResult?
         var detector: Bool??
+        var policy: NeuralLayoutPolicyResult?
     }
     private var entries: [NeuralLayoutRequest: Entry] = [:]
     private var order: [NeuralLayoutRequest] = []
@@ -90,7 +91,7 @@ final class NeuralLayoutRuntime {
                     self.pending = nil
                 case .success(let metadata):
                     self.modelID = metadata.0
-                    self.sha256 = metadata.1
+                    self.modelSHA256 = metadata.1
                     self.status = .ready
                     self.coordinator = NeuralLayoutCoordinator(backend: slot, work: self.work, deliver: self.deliver) { [weak self] result in
                         self?.receive(result)
@@ -154,6 +155,11 @@ final class NeuralLayoutRuntime {
         emit(request)
     }
 
+    func recordPolicy(_ policy: NeuralLayoutPolicyResult, for request: NeuralLayoutRequest) {
+        precondition(Thread.isMainThread)
+        entries[request]?.policy = policy
+    }
+
     private func remember(_ request: NeuralLayoutRequest) {
         if entries[request] == nil {
             entries[request] = Entry(mode: mode)
@@ -180,10 +186,12 @@ final class NeuralLayoutRuntime {
         let winner = NeuralLayoutClass.allCases.max { scores[$0] < scores[$1] }!
         let direction: Bool? = winner == .ruFromEn ? true : (winner == .enFromRu ? false : nil)
         let unsupported = [.he, .heFromEn, .enFromHe, .heFromRu, .ruFromHe].map { scores[$0] }.reduce(0, +)
-        evidence(request, NeuralLayoutEvidence(modelID: modelID, modelSHA256: sha256, mode: entry.mode,
+        let policyBlock: NeuralLayoutBlock?
+        if case .blocked(let block) = entry.policy { policyBlock = block } else { policyBlock = nil }
+        evidence(request, NeuralLayoutEvidence(modelID: modelID, modelSHA256: modelSHA256, mode: entry.mode,
             ru: scores[.ru], en: scores[.en], ruFromEn: scores[.ruFromEn], enFromRu: scores[.enFromRu],
             unsupported: unsupported, durationMs: result.durationMs, proposedCyrillic: direction,
-            block: !isCurrent(request) ? .stale : ([NeuralLayoutClass.he, .heFromEn, .enFromHe, .heFromRu, .ruFromHe].contains(winner) ? .unsupported : nil),
+            block: policyBlock ?? (!isCurrent(request) ? .stale : ([NeuralLayoutClass.he, .heFromEn, .enFromHe, .heFromRu, .ruFromHe].contains(winner) ? .unsupported : nil)),
             disagreesWithDetector: direction != detector))
         entries.removeValue(forKey: request)
         order.removeAll { $0 == request }

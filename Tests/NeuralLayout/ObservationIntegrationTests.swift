@@ -28,6 +28,7 @@ private final class LifetimeBackend: NeuralLayoutBackend {
 enum ObservationIntegrationTests: DiagnosticSuite {
     static let name = "integration"
     static func run(_ t: DiagnosticTests) {
+        t.check("Незаполненный layout cache не читает системную раскладку", KeyboardLayoutCache.cachedSourceID == nil)
         let domain = "keyboop-integration-\(UUID())"
         let defaults = UserDefaults(suiteName: domain)!
         defer { defaults.removePersistentDomain(forName: domain) }
@@ -104,6 +105,8 @@ enum ObservationIntegrationTests: DiagnosticSuite {
         runtime.stop()
         checkJournal(t)
         checkLifetime(t)
+        checkFocus(t)
+        checkPolicyEvidence(t)
     }
     private static func wait(_ ready: () -> Bool) -> Bool {
         let limit = Date().addingTimeInterval(5)
@@ -184,4 +187,53 @@ enum ObservationIntegrationTests: DiagnosticSuite {
         t.check("Одинаковое слово другого occurrence не получает evidence", snapshot?.observations.first(where: { $0.id == observation.id })?.neural == nil)
         runtime.stop()
     }
+    private static func checkFocus(_ t: DiagnosticTests) {
+        let queues = IntegrationQueues()
+        let runtime = NeuralLayoutRuntime(mode: .observe, factory: {
+            NeuralLayoutLoadedBackend(backend: IntegrationBackend(), modelID: "focus", sha256: String(repeating: "a", count: 64))
+        }, work: { queues.work.append($0) }, deliver: { queues.delivery.append($0) })
+        var changed: (() -> Void)?
+        var cancelled = 0
+        let focus = NeuralFocusMonitor(install: { _, callback in
+            changed = callback
+            return { cancelled += 1 }
+        }, changed: { runtime.invalidateContext() })
+        focus.track(pid: 123)
+        let request = runtime.request(occurrenceID: UUID(), word: "same", bundleID: "editor", layoutCode: "source.id")
+        changed?()
+        t.check("Смена поля того же приложения меняет epoch для того же слова", runtime.session.epoch != request.epoch && !runtime.isCurrent(request))
+        t.check("Доступность AX tracking явно доступна", focus.available)
+        focus.track(pid: 456)
+        focus.stop()
+        t.check("Смена PID и остановка освобождают AX регистрации", cancelled == 2 && !focus.available)
+        let unavailable = NeuralFocusMonitor(install: { _, _ in nil }, changed: {})
+        unavailable.track(pid: 123)
+        t.check("Недоступный AX tracking не выдаёт разрешение assistance", !unavailable.available)
+        runtime.stop()
+    }
+
+    private static func checkPolicyEvidence(_ t: DiagnosticTests) {
+        let queues = IntegrationQueues()
+        var saved: NeuralLayoutEvidence?
+        var runtime: NeuralLayoutRuntime!
+        runtime = NeuralLayoutRuntime(mode: .observe, factory: {
+            NeuralLayoutLoadedBackend(backend: IntegrationBackend(), modelID: "policy", sha256: String(repeating: "d", count: 64))
+        }, work: { queues.work.append($0) }, deliver: { queues.delivery.append($0) },
+        evidence: { _, evidence in saved = evidence }, result: { result in
+            let admission = NeuralLayoutAdmission(mode: .assist, modelSHA256: runtime.modelSHA256, profile: nil,
+                fresh: true, block: .editing, wordLength: result.request.word.count, sourceCyrillic: false)
+            runtime.recordPolicy(NeuralLayoutPolicy.evaluate(scores: result.scores, admission: admission), for: result.request)
+        })
+        queues.run(); queues.deliver()
+        let occurrence = UUID()
+        runtime.observe(occurrenceID: occurrence, word: "ghbdtn", bundleID: "editor", layoutCode: "source.id", collecting: true)
+        let request = runtime.request(occurrenceID: occurrence, word: "ghbdtn", bundleID: "editor", layoutCode: "source.id")
+        runtime.bind(request, detectorCyrillic: nil)
+        queues.run(); queues.deliver()
+        t.check("Policy Engine сохраняется в evidence до emit", saved?.block == .editing)
+        t.check("Policy не стирает независимое предложение raw scores", saved?.proposedCyrillic == true && runtime.modelSHA256 == String(repeating: "d", count: 64))
+        runtime.stop()
+        runtime = nil
+    }
+
 }

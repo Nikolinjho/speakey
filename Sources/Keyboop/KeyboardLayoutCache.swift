@@ -23,6 +23,11 @@ enum KeyboardLayoutCache {
     private static var lock = os_unfair_lock_s()
     private static var blob: Data?
     private static var kbdType: UInt32 = 0
+    private static var sourceID: String?
+    static var cachedSourceID: String? {
+        os_unfair_lock_lock(&lock); defer { os_unfair_lock_unlock(&lock) }
+        return sourceID
+    }
     /// ТОЛЬКО с главного потока. Звать при старте и на ВНЕШНЮЮ смену раскладки (TIS-уведомление).
     /// ⚠️ НЕ звать сразу после НАШЕГО TISSelect: чтение «текущего» источника в этот момент
     /// возвращает СТАРЫЙ (стейл-баг kawa PR#21) — кэш заряжался старьём, и сверка алфавитов
@@ -39,6 +44,12 @@ enum KeyboardLayoutCache {
     /// ноль чтений «текущего», значит ноль шансов на стейл.
     @discardableResult
     static func refresh(fromSelected src: TISInputSource) -> Bool {
+        let identity = TISGetInputSourceProperty(src, kTISPropertyInputSourceID).map {
+            Unmanaged<CFString>.fromOpaque($0).takeUnretainedValue() as String
+        }
+        os_unfair_lock_lock(&lock)
+        sourceID = identity
+        os_unfair_lock_unlock(&lock)
         guard let p = TISGetInputSourceProperty(src, kTISPropertyUnicodeKeyLayoutData) else { return false }
         let cf = Unmanaged<CFData>.fromOpaque(p).takeUnretainedValue()
         // ГЛУБОКАЯ копия байтов (ревью research 24.07): Get-семантика — CFData живёт, пока жив
