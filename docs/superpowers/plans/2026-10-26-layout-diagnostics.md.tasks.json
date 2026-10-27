@@ -150,7 +150,7 @@
         "detector": "42 checks, 0 failures, real dictionaries, parent independently verified",
         "native": "22 actual AppKit checks, 0 failures; parent reran final renamed artifact, exit0",
         "build": "full optimized build exit0; final Keyboop_local.app codesign --verify --deep --strict exit0",
-        "artifact": "/Users/itsnikoko/tools/keyboop-layout-diagnostics/Keyboop_local.app",
+        "artifact": "/Users/itsnikoko/keybop local/Keyboop_local.app",
         "bundleID": "ru.keyboop.app.dev",
         "appName": "Keyboop_local",
         "offline": "6 checks, 0 failures",
@@ -161,11 +161,12 @@
       "completionScope": "Реализация, автоматизированная проверка ядра и настоящих нативных контролов, сборка и подпись. Физическая проверка ввода вынесена в отдельный ручной этап ниже."
     }
   ],
-  "lastUpdated": "2026-10-26T19:26:38.717834+03:00",
+  "lastUpdated": "2026-10-27T10:18:00.076619+03:00",
   "implementationNotes": {
-    "workspace": "/Users/itsnikoko/tools/keyboop-layout-diagnostics",
+    "workspace": "/Users/itsnikoko/keybop local",
     "branch": "feat/layout-diagnostics",
-    "userSteering": "26.10.2026: реализовать в дизайне и навигации текущего приложения. Вместо отдельного окна журнала добавить SettingsSection.layoutJournal и вынести экран в отдельный LayoutJournalView, сохранив тонкий host в DetailVC."
+    "userSteering": "26.10.2026: реализовать в дизайне и навигации текущего приложения. Вместо отдельного окна журнала добавить SettingsSection.layoutJournal и вынести экран в отдельный LayoutJournalView, сохранив тонкий host в DetailVC.",
+    "relocation": "27.10.2026: git worktree move по просьбе пользователя. Основной Git-репозиторий остаётся в /Users/itsnikoko/tools/keyboop."
   },
   "manualValidation": {
     "status": "pending",
