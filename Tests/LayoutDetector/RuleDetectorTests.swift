@@ -76,6 +76,21 @@ enum RuleDetectorTests {
             t.check("Настоящий детектор сохраняет force цели: \(source)", LayoutDetector.decide(word: source, exceptions: exceptions) == .convert(toCyrillic: !source.hasCyrillic))
             exceptions.removeForceSwap(target)
         }
+        for suffix in ["ю", "б", "ж", "юбж"] {
+            let raw = "руддщ" + suffix
+            exceptions.addIgnored("руддщ")
+            t.check("Ignored сохраняет ядро перед знаком другой раскладки: \(raw)", LayoutDetector.decide(word: raw, exceptions: exceptions) == .keep && neuralBlocked(raw))
+            exceptions.removeIgnored("руддщ")
+            exceptions.addLearned("руддщ")
+            t.check("Learned сохраняет ядро перед знаком другой раскладки: \(raw)", LayoutDetector.decide(word: raw, exceptions: exceptions) == .keep && neuralBlocked(raw))
+            exceptions.removeLearned("руддщ")
+            exceptions.addForceSwap("руддщ")
+            t.check("Force исходника сохраняется перед знаком другой раскладки: \(raw)", LayoutDetector.decide(word: raw, exceptions: exceptions) == .keep && neuralBlocked(raw))
+            exceptions.removeForceSwap("руддщ")
+            exceptions.addForceSwap("hello")
+            t.check("Force цели сохраняется перед знаком другой раскладки: \(raw)", LayoutDetector.decide(word: raw, exceptions: exceptions) == .convert(toCyrillic: false) && neuralBlocked(raw))
+            exceptions.removeForceSwap("hello")
+        }
         for saved in ["ghbdtn", "1ghbdtn", "ghbdtn.", ":ghbdtn"] {
             exceptions.addIgnored(saved)
             t.check("Сохраняется полная пользовательская защита: \(saved)", neuralBlocked(saved.uppercased()))

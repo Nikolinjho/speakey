@@ -80,6 +80,9 @@ enum LayoutDetector {
         let cyrillic = word.hasCyrillic
         guard cyrillic != word.hasLatinLetter else { return false }
         let swapped = Keymap.convert(word, toCyrillic: !cyrillic).lowercased()
+        if let trimmed = coreBeforeMappedTrailingPunctuation(word, swapped: swapped) {
+            return trimmed.isEmpty || neuralRuleBlock(word: trimmed, exceptions: exceptions)
+        }
         // Force выбирает победителя пары. Ни исходное, ни целевое намерение модель не меняет.
         if exceptions.forceSwap.contains(word) || exceptions.forceSwap.contains(swapped) { return true }
         if forceSwap.contains(word) || (!cyrillic && ExtraWords.techLatinTokens.contains(word)) { return true }
@@ -88,6 +91,19 @@ enum LayoutDetector {
         let sourceIsReal = data.wordsRu.contains(word) || data.wordsEn.contains(word)
             || (deElongated(word)?.contains { data.wordsRu.contains($0) || data.wordsEn.contains($0) } ?? false)
         return word.count >= 2 && sourceIsReal && !(!cyrillic && ExtraWords.forceRuAmb.contains(word))
+    }
+
+    /// Концевые буквы ошибочной RU-раскладки могут означать пунктуацию EN-токена.
+    private static func coreBeforeMappedTrailingPunctuation(_ core: String, swapped: String) -> String? {
+        guard core.hasCyrillic, !LayoutData.shared.wordsRu.contains(core.lowercased()),
+              let last = swapped.last, Keymap.trailingPunctuation.contains(last) else { return nil }
+        var trimmed = Substring(core)
+        while let last = trimmed.last,
+              let mapped = Keymap.convert(String(last), toCyrillic: false).last,
+              Keymap.trailingPunctuation.contains(mapped) {
+            trimmed = trimmed.dropLast()
+        }
+        return String(trimmed)
     }
 
     static let margin = 2.0
@@ -554,16 +570,9 @@ enum LayoutDetector {
         // strict-gate, только на уровень выше: «муж», «зуб», «штаб» тоже оканчиваются на «ж» и «б»,
         // и без этой проверки рекурсия судила по огрызку («му», «зу», «шта») и honestly ломала их.
         // Замерено: без неё 3 ложных срабатывания на 20 словах, с ней ноль.
-        if sourceCyrillic, !LayoutData.shared.wordsRu.contains(w),
-           let last = swapped.last, Keymap.trailingPunctuation.contains(last) {
-            var trimmed = Substring(coreRaw)
-            while let l = trimmed.last,
-                  let mapped = Keymap.convert(String(l), toCyrillic: false).last,
-                  Keymap.trailingPunctuation.contains(mapped) {
-                trimmed = trimmed.dropLast()
-            }
+        if let trimmed = Self.coreBeforeMappedTrailingPunctuation(coreRaw, swapped: swapped) {
             guard !trimmed.isEmpty else { return .keep }
-            return decide(word: String(trimmed), exceptions: exceptions, prev: prev, earlier: earlier,
+            return decide(word: trimmed, exceptions: exceptions, prev: prev, earlier: earlier,
                           afterCaretJump: afterCaretJump)
         }
         guard swapped != w, swapped.allSatisfy({ $0.isLetter || $0 == "'" }) else { return .keep }
