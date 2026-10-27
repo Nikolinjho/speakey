@@ -20,6 +20,34 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
     runtime.controller.addManualCase(typed: "ghbdtn", expected: "привет", bundleID: "com.apple.TextEdit", kind: .missedConversion)
     runtime.controller.addManualCase(typed: "ghbdtn", expected: "привёт", bundleID: "com.apple.TextEdit", kind: .missedConversion)
     runtime.controller.addManualCase(typed: "hello", expected: "hello", bundleID: "com.apple.Safari", kind: .unwantedConversion)
+    // Настоящие факты из встроенных словарей и текущей таблицы клавиатуры.
+    let data = LayoutData.shared
+    func facts(_ typed: String) -> LayoutObservationFacts {
+        LayoutObservationFacts.evaluate(typed, wordsRu: data.wordsRu, wordsEn: data.wordsEn) {
+            Keymap.convert($0, toCyrillic: $1)
+        }
+    }
+    let missing = facts("дд")
+    var oldObservation = LayoutObservation(occurrenceID: UUID(), contextID: UUID(), bundleID: "com.apple.TextEdit",
+        typed: "дд", proposed: nil, alternative: missing.alternative, dictionaryMatch: missing.dictionaryMatch,
+        path: .boundary, reason: .detectorKeep, action: .keep, submission: .notNeeded,
+        isCompleteWord: true, uptime: ProcessInfo.processInfo.systemUptime - 60)
+    oldObservation.recordedAt = Date().addingTimeInterval(-60)
+    store.recordObservation(oldObservation)
+    let punctuation = facts("[kt,")
+    if let replacement = runtime.controller.record(occurrenceID: UUID(), bundleID: "com.apple.TextEdit", typed: "[kt,",
+        proposed: punctuation.alternative, alternative: punctuation.alternative, dictionaryMatch: punctuation.dictionaryMatch,
+        path: .boundary, reason: .detectorConvert, action: .replace, complete: true) {
+        runtime.controller.submission(observationID: replacement.id, contextID: replacement.contextID, submitted: true)
+    }
+    let unknown = facts("жжжж")
+    runtime.controller.record(occurrenceID: UUID(), bundleID: "com.apple.TextEdit", typed: "жжжж", proposed: nil,
+        alternative: unknown.alternative, dictionaryMatch: unknown.dictionaryMatch,
+        path: .boundary, reason: .detectorKeep, action: .keep, complete: true)
+    let blocked = facts("hello")
+    runtime.controller.record(occurrenceID: UUID(), bundleID: "com.apple.Safari", typed: "hello", proposed: nil,
+        alternative: blocked.alternative, dictionaryMatch: blocked.dictionaryMatch,
+        path: .boundary, reason: .appDisabled, action: .blocked, complete: true)
     var previewWindow: SettingsWindowController?
     // Ограничивает также ожидание начальной загрузки и отрисовки.
     if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW_INTERACTIVE"] != "1" ||
@@ -48,7 +76,7 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
             if environment["KEYBOOP_JOURNAL_PREVIEW_CHECK"] == "1", let window = previewWindow {
                 Task { @MainActor in
                     var status: Int32 = 0
-                    do { _ = try await LayoutJournalPreviewCheck.run(window: window, runtime: runtime) }
+                    do { _ = try await LayoutJournalPreviewCheck.run(window: window, runtime: runtime, directory: directory) }
                     catch { fputs("FAIL: \(error)\n", stderr); status = 1 }
                     defaults.removePersistentDomain(forName: suite)
                     try? FileManager.default.removeItem(at: directory)

@@ -6,7 +6,7 @@ enum LayoutJournalPreviewCheck {
     struct Failure: Error, CustomStringConvertible {
         let description: String
     }
-    static func run(window: SettingsWindowController, runtime: LayoutDiagnosticsRuntime) async throws -> Int {
+    static func run(window: SettingsWindowController, runtime: LayoutDiagnosticsRuntime, directory: URL) async throws -> Int {
         var count = 0
         func check(_ name: String, _ value: Bool) throws {
             guard value else { throw Failure(description: name) }
@@ -49,12 +49,58 @@ enum LayoutJournalPreviewCheck {
         UpdaterController.shared.checkNow()
         UpdaterController.shared.automaticChecks = true
         try check("Ручная проверка и KEYBOOP_UPDATER не включают обновления", !UpdaterController.shared.automaticChecks)
+        let decisions = await snapshot()
+        let stream = try control("journal.stream", NSSegmentedControl.self)
+        func selectStream(_ index: Int) {
+            stream.selectedSegment = index
+            _ = stream.sendAction(stream.action, to: stream.target)
+        }
+        func observationRows() -> Int {
+            allViews().filter { $0.accessibilityIdentifier().hasPrefix("journal.observation.") == true && $0 is NSButton }.count
+        }
+        try check("По умолчанию видны четыре сохранённых решения", stream.selectedSegment == 0 && decisions.observations.count == 4 && observationRows() == 4)
+        try select("journal.filter.dictionary", LayoutDictionaryMatch.allCases.firstIndex(of: .neither)! + 1)
+        try check("Настоящий фильтр словаря показывает жжжж без совпадений", observationRows() == 1 && decisions.observations.contains { $0.typed == "жжжж" && $0.alternative == ";;;;" && $0.dictionaryMatch == .neither })
+        try select("journal.filter.dictionary", 0)
+        try check("Пунктуация сохранена с подтверждённой заменой", decisions.observations.contains { $0.typed == "[kt," && $0.proposed == "хлеб" && $0.dictionaryMatch == .alternative && $0.submission == .submitted })
+        let reopened = LayoutJournalStore(directory: directory)
+        let disk = await withCheckedContinuation { continuation in reopened.snapshot { continuation.resume(returning: $0) } }
+        guard let old = disk.observations.first(where: { $0.typed == "дд" }) else { throw Failure(description: "Нет решения на диске") }
+        try check("Старое решение переживает открытие хранилища без временной связи", ProcessInfo.processInfo.systemUptime - old.uptime > 10 && !runtime.recent.contains { $0.id == old.id })
+        try click("journal.observation.\(old.id)")
+        let expectation = try control("journal.observation.expected", NSTextField.self)
+        expectation.stringValue = "ll"
+        try click("journal.observation.mark")
+        await settle()
+        let marked = await snapshot()
+        try check("Нативная отметка старого решения создаёт один кейс", marked.cases.contains { $0.typed == "дд" && $0.expected == "ll" && $0.count == 1 } && marked.markedObservationIDs.contains(old.id))
+        runtime.controller.mark(observation: old, expected: "ll", kind: .missedConversion)
+        await settle()
+        let duplicate = await snapshot()
+        try check("Повторная отметка не увеличивает счётчик", duplicate.cases.first { $0.typed == "дд" }?.count == 1)
+        let buffer = KeystrokeBuffer()
+        buffer.append("дд")
+        let sourceID = buffer.currentOccurrenceID!
+        let converted = Keymap.convert("дд", toCyrillic: false)
+        guard let retyped = runtime.controller.record(occurrenceID: sourceID, bundleID: "com.apple.TextEdit", typed: "дд", proposed: nil, alternative: converted, path: .editing, reason: .editingObserved, action: .keep, complete: false) else { throw Failure(description: "Не записан пропуск") }
+        for _ in 0..<2 {
+            buffer.backspace()
+            runtime.controller.observeRetyping(occurrenceID: buffer.retypingOccurrenceID ?? buffer.currentOccurrenceID, current: buffer.currentWord)
+        }
+        for letter in converted {
+            buffer.append(String(letter))
+            runtime.controller.observeRetyping(occurrenceID: buffer.retypingOccurrenceID ?? buffer.currentOccurrenceID, current: buffer.currentWord)
+        }
+        await settle()
+        let corrected = await snapshot()
+        try check("Буфер и Keymap сохраняют пропуск дд в ll после удаления и перепечатывания", converted == "ll" && Keymap.convert(converted, toCyrillic: true) == "дд" && corrected.observations.contains { $0.id == retyped.id } && corrected.cases.contains { $0.evidence.contains { $0.observationID == retyped.id && $0.source == .retype } })
+        selectStream(1)
         let initial = await snapshot()
         guard let item = initial.cases.first(where: { $0.typed == "ghbdtn" && $0.expected == "привет" }) else {
             throw Failure(description: "Нет исходного кандидата")
         }
-        try check("Исходные три кандидата без активных правил", initial.cases.count == 3 && initial.rules.isEmpty && initial.cases.allSatisfy { $0.status == .candidate })
-        try check("Видны три настоящие строки", rowCount() == 3)
+        try check("Исходные пять кандидатов без активных правил", initial.cases.count == 5 && initial.rules.isEmpty && initial.cases.allSatisfy { $0.status == .candidate })
+        try check("Видны пять настоящих строк", rowCount() == 5)
         try select("journal.filter.kind", 2)
         try check("Фильтр вида оставляет одну строку", rowCount() == 1)
         try select("journal.filter.kind", 0)
@@ -62,7 +108,7 @@ enum LayoutJournalPreviewCheck {
         try check("Фильтр приложения оставляет Safari", rowCount() == 1)
         try select("journal.filter.app", 0)
         try select("journal.filter.sort", 1)
-        try check("Сортировка сохраняет три строки", rowCount() == 3)
+        try check("Сортировка сохраняет пять строк", rowCount() == 5)
         try click("journal.case.\(item.id)")
         try check("Кандидат нельзя применить", !(try control("journal.apply.keep", NSButton.self)).isEnabled && !(try control("journal.apply.force", NSButton.self)).isEnabled)
         try edit("ghbdtn")
@@ -116,7 +162,7 @@ enum LayoutJournalPreviewCheck {
         await settle()
         let cleared = await snapshot()
         try check("Подтверждена настоящая модальная очистка", clickedModal)
-        try check("Очистка убирает кейсы и временные следы", cleared.cases.isEmpty && runtime.recent.isEmpty && runtime.frozenRecent.isEmpty)
+        try check("Очистка убирает кейсы и временные следы", cleared.cases.isEmpty && cleared.observations.isEmpty && runtime.recent.isEmpty && runtime.frozenRecent.isEmpty)
         try check("После очистки правило остаётся видимым", cleared.rules.contains { $0.status == .active } && (try control("journal.remove", NSButton.self)).isEnabled && rowCount() == 0)
         try click("journal.remove")
         await settle()
