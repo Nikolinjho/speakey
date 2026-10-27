@@ -1,0 +1,36 @@
+
+functionName: (null)
+inputs: (
+    "input_ids : MultiArray (Float32, 1 \U00d7 20)"
+)
+outputs: (
+    "classLogits : MultiArray (Float32, )"
+)
+states: (
+)
+predictedFeatureName: (null)
+predictedProbabilitiesName: (null)
+classLabels: (null)
+updatable: NO
+trainingInputs: (
+)
+parameters: (
+)
+metadata: {
+    MLModelAuthorKey = "OMFK Agent";
+    MLModelCreatorDefinedKey =     {
+        classes = "ru,en,he,ru_from_en,he_from_en,en_from_ru,en_from_he,he_from_ru,ru_from_he";
+        "com.github.apple.coremltools.conversion_date" = "2025-12-22";
+        "com.github.apple.coremltools.source" = "torch==2.9.1";
+        "com.github.apple.coremltools.source_dialect" = TorchScript;
+        "com.github.apple.coremltools.version" = "9.0";
+        "input_length" = 20;
+        "model_version" = ensemble;
+        parameters = 3462292;
+    };
+    MLModelDescriptionKey = "Layout Classifier (ensemble, INPUT_LENGTH=20)";
+    MLModelLicenseKey = "";
+    MLModelVersionStringKey = "";
+}
+classLogits = MultiArray : Float32 1 × 9 matrix
+  [0.5167965,0.3318186,0.2217048,-0.1503746,-0.3631068,-0.3650792,-0.3201068,-0.3923799,-0.1768767]
