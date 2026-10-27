@@ -9,7 +9,7 @@ final class Engine: EventTapHandler {
     private let buffer = KeystrokeBuffer()
     private let eventTap = EventTap()
     private let diagnostics = LayoutDiagnosticsRuntime.shared
-    private lazy var neural = NeuralLayoutRuntime(mode: settings.neuralLayoutMode,
+    private lazy var neural = NeuralLayoutRuntime(mode: settings.neuralLayoutMode, presentation: .shared,
         factory: { try RightLayoutRuntimeFactory.load() },
         note: { [weak self] in self?.diagnostics.noteNeuralRequest($0) },
         evidence: { [weak self] request, evidence in

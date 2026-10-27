@@ -1,0 +1,28 @@
+Task 9 verification
+bash scripts/test-neural-layout.sh settings: exit 0; 13 checks, 0 failures.
+bash scripts/test-layout-diagnostics.sh all: exit 0; 280 checks, 0 failures.
+bash scripts/test-neural-layout.sh integration: exit 0; 49 checks, 0 failures.
+Scoped AppKit settings-view typecheck: exit 0; temporary AppSettings/L10n/error declarations only.
+Changed AppKit settings/window/journal-preview/main/localization parse: exit 0.
+git diff --check: exit 0.
+
+RED evidence
+09-settings-red.txt: 7 checks, 1 actual failure (SHA-mismatched profile accepted).
+09-presenter-red.txt: missing neuralDetails API compiler failure.
+09-export-red.txt: 49 checks, 1 actual failure (nine original scores absent from JSON).
+
+Self-review
+Production status comes from Engine-owned runtime into readonly presentation snapshots; the store creates no runtime or model.
+Preview passes an isolated store to window, uses temporary defaults/journal and fake backend; no Engine/AppDelegate/event tap construction.
+Off releases backend using existing worker flow and publishes off; selection changes keep diagnostics collecting independent.
+Assist remains disabled for shipped disabled profile; persisted assist remains selected while effective observe and quality reason are visible.
+Journal actual action/submission come from observation, independently of model proposal/block/score; missing neural evidence produces no empty headers.
+Optional classScores records all nine stable class keys, validates finite values in [0,1], and leaves older evidence readable. Existing journal metadata/write invariants pass.
+Fingerprint-sensitive detector/types/policy/keymap/model/profile unchanged.
+
+Deferred to Task10
+No full build, normal app launch, install, push, or /Applications changes performed.
+Native checks prepared but not executed without Task10 build.
+KEYBOOP_NEURAL_PREVIEW_CHECK=1 runs isolated native assertions. Reuse KEYBOOP_JOURNAL_PREVIEW_LIGHT=1 for light appearance.
+Optional screenshot paths: KEYBOOP_NEURAL_PREVIEW_SETTINGS_PNG and KEYBOOP_NEURAL_PREVIEW_JOURNAL_PNG.
+Original KEYBOOP_JOURNAL_PREVIEW_CHECK path remains available with original four-observation fixture.

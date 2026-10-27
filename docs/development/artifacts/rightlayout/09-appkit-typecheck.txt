@@ -1,0 +1,3 @@
+swiftc -swift-version 5 -typecheck NeuralLayoutTypes.swift NeuralLayoutCoordinator.swift NeuralLayoutPolicy.swift NeuralLayoutEvidence.swift NeuralLayoutPresentation.swift NeuralLayoutRuntime.swift NeuralLayoutModeSettings.swift NeuralLayoutSettingsView.swift /tmp/keyboop-task9-ui-stubs.swift
+exit 0, no diagnostics
+Scoped AppKit view typecheck with temporary AppSettings, L10n and LayoutJournalError declarations. Full application compilation and native execution belong to Task10.

@@ -1,0 +1,47 @@
+Tests/LayoutDiagnostics/PresenterTests.swift:28:96: error: value of type 'LayoutJournalPresenter' has no member 'neuralDetails'
+26 |         b.evidence[0].observation.isCompleteWord = false
+27 |         tests.check("Нейрозамена части слова доступна только для ревью", presenter.allowedActions(for: b) == [.review])
+28 |         tests.check("Без evidence нет пустого блока модели", presenter.neuralDetails(for: observation) == nil)
+   |                                                                        `- error: value of type 'LayoutJournalPresenter' has no member 'neuralDetails'
+29 |         observation.neural = NeuralLayoutEvidence(modelID: "fixture", modelSHA256: String(repeating: "a", count: 64), mode: .observe,
+30 |             ru: 0, en: 0, ruFromEn: 0.97, enFromRu: 0.01, unsupported: 0.02, durationMs: 2,
+
+Tests/LayoutDiagnostics/PresenterTests.swift:32:33: error: value of type 'LayoutJournalPresenter' has no member 'neuralDetails'
+30 |             ru: 0, en: 0, ruFromEn: 0.97, enFromRu: 0.01, unsupported: 0.02, durationMs: 2,
+31 |             proposedCyrillic: true, block: .profile, disagreesWithDetector: true)
+32 |         let details = presenter.neuralDetails(for: observation)
+   |                                 `- error: value of type 'LayoutJournalPresenter' has no member 'neuralDetails'
+33 |         tests.check("Предложение модели не заменяет фактическое keep", details?.proposedCyrillic == true && details?.action == .keep && details?.submission == .notNeeded)
+34 |         tests.check("Причина отказа и оценка доступны отдельно", details?.block == .profile && details?.score == 0.97 && details?.reason == .detectorKeep)
+
+Tests/LayoutDiagnostics/PresenterTests.swift:33:167: error: cannot infer contextual base in reference to member 'keep'
+31 |             proposedCyrillic: true, block: .profile, disagreesWithDetector: true)
+32 |         let details = presenter.neuralDetails(for: observation)
+33 |         tests.check("Предложение модели не заменяет фактическое keep", details?.proposedCyrillic == true && details?.action == .keep && details?.submission == .notNeeded)
+   |                                                                                                                                 `- error: cannot infer contextual base in reference to member 'keep'
+34 |         tests.check("Причина отказа и оценка доступны отдельно", details?.block == .profile && details?.score == 0.97 && details?.reason == .detectorKeep)
+35 |         var older = observation; older.recordedAt = Date(timeIntervalSince1970: 1)
+
+Tests/LayoutDiagnostics/PresenterTests.swift:33:199: error: cannot infer contextual base in reference to member 'notNeeded'
+31 |             proposedCyrillic: true, block: .profile, disagreesWithDetector: true)
+32 |         let details = presenter.neuralDetails(for: observation)
+33 |         tests.check("Предложение модели не заменяет фактическое keep", details?.proposedCyrillic == true && details?.action == .keep && details?.submission == .notNeeded)
+   |                                                                                                                                                                 `- error: cannot infer contextual base in reference to member 'notNeeded'
+34 |         tests.check("Причина отказа и оценка доступны отдельно", details?.block == .profile && details?.score == 0.97 && details?.reason == .detectorKeep)
+35 |         var older = observation; older.recordedAt = Date(timeIntervalSince1970: 1)
+
+Tests/LayoutDiagnostics/PresenterTests.swift:34:121: error: cannot infer contextual base in reference to member 'profile'
+32 |         let details = presenter.neuralDetails(for: observation)
+33 |         tests.check("Предложение модели не заменяет фактическое keep", details?.proposedCyrillic == true && details?.action == .keep && details?.submission == .notNeeded)
+34 |         tests.check("Причина отказа и оценка доступны отдельно", details?.block == .profile && details?.score == 0.97 && details?.reason == .detectorKeep)
+   |                                                                                     `- error: cannot infer contextual base in reference to member 'profile'
+35 |         var older = observation; older.recordedAt = Date(timeIntervalSince1970: 1)
+36 |         var latest = observation; latest.id = UUID(); latest.recordedAt = Date(timeIntervalSince1970: 2); latest.bundleID = "other"; latest.dictionaryMatch = .neither
+
+Tests/LayoutDiagnostics/PresenterTests.swift:34:178: error: cannot infer contextual base in reference to member 'detectorKeep'
+32 |         let details = presenter.neuralDetails(for: observation)
+33 |         tests.check("Предложение модели не заменяет фактическое keep", details?.proposedCyrillic == true && details?.action == .keep && details?.submission == .notNeeded)
+34 |         tests.check("Причина отказа и оценка доступны отдельно", details?.block == .profile && details?.score == 0.97 && details?.reason == .detectorKeep)
+   |                                                                                                                                              `- error: cannot infer contextual base in reference to member 'detectorKeep'
+35 |         var older = observation; older.recordedAt = Date(timeIntervalSince1970: 1)
+36 |         var latest = observation; latest.id = UUID(); latest.recordedAt = Date(timeIntervalSince1970: 2); latest.bundleID = "other"; latest.dictionaryMatch = .neither

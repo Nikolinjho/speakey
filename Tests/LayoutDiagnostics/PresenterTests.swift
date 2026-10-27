@@ -25,6 +25,13 @@ enum PresenterTests: DiagnosticSuite {
         b.evidence[0].observation.reason = .neuralConvert
         b.evidence[0].observation.isCompleteWord = false
         tests.check("Нейрозамена части слова доступна только для ревью", presenter.allowedActions(for: b) == [.review])
+        tests.check("Без evidence нет пустого блока модели", presenter.neuralDetails(for: observation) == nil)
+        observation.neural = NeuralLayoutEvidence(modelID: "fixture", modelSHA256: String(repeating: "a", count: 64), mode: .observe,
+            ru: 0, en: 0, ruFromEn: 0.97, enFromRu: 0.01, unsupported: 0.02, durationMs: 2,
+            proposedCyrillic: true, block: .profile, disagreesWithDetector: true)
+        let details = presenter.neuralDetails(for: observation)
+        tests.check("Предложение модели не заменяет фактическое keep", details?.proposedCyrillic == true && details?.action == .keep && details?.submission == .notNeeded)
+        tests.check("Причина отказа и оценка доступны отдельно", details?.block == .profile && details?.score == 0.97 && details?.reason == .detectorKeep)
         var older = observation; older.recordedAt = Date(timeIntervalSince1970: 1)
         var latest = observation; latest.id = UUID(); latest.recordedAt = Date(timeIntervalSince1970: 2); latest.bundleID = "other"; latest.dictionaryMatch = .neither
         tests.check("Решения по умолчанию показывают свежие первыми", presenter.observations([older, latest], filter: .init()).map(\.id) == [latest.id, older.id])

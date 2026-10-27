@@ -11,6 +11,18 @@ enum NeuralEvidenceTests: DiagnosticSuite {
         NeuralLayoutRequest(epoch: UUID(), revision: revision, occurrenceID: UUID(), bundleID: "test", layoutCode: "en", word: "ghbdtn")
     }
     static func run(_ t: DiagnosticTests) {
+        var raw = evidence()
+        raw.classScores = Dictionary(uniqueKeysWithValues: NeuralLayoutEvidence.classNames.map { ($0, 0.1) })
+        t.check("Полные исходные оценки проходят валидацию", (try? raw.validate()) != nil)
+        raw.classScores?["he"] = .nan
+        t.check("NaN в исходных оценках отклоняется", (try? raw.validate()) == nil)
+        raw.classScores?["he"] = 1.1
+        t.check("Оценка выше единицы отклоняется", (try? raw.validate()) == nil)
+        raw.classScores?["he"] = -0.1
+        t.check("Отрицательная исходная оценка отклоняется", (try? raw.validate()) == nil)
+        raw.classScores?["he"] = nil
+        raw.classScores?["future"] = 0.1
+        t.check("Неизвестный ключ вместо класса отклоняется", (try? raw.validate()) == nil)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = LayoutJournalStore(directory: directory, now: { JournalStoreTests.date })

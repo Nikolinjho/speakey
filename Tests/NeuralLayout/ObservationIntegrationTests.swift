@@ -79,6 +79,8 @@ enum ObservationIntegrationTests: DiagnosticSuite {
         queues.deliver()
         t.check("Последний снимок до ready сохраняет точный ключ после границы", backend.words == ["ghbdtn"] && results.first?.0 == original && noted.contains(original))
         t.check("Observe сохраняет предложение модели", results.first?.1.proposedCyrillic == true && results.first?.1.modelID == "test-model")
+        let exported = results.first.flatMap { try? JSONEncoder().encode($0.1) }.flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+        t.check("JSON экспорт содержит SHA и все девять исходных оценок", (exported?["classScores"] as? [String: Double])?.count == 9 && exported?["modelSHA256"] as? String == String(repeating: "a", count: 64))
         runtime.changed()
         runtime.observe(occurrenceID: UUID(), word: "hello", bundleID: "editor", layoutCode: "EN", collecting: false)
         queues.run(); queues.deliver()

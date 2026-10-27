@@ -171,3 +171,68 @@ enum LayoutJournalPreviewCheck {
         return count
     }
 }
+
+final class PreviewNeuralLayoutBackend: NeuralLayoutBackend {
+    func predict(_ word: String) throws -> NeuralLayoutScores {
+        try NeuralLayoutScores(logits: [0, 0, 0, 10, 0, 0, 0, 0, 0])
+    }
+}
+
+extension LayoutJournalPreviewCheck {
+    static func runNeural(window: SettingsWindowController, diagnostics: LayoutDiagnosticsRuntime,
+                          neural: NeuralLayoutRuntime, presentation: NeuralLayoutPresentationStore,
+                          defaults: UserDefaults, appearance: NSAppearance.Name) async throws -> Int {
+        var count = 0
+        func check(_ name: String, _ condition: Bool) throws {
+            guard condition else { throw Failure(description: name) }
+            count += 1; print("PASS: \(name)")
+        }
+        func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
+        func control<T: NSView>(_ id: String, _ type: T.Type) throws -> T {
+            guard let root = window.window?.contentView,
+                  let value = views(root).first(where: { $0.accessibilityIdentifier() == id }) as? T else {
+                throw Failure(description: "Не найден контрол \(id)")
+            }
+            return value
+        }
+        func waitReady() async throws {
+            let deadline = Date().addingTimeInterval(5)
+            while neural.status == .loading && Date() < deadline { try await Task.sleep(nanoseconds: 10_000_000) }
+            try check("Временный backend загружен", neural.status == .ready)
+        }
+        func screenshot(_ section: SettingsSection, _ key: String) {
+            if let path = ProcessInfo.processInfo.environment[key], let index = SettingsSection.sidebarCases.firstIndex(of: section) {
+                window.dumpFullWindow(section: index, to: path, appearance: appearance, selectSection: false)
+            }
+        }
+        try await waitReady()
+        window.show(section: .switching)
+        let assist = try control("neural.mode.assist", NSButton.self)
+        let status = try control("neural.status", NSTextField.self)
+        try check("Нативный статус показывает готовую модель", status.stringValue.contains(L10n.neural("ready")))
+        try check("Сохранённый assist виден, но недоступен без качества", assist.state == .on && !assist.isEnabled && status.stringValue.contains(L10n.neural("quality")) && status.stringValue.contains(L10n.neural("effective") + L10n.neural("observe")))
+        screenshot(.switching, "KEYBOOP_NEURAL_PREVIEW_SETTINGS_PNG")
+        for mode in [NeuralLayoutMode.off, .observe] {
+            let button = try control("neural.mode." + mode.rawValue, NSButton.self)
+            button.performClick(nil)
+            try check("Нативный выбор \(mode.rawValue) сохраняется отдельно от сбора", NeuralLayoutModeSettings.read(defaults) == mode && neural.mode == mode && diagnostics.enabled)
+        }
+        try await waitReady()
+        diagnostics.setEnabled(false)
+        try check("Отключение сбора сохраняет работающую модель", neural.mode == .observe && neural.status == .ready)
+        diagnostics.setEnabled(true)
+        presentation.publish(NeuralLayoutPresentation(mode: .observe, status: .loading, error: nil, assistanceAvailable: false))
+        try check("Нативный статус показывает загрузку", status.stringValue.contains(L10n.neural("loading")))
+        presentation.publish(NeuralLayoutPresentation(mode: .observe, status: .unavailable, error: "preview-error", assistanceAvailable: false))
+        try check("Нативный статус показывает ошибку", status.stringValue.contains("preview-error"))
+        window.show(section: .layoutJournal)
+        await withCheckedContinuation { continuation in window.whenLayoutJournalReady { continuation.resume() } }
+        let proposal = try control("journal.neural.proposal", NSTextField.self)
+        let actual = try control("journal.neural.actual", NSTextField.self)
+        let reason = try control("journal.neural.reason", NSTextField.self)
+        try check("Противоположное предложение модели показано отдельно от keep", proposal.stringValue.contains(L10n.neural("en")) && actual.stringValue.contains(L10n.journal("action.keep")) && reason.stringValue.contains(L10n.neural("quality")))
+        screenshot(.layoutJournal, "KEYBOOP_NEURAL_PREVIEW_JOURNAL_PNG")
+        print("\(count) нативных проверок модели, 0 ошибок")
+        return count
+    }
+}

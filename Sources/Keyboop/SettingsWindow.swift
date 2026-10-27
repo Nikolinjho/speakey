@@ -208,7 +208,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let bodyBox = NSView()
     private var bodyChild: NSViewController?
 
-    convenience init() {
+    convenience init(neuralPresentation: NeuralLayoutPresentationStore = .shared) {
         let de = ProcessInfo.processInfo.environment
         let w0: CGFloat = (de["KEYBOOP_DUMP"] == "1" || de["KEYBOOP_LIVEDIAG"] == "1") ? 1040 : DS.minWindowWidth + 24
         let window = NSWindow(
@@ -230,6 +230,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // так что прежних 420 не хватало и подавно.
         window.minSize = NSSize(width: DS.minWindowWidth, height: 504)
         self.init(window: window)
+        configureNeuralPresentation(neuralPresentation)
         window.delegate = self
 
         let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
@@ -811,6 +812,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         return img
     }
 
+    private func configureNeuralPresentation(_ store: NeuralLayoutPresentationStore) {
+        detail.neuralPresentation = store
+        rootVC.neuralPresentation = store
+    }
+
     func whenLayoutJournalReady(_ completion: @escaping () -> Void) {
         detail.whenLayoutJournalReady(completion)
     }
@@ -1102,6 +1108,7 @@ final class SidebarVC: NSViewController {
 // MARK: - Detail
 
 final class DetailVC: NSViewController {
+    var neuralPresentation = NeuralLayoutPresentationStore()
     var onLanguageChanged: (() -> Void)?
     private let settings = AppSettings.shared
     private let exceptions = ExceptionStore.shared
@@ -1737,6 +1744,7 @@ final class DetailVC: NSViewController {
 
         var items: [NSView] = [
             blockTitle("switch.title"),
+            NeuralLayoutSettingsView(settings: settings, presentation: neuralPresentation),
             sub(L10n.t("switch.sub")),
             group(8),
             card([

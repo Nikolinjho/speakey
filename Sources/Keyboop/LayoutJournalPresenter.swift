@@ -1,6 +1,25 @@
 import Foundation
 
 struct LayoutJournalPresenter {
+    struct NeuralDetails: Equatable {
+        let proposedCyrillic: Bool?
+        let score: Double
+        let unsupported: Bool
+        let action: LayoutAction
+        let submission: LayoutSubmission
+        let reason: LayoutReason
+        let block: NeuralLayoutBlock?
+        let mode: NeuralLayoutMode
+    }
+
+    func neuralDetails(for observation: LayoutObservation) -> NeuralDetails? {
+        guard let evidence = observation.neural else { return nil }
+        return NeuralDetails(proposedCyrillic: evidence.proposedCyrillic,
+            score: evidence.proposedCyrillic.map { $0 ? evidence.ruFromEn : evidence.enFromRu } ?? max(evidence.ru, evidence.en),
+            unsupported: evidence.block == .unsupported, action: observation.action, submission: observation.submission,
+            reason: observation.reason, block: evidence.block, mode: evidence.mode)
+    }
+
     struct Filter {
         var kind: LayoutErrorKind?
         var bundleID: String?

@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 suite="${1:-model}"
 case "$suite" in
-    model|coordinator|policy|integration|quality|assistance|all) ;;
+    model|coordinator|policy|integration|quality|assistance|settings|all) ;;
     *) echo "Неизвестный набор: $suite" >&2; exit 2 ;;
 esac
 work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-neural-layout.XXXXXX")"
@@ -25,7 +25,7 @@ if [ "$suite" = policy ] || [ "$suite" = all ]; then
     options+=(-D POLICY_TESTS)
 fi
 if [ "$suite" = integration ] || [ "$suite" = all ]; then
-    for name in NeuralLayoutCoordinator NeuralLayoutRuntime NeuralLayoutPolicy NeuralFocusMonitor NeuralOccurrenceFence KeystrokeBuffer KeyboardLayoutCache NeuralLayoutModeSettings NeuralLayoutEvidence NeuralLayoutEvidenceBuffer LayoutDiagnosticsController LayoutFeedbackTracker LayoutJournalStore LayoutObservation Keymap DynamicKeymap LayoutData ExtraWords ExceptionStore LayoutDetector; do
+    for name in NeuralLayoutCoordinator NeuralLayoutRuntime NeuralLayoutPresentation NeuralLayoutPolicy NeuralFocusMonitor NeuralOccurrenceFence KeystrokeBuffer KeyboardLayoutCache NeuralLayoutModeSettings NeuralLayoutEvidence NeuralLayoutEvidenceBuffer LayoutDiagnosticsController LayoutFeedbackTracker LayoutJournalStore LayoutObservation Keymap DynamicKeymap LayoutData ExtraWords ExceptionStore LayoutDetector; do
         file="Sources/Keyboop/$name.swift"
         if [[ " ${sources[*]} " != *" $file "* ]]; then sources+=("$file"); fi
     done
@@ -40,6 +40,14 @@ if [ "$suite" = assistance ] || [ "$suite" = all ]; then
     if [ "$suite" = assistance ]; then sources+=(Sources/Keyboop/NeuralLayoutPolicy.swift); fi
     sources+=(Sources/Keyboop/NeuralLayoutMarkerCodec.swift Sources/Keyboop/InputLatency.swift Sources/Keyboop/NeuralLayoutAssistance.swift Tests/NeuralLayout/MarkerTests.swift Tests/NeuralLayout/AssistanceTests.swift)
     options+=(-D ASSISTANCE_TESTS -framework CoreGraphics)
+fi
+if [ "$suite" = settings ] || [ "$suite" = all ]; then
+    for name in NeuralLayoutCoordinator NeuralLayoutRuntime NeuralLayoutPresentation NeuralLayoutPolicy NeuralLayoutEvidence NeuralLayoutModeSettings LayoutObservation LayoutJournalStore; do
+        file="Sources/Keyboop/$name.swift"
+        if [[ " ${sources[*]} " != *" $file "* ]]; then sources+=("$file"); fi
+    done
+    sources+=(Tests/NeuralLayout/SettingsTests.swift)
+    options+=(-D SETTINGS_TESTS)
 fi
 sources+=(Tests/NeuralLayout/main.swift)
 swiftc "${options[@]}" "${sources[@]}" -o "$work/tests"

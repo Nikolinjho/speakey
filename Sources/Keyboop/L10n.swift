@@ -1496,6 +1496,50 @@ enum L10n {
 }
 
 extension L10n {
+    static func neural(_ key: String) -> String {
+        let values: [String: (String, String)] = [
+            "title": ("Модель раскладки", "Layout model"),
+            "off": ("Выключено", "Off"),
+            "observe": ("Наблюдение", "Observe"),
+            "assist": ("Помощь при переключении", "Switching assistance"),
+            "observeHelp": ("Наблюдение: модель предлагает решения в журнале, раскладку меняет текущий движок.", "Observe: the model proposes decisions in the journal. The current engine changes the layout."),
+            "assistHelp": ("Помощь при переключении: модель участвует в замене после проверки качества.", "Switching assistance: the model participates in replacements after quality validation."),
+            "quality": ("Помощь недоступна: модель пока не прошла проверку качества.", "Assistance unavailable: the model has not passed quality validation yet."),
+            "effective": ("Сейчас действует: ", "Effective mode: "),
+            "loading": ("Модель загружается…", "Loading model…"),
+            "ready": ("Модель загружена", "Model ready"),
+            "unavailable": ("Ошибка модели: ", "Model error: "),
+            "stopped": ("Модель выключена", "Model off"),
+            "proposal": ("Предложение модели", "Model proposal"),
+            "actual": ("Действие Keyboop", "Keyboop action"),
+            "reason": ("Причина", "Reason"),
+            "score": ("Оценка модели", "Model score"),
+            "scoreHelp": ("Softmax не является точностью или вероятностью правильного решения.", "Softmax is not accuracy or a probability of a correct decision."),
+            "keep": ("Сохранить исходное слово", "Keep source word"),
+            "ru": ("Переключить на русский", "Switch to Russian"),
+            "en": ("Переключить на английский", "Switch to English"),
+            "unsupported": ("Неподдерживаемая раскладка", "Unsupported layout"),
+            "block.disabled": ("Модель выключена", "Model off"),
+            "block.unavailable": ("Модель недоступна", "Model unavailable"),
+            "block.profile": ("Помощь недоступна: модель пока не прошла проверку качества.", "Assistance unavailable: the model has not passed quality validation yet."),
+            "block.stale": ("Ввод уже изменился", "Input changed"),
+            "block.length": ("Длина слова вне допустимого диапазона", "Word length outside supported range"),
+            "block.unsupported": ("Неподдерживаемая раскладка", "Unsupported layout"),
+            "block.confidence": ("Оценка ниже порога профиля", "Score below profile threshold"),
+            "block.app": ("Переключение отключено в приложении", "Switching disabled for app"),
+            "block.developer": ("Режим разработчика", "Developer mode"),
+            "block.secureInput": ("Защищённый ввод", "Secure input"),
+            "block.modifiers": ("Нажаты модификаторы", "Modifiers pressed"),
+            "block.editing": ("Редактирование текста", "Editing text"),
+            "block.syntheticFlight": ("Замена уже выполняется", "Replacement in progress"),
+            "block.undo": ("Отмена замены", "Replacement undo"),
+            "block.rule": ("Правило слова запрещает замену", "Word rule blocks replacement"),
+            "block.resonance": ("Защита от повторной замены", "Repeated replacement protection"),
+            "block.keymap": ("Преобразование раскладки недоступно", "Layout conversion unavailable"),
+        ]
+        guard let value = values[key] else { return key }
+        return current == .ru ? value.0 : value.1
+    }
     static func journal(_ key: String) -> String {
         let values: [String: (String, String)] = [
             "decisions": ("Решения", "Decisions"),

@@ -1,0 +1,2 @@
+swiftc -frontend -parse NeuralLayoutSettingsView.swift LayoutJournalPreviewCheck.swift SettingsWindow.swift main.swift L10n.swift
+exit 0, no diagnostics

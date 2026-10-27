@@ -23,6 +23,7 @@ final class NeuralLayoutRuntime {
     private(set) var lastError: Error?
     private(set) var mode: NeuralLayoutMode = .off
     private(set) var session = NeuralLayoutSession()
+    private let presentation: NeuralLayoutPresentationStore?
     private let factory: () throws -> NeuralLayoutLoadedBackend
     private let work: Schedule
     private let deliver: Schedule
@@ -45,12 +46,13 @@ final class NeuralLayoutRuntime {
     private var entries: [NeuralLayoutRequest: Entry] = [:]
     private var order: [NeuralLayoutRequest] = []
 
-    init(mode: NeuralLayoutMode, factory: @escaping () throws -> NeuralLayoutLoadedBackend,
+    init(mode: NeuralLayoutMode, presentation: NeuralLayoutPresentationStore? = nil, factory: @escaping () throws -> NeuralLayoutLoadedBackend,
          work: Schedule? = nil,
          deliver: @escaping Schedule = { DispatchQueue.main.async(execute: $0) },
          note: @escaping (NeuralLayoutRequest) -> Void = { _ in },
          evidence: @escaping (NeuralLayoutRequest, NeuralLayoutEvidence) -> Void = { _, _ in },
          result: @escaping (NeuralLayoutResult) -> Void = { _ in }) {
+        self.presentation = presentation
         self.factory = factory
         let queue = DispatchQueue(label: "com.keyboop.neural-layout.runtime", qos: .utility)
         self.work = work ?? { queue.async(execute: DispatchWorkItem(block: $0)) }
@@ -74,6 +76,7 @@ final class NeuralLayoutRuntime {
         guard mode != .off else { return }
         status = .loading
         lastError = nil
+        publish()
         let generation = self.generation
         let factory = factory
         let slot = slot
@@ -94,7 +97,7 @@ final class NeuralLayoutRuntime {
                 case .success(let metadata):
                     self.modelID = metadata.0
                     self.modelSHA256 = metadata.1
-                    self.profile = metadata.2
+                    self.profile = metadata.2?.modelSHA256 == metadata.1 ? metadata.2 : nil
                     self.status = .ready
                     self.coordinator = NeuralLayoutCoordinator(backend: slot, work: self.work, deliver: self.deliver) { [weak self] result in
                         self?.receive(result)
@@ -104,8 +107,14 @@ final class NeuralLayoutRuntime {
                         self.coordinator?.submit(pending)
                     }
                 }
+                self.publish()
             }
         }
+    }
+
+    private func publish() {
+        presentation?.publish(NeuralLayoutPresentation(mode: mode, status: status, error: lastError.map { String(describing: $0) },
+            assistanceAvailable: status == .ready && profile?.enabled == true && profile?.modelSHA256 == modelSHA256))
     }
 
     func stop() {
@@ -116,6 +125,8 @@ final class NeuralLayoutRuntime {
         coordinator = nil
         mode = .off
         status = .off
+        lastError = nil
+        publish()
         let slot = slot
         work { slot.backend = nil }
     }
@@ -175,7 +186,7 @@ final class NeuralLayoutRuntime {
 
     private func receive(_ result: Result<NeuralLayoutResult, Error>) {
         switch result {
-        case .failure(let error): lastError = error
+        case .failure(let error): lastError = error; publish()
         case .success(let result):
             self.result(result)
             guard entries[result.request] != nil else { return }
@@ -192,11 +203,13 @@ final class NeuralLayoutRuntime {
         let unsupported = [.he, .heFromEn, .enFromHe, .heFromRu, .ruFromHe].map { scores[$0] }.reduce(0, +)
         let policyBlock: NeuralLayoutBlock?
         if case .blocked(let block) = entry.policy { policyBlock = block } else { policyBlock = nil }
-        evidence(request, NeuralLayoutEvidence(modelID: modelID, modelSHA256: modelSHA256, mode: entry.mode,
+        var saved = NeuralLayoutEvidence(modelID: modelID, modelSHA256: modelSHA256, mode: entry.mode,
             ru: scores[.ru], en: scores[.en], ruFromEn: scores[.ruFromEn], enFromRu: scores[.enFromRu],
             unsupported: unsupported, durationMs: result.durationMs, proposedCyrillic: direction,
             block: policyBlock ?? (!isCurrent(request) ? .stale : ([NeuralLayoutClass.he, .heFromEn, .enFromHe, .heFromRu, .ruFromHe].contains(winner) ? .unsupported : nil)),
-            disagreesWithDetector: direction != detector))
+            disagreesWithDetector: direction != detector)
+        saved.classScores = Dictionary(uniqueKeysWithValues: zip(NeuralLayoutEvidence.classNames, scores.values))
+        evidence(request, saved)
         entries.removeValue(forKey: request)
         order.removeAll { $0 == request }
     }

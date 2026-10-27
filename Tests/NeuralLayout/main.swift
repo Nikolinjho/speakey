@@ -18,4 +18,7 @@ DiagnosticTestRegistry.add(QualityTests.self)
 #if ASSISTANCE_TESTS
 DiagnosticTestRegistry.add(AssistanceTests.self)
 #endif
+#if SETTINGS_TESTS
+DiagnosticTestRegistry.add(SettingsTests.self)
+#endif
 DiagnosticTestRegistry.run(CommandLine.arguments.dropFirst().first ?? "")

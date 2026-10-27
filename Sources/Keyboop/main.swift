@@ -1,7 +1,7 @@
 import AppKit
 
 // Изолированный просмотр настроек: до любых системных guard и AppDelegate.
-if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
+if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" || ProcessInfo.processInfo.environment["KEYBOOP_NEURAL_PREVIEW_CHECK"] == "1" {
     let previewApp = NSApplication.shared
     previewApp.setActivationPolicy(.regular)
     let previewAppearance: NSAppearance.Name = ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW_LIGHT"] == "1" ? .aqua : .darkAqua
@@ -17,6 +17,18 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
     let runtime = LayoutDiagnosticsRuntime(store: store, settings: .shared, backend: ExceptionLayoutRuleBackend(exceptions: .shared))
     LayoutDiagnosticsRuntime.shared = runtime
     runtime.setEnabled(true)
+    let neuralCheck = ProcessInfo.processInfo.environment["KEYBOOP_NEURAL_PREVIEW_CHECK"] == "1"
+    let neuralPresentation = NeuralLayoutPresentationStore()
+    if neuralCheck { AppSettings.shared.neuralLayoutMode = .assist }
+    let neuralPreview = NeuralLayoutRuntime(mode: neuralCheck ? .assist : .off, presentation: neuralPresentation, factory: {
+        let sha = String(repeating: "a", count: 64)
+        let profile = try NeuralLayoutProfile(modelSHA256: sha, enabled: false, minimumScore: 0.99, minimumMargin: 0.5)
+        return NeuralLayoutLoadedBackend(backend: PreviewNeuralLayoutBackend(), modelID: "preview", sha256: sha, profile: profile)
+    })
+    let neuralObserver = NotificationCenter.default.addObserver(forName: .neuralLayoutModeChanged, object: nil, queue: .main) { _ in
+        neuralPreview.setMode(AppSettings.shared.neuralLayoutMode)
+    }
+    defer { NotificationCenter.default.removeObserver(neuralObserver); neuralPreview.stop() }
     runtime.controller.addManualCase(typed: "ghbdtn", expected: "привет", bundleID: "com.apple.TextEdit", kind: .missedConversion)
     runtime.controller.addManualCase(typed: "ghbdtn", expected: "привёт", bundleID: "com.apple.TextEdit", kind: .missedConversion)
     runtime.controller.addManualCase(typed: "hello", expected: "hello", bundleID: "com.apple.Safari", kind: .unwantedConversion)
@@ -32,6 +44,11 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
         typed: "дд", proposed: nil, alternative: missing.alternative, dictionaryMatch: missing.dictionaryMatch,
         path: .boundary, reason: .detectorKeep, action: .keep, submission: .notNeeded,
         isCompleteWord: true, uptime: ProcessInfo.processInfo.systemUptime - 60)
+    if neuralCheck {
+        oldObservation.neural = NeuralLayoutEvidence(modelID: "preview", modelSHA256: String(repeating: "a", count: 64), mode: .assist,
+            ru: 0.01, en: 0.01, ruFromEn: 0.01, enFromRu: 0.96, unsupported: 0.01, durationMs: 1,
+            proposedCyrillic: false, block: .profile, disagreesWithDetector: true)
+    }
     oldObservation.recordedAt = Date().addingTimeInterval(-60)
     store.recordObservation(oldObservation)
     let punctuation = facts("[kt,")
@@ -51,7 +68,7 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
     var previewWindow: SettingsWindowController?
     // Ограничивает также ожидание начальной загрузки и отрисовки.
     if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW_INTERACTIVE"] != "1" ||
-        ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW_CHECK"] == "1" {
+        ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW_CHECK"] == "1" || neuralCheck {
     DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
         fputs("FAIL: preview не завершился за 30 секунд\n", stderr)
         defaults.removePersistentDomain(forName: suite)
@@ -66,17 +83,22 @@ if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" {
             try? FileManager.default.removeItem(at: directory)
             exit(1)
         }
-        previewWindow = SettingsWindowController()
+        previewWindow = SettingsWindowController(neuralPresentation: neuralPresentation)
         previewWindow?.show(section: .layoutJournal)
         previewWindow?.whenLayoutJournalReady {
             let environment = ProcessInfo.processInfo.environment
             if let path = environment["KEYBOOP_JOURNAL_PREVIEW_PNG"], let index = SettingsSection.sidebarCases.firstIndex(of: .layoutJournal) {
                 previewWindow?.dumpFullWindow(section: index, to: path, appearance: previewAppearance, selectSection: false)
             }
-            if environment["KEYBOOP_JOURNAL_PREVIEW_CHECK"] == "1", let window = previewWindow {
+            if environment["KEYBOOP_JOURNAL_PREVIEW_CHECK"] == "1" || neuralCheck, let window = previewWindow {
                 Task { @MainActor in
                     var status: Int32 = 0
-                    do { _ = try await LayoutJournalPreviewCheck.run(window: window, runtime: runtime, directory: directory) }
+                    do {
+                        if neuralCheck {
+                            _ = try await LayoutJournalPreviewCheck.runNeural(window: window, diagnostics: runtime, neural: neuralPreview,
+                                presentation: neuralPresentation, defaults: defaults, appearance: previewAppearance)
+                        } else { _ = try await LayoutJournalPreviewCheck.run(window: window, runtime: runtime, directory: directory) }
+                    }
                     catch { fputs("FAIL: \(error)\n", stderr); status = 1 }
                     defaults.removePersistentDomain(forName: suite)
                     try? FileManager.default.removeItem(at: directory)

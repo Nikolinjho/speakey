@@ -194,6 +194,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
                 text(L10n.journal("reason." + item.reason.rawValue) + " · " + L10n.journal("path." + item.path.rawValue), secondary: true),
                 text(L10n.journal("alternative") + ": " + (item.alternative ?? "—") + " · " + L10n.journal("dictionary." + (item.dictionaryMatch ?? .unavailable).rawValue), secondary: true),
                 text(L10n.journal("produced") + ": " + (item.proposed ?? "—") + " · " + L10n.journal("submission." + item.submission.rawValue), secondary: true)]
+            views += neuralViews(item)
             if selectedID == item.id {
                 let linked = snapshot.markedObservationIDs.contains(item.id)
                 if linked { views.append(label("alreadyMarked", secondary: true)) }
@@ -224,6 +225,20 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         if observations.count > page * 30 { body.addArrangedSubview(button("more") { [weak self] in self?.page += 1; self?.render() }) }
     }
 
+    private func neuralViews(_ observation: LayoutObservation) -> [NSView] {
+        guard let details = presenter.neuralDetails(for: observation) else { return [] }
+        let proposal = details.unsupported ? "unsupported" : details.proposedCyrillic.map { $0 ? "ru" : "en" } ?? "keep"
+        let proposed = text(L10n.neural("proposal") + ": " + L10n.neural(proposal))
+        proposed.setAccessibilityIdentifier("journal.neural.proposal")
+        let actual = text(L10n.neural("actual") + ": " + L10n.journal("action." + details.action.rawValue) + " · " + L10n.journal("submission." + details.submission.rawValue))
+        actual.setAccessibilityIdentifier("journal.neural.actual")
+        let reason = text(L10n.neural("reason") + ": " + L10n.journal("reason." + details.reason.rawValue) + " · " + (details.block.map { L10n.neural("block." + $0.rawValue) } ?? L10n.neural(details.mode.rawValue)), secondary: true)
+        reason.setAccessibilityIdentifier("journal.neural.reason")
+        return [proposed, actual, reason,
+            text(L10n.neural("score") + ": " + String(format: "%.3f", details.score), secondary: true),
+            text(L10n.neural("scoreHelp"), secondary: true)]
+    }
+
     private func detail(_ item: LayoutCase) -> [NSView] {
         let locked = snapshot.rules.contains { $0.sourceCaseID == item.id && $0.status != .removed }
         let field = input(item.expected, placeholder: "expected", id: "journal.expected"); expectedField = field
@@ -236,6 +251,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         let formatter = DateFormatter(); formatter.timeZone = TimeZone(secondsFromGMT: 3 * 3600); formatter.dateFormat = "dd.MM.yyyy HH:mm:ss 'MSK'"
         for evidence in item.evidence.suffix(5) {
             let o = evidence.observation
+            result += neuralViews(o)
             result.append(text("\(formatter.string(from: evidence.createdAt)) · \(L10n.journal("source")): \(evidence.source.rawValue)\n\(L10n.journal("decision")): \(o.reason.rawValue) · \(o.path.rawValue) · \(o.submission.rawValue)", secondary: true))
         }
         result.append(text(formatter.string(from: item.firstSeen) + " — " + formatter.string(from: item.lastSeen), secondary: true))
