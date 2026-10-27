@@ -187,6 +187,8 @@ extension LayoutJournalPreviewCheck {
             guard condition else { throw Failure(description: name) }
             count += 1; print("PASS: \(name)")
         }
+        let defaultWindow = SettingsWindowController()
+        try check("Обычный конструктор настроек создаёт окно", defaultWindow.window?.contentViewController != nil)
         func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
         func control<T: NSView>(_ id: String, _ type: T.Type) throws -> T {
             guard let root = window.window?.contentView,

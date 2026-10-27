@@ -208,7 +208,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let bodyBox = NSView()
     private var bodyChild: NSViewController?
 
-    convenience init(neuralPresentation: NeuralLayoutPresentationStore = .shared) {
+    convenience init() {
+        self.init(neuralPresentation: .shared)
+    }
+
+    convenience init(neuralPresentation: NeuralLayoutPresentationStore) {
         let de = ProcessInfo.processInfo.environment
         let w0: CGFloat = (de["KEYBOOP_DUMP"] == "1" || de["KEYBOOP_LIVEDIAG"] == "1") ? 1040 : DS.minWindowWidth + 24
         let window = NSWindow(
