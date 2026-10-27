@@ -189,6 +189,9 @@ extension LayoutJournalPreviewCheck {
         }
         let defaultWindow = SettingsWindowController()
         try check("Обычный конструктор настроек создаёт окно", defaultWindow.window?.contentViewController != nil)
+        if ProcessInfo.processInfo.environment["KEYBOOP_COMPACT_SETTINGS_CHECK"] == "1" {
+            try check("Подробное окно открывается размером 760 × 560: \(String(describing: defaultWindow.window?.frame.size))", defaultWindow.window?.frame.size == NSSize(width: 760, height: 560))
+        }
         func views(_ view: NSView) -> [NSView] { [view] + view.subviews.flatMap(views) }
         func control<T: NSView>(_ id: String, _ type: T.Type) throws -> T {
             guard let root = window.window?.contentView,
@@ -225,14 +228,21 @@ extension LayoutJournalPreviewCheck {
         }
         try check("Настоящие runtime и policy сохраняют отказ профиля и независимое предложение", emitted?.block == .profile && emitted?.mode == .assist && emitted?.proposedCyrillic == false && emitted?.classScores?.count == 9)
         window.show(section: .switching)
-        let assist = try control("neural.mode.assist", NSButton.self)
+        let picker = try control("neural.mode", NSPopUpButton.self)
         let status = try control("neural.status", NSTextField.self)
         try check("Нативный статус показывает готовую модель", status.stringValue.contains(L10n.neural("ready")))
-        try check("Сохранённый assist виден, но недоступен без качества", assist.state == .on && !assist.isEnabled && status.stringValue.contains(L10n.neural("quality")) && status.stringValue.contains(L10n.neural("effective") + L10n.neural("observe")))
+        try check("Сохранённый assist виден, но недоступен без качества", picker.indexOfSelectedItem == 2 && picker.item(at: 2)?.isEnabled == false && status.stringValue.contains(L10n.neural("qualityShort")) && status.stringValue.contains(L10n.neural("effective") + L10n.neural("observe")))
+        let disclosure = try control("neural.details", NSButton.self)
+        let explanation = try control("neural.explanation", NSTextField.self)
+        try check("Подробное пояснение модели изначально свёрнуто", explanation.isHidden)
+        disclosure.performClick(nil)
+        try check("Пояснение раскрывается и содержит причину недоступности помощи", !explanation.isHidden && explanation.stringValue.contains(L10n.neural("quality")))
+        disclosure.performClick(nil)
+        try check("Пояснение снова сворачивается", explanation.isHidden)
         screenshot(.switching, "KEYBOOP_NEURAL_PREVIEW_SETTINGS_PNG")
         for mode in [NeuralLayoutMode.off, .observe] {
-            let button = try control("neural.mode." + mode.rawValue, NSButton.self)
-            button.performClick(nil)
+            picker.selectItem(at: mode == .off ? 0 : 1)
+            _ = picker.sendAction(picker.action, to: picker.target)
             try check("Нативный выбор \(mode.rawValue) сохраняется отдельно от сбора", NeuralLayoutModeSettings.read(defaults) == mode && neural.mode == mode && diagnostics.enabled)
         }
         try await waitReady()
@@ -250,6 +260,60 @@ extension LayoutJournalPreviewCheck {
         let reason = try control("journal.neural.reason", NSTextField.self)
         try check("Противоположное предложение модели показано отдельно от keep", proposal.stringValue.contains(L10n.neural("en")) && actual.stringValue.contains(L10n.journal("action.keep")) && reason.stringValue.contains(L10n.neural("quality")))
         screenshot(.layoutJournal, "KEYBOOP_NEURAL_PREVIEW_JOURNAL_PNG")
+        if ProcessInfo.processInfo.environment["KEYBOOP_COMPACT_SETTINGS_CHECK"] == "1" {
+            guard let nativeWindow = window.window, let root = nativeWindow.contentView else { throw Failure(description: "Нет окна") }
+            presentation.publish(NeuralLayoutPresentation(mode: .observe, status: .ready, error: nil, assistanceAvailable: false))
+            for section in SettingsSection.sidebarCases {
+                window.show(section: section)
+                if section == .layoutJournal { await withCheckedContinuation { continuation in window.whenLayoutJournalReady { continuation.resume() } } }
+                guard let scroll = views(root).first(where: { $0.accessibilityIdentifier() == "settings.scroll" }) as? NSScrollView,
+                      let document = scroll.documentView else { throw Failure(description: "Нет области настроек") }
+                // Автоскрытие полосы прокрутки меняет ширину clip-view после раскладки.
+                let layoutDeadline = Date().addingTimeInterval(2)
+                repeat {
+                    nativeWindow.layoutIfNeeded()
+                    root.layoutSubtreeIfNeeded()
+                    if abs(document.bounds.width - scroll.contentView.bounds.width) <= 1 { break }
+                    try await Task.sleep(nanoseconds: 10_000_000)
+                } while Date() < layoutDeadline
+                let visibleControls = views(document).filter { $0 is NSControl && !$0.isHiddenOrHasHiddenAncestor && $0.bounds.width > 0 }
+                let clipped = visibleControls.filter {
+                    let frame = document.convert($0.bounds, from: $0)
+                    return frame.minX < -1 || frame.maxX > scroll.contentView.bounds.width + 1
+                }
+                let geometry = "document=\(document.bounds.width), viewport=\(scroll.contentView.bounds.width), clipped=\(clipped.map { $0.identifier?.rawValue ?? String(describing: type(of: $0)) })"
+                print("Геометрия \(section): \(geometry)")
+                try check("Раздел \(section) помещается по ширине", clipped.isEmpty && !scroll.hasHorizontalScroller)
+                if let directory = ProcessInfo.processInfo.environment["KEYBOOP_COMPACT_SETTINGS_ARTIFACTS"],
+                   [.switching, .layoutJournal, .voice, .general].contains(section) {
+                    try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+                    window.liveDiag(to: directory + "/\(section).txt")
+                    nativeWindow.displayIfNeeded()
+                    CATransaction.flush()
+                    let capture = Process()
+                    capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+                    capture.arguments = ["-x", "-o", "-l", String(nativeWindow.windowNumber), directory + "/\(section).png"]
+                    try capture.run(); capture.waitUntilExit()
+                    try check("Снимок настоящего окна \(section) сохранён", capture.terminationStatus == 0)
+                }
+            }
+            window.show(section: .switching)
+            let size = nativeWindow.frame.size
+            guard let picker = nativeWindow.titlebarAccessoryViewControllers.flatMap({ views($0.view) }).compactMap({ $0 as? ModePicker }).first else {
+                throw Failure(description: "Нет переключателя Основное / Все")
+            }
+            for _ in 0..<2 {
+                picker.onSelect?(0)
+                try check("Переключатель открывает простой экран", AppSettings.shared.simpleMode && nativeWindow.frame.width == DS.simpleWindowWidth)
+                picker.onSelect?(1)
+                try check("Переключатель возвращает все настройки", !AppSettings.shared.simpleMode && nativeWindow.frame.width == 760)
+            }
+            try check("Смена Основное / Все сохраняет размер подробного окна", nativeWindow.frame.size == size)
+            nativeWindow.setContentSize(NSSize(width: 760, height: 620))
+            window.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification))
+            let restored = SettingsWindowController()
+            try check("Новая высота восстанавливается после повторного открытия", restored.window?.frame.height == nativeWindow.frame.height)
+        }
         print("\(count) нативных проверок модели, 0 ошибок")
         return count
     }

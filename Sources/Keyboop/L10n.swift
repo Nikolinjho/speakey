@@ -1499,6 +1499,8 @@ extension L10n {
     static func neural(_ key: String) -> String {
         let values: [String: (String, String)] = [
             "title": ("Модель раскладки", "Layout model"),
+            "details": ("Как работает нейронка", "How the model works"),
+            "qualityShort": ("Помощь недоступна", "Assistance unavailable"),
             "off": ("Выключено", "Off"),
             "observe": ("Наблюдение", "Observe"),
             "assist": ("Помощь при переключении", "Switching assistance"),

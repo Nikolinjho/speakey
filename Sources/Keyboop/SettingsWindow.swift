@@ -3,57 +3,34 @@ import QuartzCore
 import AVFoundation
 import UniformTypeIdentifiers
 
-/// Дизайн-система Keyboop — единая шкала (8-pt grid), чтобы интерфейс был
-/// системным и «вне времени». Числа из Apple HIG (Layout / Sidebars / Typography).
+/// Размеры компактного окна и общие цвета настроек.
 enum DS {
-    // Sidebar
-    static let sidebarWidth: CGFloat = 220
-    static let rowHeight: CGFloat = 32
+    static let sidebarWidth: CGFloat = 172
+    static let rowHeight: CGFloat = 30
     static let rowGap: CGFloat = 2
-    static let pillInsetH: CGFloat = 9      // капсула выделения отступает от краёв sidebar
-    static let rowLeadingInset: CGFloat = 12 // иконка от левого края капсулы
-    static let iconTextGap: CGFloat = 9
-    static let iconPointSize: CGFloat = 14
-    static let pillRadius: CGFloat = 6        // concentric с control-радиусами Tahoe
-    // Content
-    static let contentMaxWidth: CGFloat = 600 // Apple grouped-form cap (macOS 15+); контент НЕ растягивается
-    /// ФИКС ширина блока настроек: прижат влево, поля узкие.
-    /// 480 → 600 (28.07): подписи под строками резались, а половину из них ширина как раз лечит.
-    /// Ровно 600, а не «сколько влезет»: шире строка «подпись слева, контрол справа» превращается в
-    /// таблицу с дырой посередине, а короткие заголовки вроде «Голосовой ввод» выглядят брошенными.
-    /// Совпадает с contentMaxWidth выше (Apple grouped-form cap).
-    /// Проверка по экранам: окно 896 это 61% ширины на 13" Air (1470×956), 62% на 1440×900 и 70% в
-    /// худшем реалистичном случае «крупный текст» 1280×800. Запас есть везде, где вообще идёт macOS 13.
-    static let contentWidth: CGFloat = 600
-    static let contentMargin: CGFloat = 24
-    /// Отступ шапки от низа строки заголовка и её просвет до первой карточки.
+    static let pillInsetH: CGFloat = 8
+    static let rowLeadingInset: CGFloat = 10
+    static let iconTextGap: CGFloat = 7
+    static let iconPointSize: CGFloat = 13
+    static let pillRadius: CGFloat = 6
+    static let contentMaxWidth: CGFloat = 528
+    static let contentWidth: CGFloat = 528
+    static let contentMargin: CGFloat = 20
     static let brandTopPad: CGFloat = 10
-    /// Размер знака приложения в шапке. ОДИН на оба режима: шапка общая, и левый верхний угол при
-    /// смене режима не должен дёргаться. Меньше 40 брать нельзя, мелкие детали знака сливаются.
-    static let brandIconSize: CGFloat = 44
-    /// Просвет между шапкой и первым пунктом бокового меню.
-    static let sidebarListGap: CGFloat = 16
-    /// Высота строки заголовка обычного окна macOS. Аксессуар в неё вписывается, а не растягивает
-    /// её. 32 это замер на macOS 26 (у окна с панелью инструментов было бы 66).
+    static let brandIconSize: CGFloat = 32
+    static let sidebarListGap: CGFloat = 12
     static let titlebarHeight: CGFloat = 32
     static let brandBottomPad: CGFloat = 8
-    /// Пустое поле под счётчиками до низа окна. Отдельно от `contentMargin`, потому что простое окно
-    /// подгоняется по содержимому, и низ там виден как поле, а не как «край прокрутки».
     static let simpleBottomPad: CGFloat = 22
-    /// Минимальная ширина окна = sidebar + поле + блок + правое поле → блок всегда влезает.
-    static let minWindowWidth: CGFloat = 220 + 24 + contentWidth + 28   // сайдбар + поле + контент + инсет
-    /// ПРОСТОЙ ЭКРАН УЖЕ, И ЭТО НЕ ЭКОНОМИЯ, А СМЫСЛ (15.08.2026). Он корень, а не раздел: шесть
-    /// строк, никакого бокового меню. Шестисотпиксельная колонка Pro под ним выглядела бы полупустой,
-    /// а окно шириной в 872 пункта ради шести строк читается как «тут что-то не поместилось».
+    // Правое поле включает место постоянной полосы прокрутки.
+    static let minWindowWidth: CGFloat = 760
+    static let defaultWindowHeight: CGFloat = 560
     static let simpleContentWidth: CGFloat = 560
     static let simpleWindowWidth: CGFloat = simpleContentWidth + contentMargin * 2
-    static let sectionGap: CGFloat = 18
-    static let itemGap: CGFloat = 10
-    // Поля ввода
-    static let fieldMaxWidth: CGFloat = 360
-    /// Фирменный coral-акцент (#FF7A59) — направление B (инженерный blueprint).
+    static let sectionGap: CGFloat = 12
+    static let itemGap: CGFloat = 6
+    static let fieldMaxWidth: CGFloat = 300
     static let coral = NSColor(srgbRed: 1.0, green: 122.0/255.0, blue: 89.0/255.0, alpha: 1)
-    /// Графит (#1C1B1A) — тёмная подложка бренда (герой сайта/онбординга, blueprint-фон).
     static let graphite = NSColor(srgbRed: 0x1C/255.0, green: 0x1B/255.0, blue: 0x1A/255.0, alpha: 1)
 }
 
@@ -123,7 +100,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// пересобирать констрейнты на каждом переходе.
     private lazy var rootVC = DetailVC(width: DS.simpleContentWidth, scroller: false)
     /// Размеры окна Pro, чтобы вернуть их при возврате из простого экрана.
-    private var proContentSize = NSSize(width: DS.minWindowWidth + 24, height: 700)
+    private var proContentSize = NSSize(width: DS.minWindowWidth, height: DS.defaultWindowHeight)
     /// ⚠️ ПОКАЗАТЬ ПОДРОБНЫЕ НА ОДИН РАЗ, НЕ ТРОГАЯ НАСТРОЙКУ (16.08). Ссылка вида «открыть настройки
     /// на разделе голоса» обязана показать раздел, но не имеет права переучивать человека: он выбрал
     /// простой режим, и завтра окно должно открыться простым. Раньше здесь стояло прямое
@@ -214,9 +191,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     convenience init(neuralPresentation: NeuralLayoutPresentationStore) {
         let de = ProcessInfo.processInfo.environment
-        let w0: CGFloat = (de["KEYBOOP_DUMP"] == "1" || de["KEYBOOP_LIVEDIAG"] == "1") ? 1040 : DS.minWindowWidth + 24
+        let w0: CGFloat = (de["KEYBOOP_DUMP"] == "1" || de["KEYBOOP_LIVEDIAG"] == "1") ? 1040 : DS.minWindowWidth
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: w0, height: 700),  // плейсхолдер; реальная высота — по контенту (ниже)
+            contentRect: NSRect(x: 0, y: 0, width: w0, height: DS.defaultWindowHeight),  // плейсхолдер; реальная высота — по контенту (ниже)
             styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
             backing: .buffered, defer: false
         )
@@ -257,18 +234,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         ])
         window.contentViewController = hostVC
         setBody(split)
-        // ⚠️ ПО ПЕРВОМУ РАЗДЕЛУ, А НЕ ПО САМОМУ ДЛИННОМУ (автор 17.08: «высота окна всех настроек
-        // очень большая»). По самому длинному окно открывалось на всю высоту экрана ради раздела,
-        // который человек, может, и не откроет, а первое впечатление о программе делает первый
-        // экран. Разделы длиннее просто прокручиваются, полоса у них видна всегда.
-        //
-        // И высоту, которую человек выставил сам, запоминаем: своя привычная высота важнее любой
-        // нашей подгонки, и переспрашивать её каждый запуск невежливо.
-        let first = SettingsSection.sidebarCases.first ?? .switching
-        let needed = detail.sectionHeight([first]) + DS.contentMargin * 2 + 16
-        let saved = CGFloat(AppSettings.shared.proWindowHeight)
+        // Старый размер не переносим: он рассчитывался под длинную страницу.
+        let saved = CGFloat(AppSettings.shared.compactWindowHeight)
         let screenMaxH = (NSScreen.main?.visibleFrame.height ?? 1000) - 40
-        window.setContentSize(NSSize(width: w0, height: min(saved > 200 ? saved : needed, screenMaxH)))
+        let height = saved > 200 ? saved : DS.defaultWindowHeight
+        window.setContentSize(NSSize(width: w0, height: min(height, screenMaxH)))
         window.center()
         // Окно тянется ТОЛЬКО по высоте: ширина контента фиксирована (поля прижаты влево, тянуть
         // вширь незачем и некрасиво). minSize.width == maxSize.width → горизонтальный ресайз запрещён.
@@ -457,8 +427,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         let icon = NSImageView(image: DockPresence.bundleIcon)
         icon.imageScaling = .scaleProportionallyUpOrDown
         icon.translatesAutoresizingMaskIntoConstraints = false
-        // ⚠️ 36, А НЕ 22. автор дважды: «превращается в кашу, все мелкие детали». Внутри знака рамка
-        // клавиши и диагональ, и на 22 pt диагональ занимала три пикселя. Меньше 32 брать нельзя.
         NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: DS.brandIconSize),
                                      icon.heightAnchor.constraint(equalToConstant: DS.brandIconSize)])
         let name = NSTextField(labelWithString: "Keyboop")
@@ -681,7 +649,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     /// человека» собственную подгонку. Этот срабатывает только после того, как отпустили край окна.
     func windowDidEndLiveResize(_ n: Notification) {
         guard let window, !showingSimple else { return }
-        AppSettings.shared.proWindowHeight = Double(window.contentView?.frame.height ?? 0)
+        AppSettings.shared.compactWindowHeight = Double(window.contentView?.frame.height ?? 0)
     }
 
     private func lockHeight() {
@@ -769,7 +737,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // заголовка), а ставил через `setContentSize` (с ней): окно худело на 32 pt за каждый цикл
         // «закрыл — открыл». Поймано замером, а не рассуждением.
         if !showingSimple, let window {
-            AppSettings.shared.proWindowHeight = Double(window.contentView?.frame.height ?? 0)
+            AppSettings.shared.compactWindowHeight = Double(window.contentView?.frame.height ?? 0)
         }
         let wasGuest = proVisit
         proVisit = false            // гостевой показ подробных живёт ровно до закрытия окна
@@ -885,7 +853,7 @@ final class SidebarRow: NSView {
         addSubview(icon)
 
         label.stringValue = title
-        label.font = .systemFont(ofSize: 13, weight: .medium)
+        label.font = .systemFont(ofSize: 12, weight: .medium)
         label.textColor = .labelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
@@ -893,7 +861,7 @@ final class SidebarRow: NSView {
         NSLayoutConstraint.activate([
             icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DS.rowLeadingInset),
             icon.centerYAnchor.constraint(equalTo: centerYAnchor),
-            icon.widthAnchor.constraint(equalToConstant: 18),
+            icon.widthAnchor.constraint(equalToConstant: 16),
             label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: DS.iconTextGap),
             label.centerYAnchor.constraint(equalTo: centerYAnchor),
             label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8)
@@ -1184,6 +1152,7 @@ final class DetailVC: NSViewController {
 
         let scroll = NSScrollView()
         scrollBox = scroll
+        scroll.setAccessibilityIdentifier("settings.scroll")
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = showsScroller
         scroll.hasHorizontalScroller = false   // только вертикальный скролл — контент не уезжает вбок
@@ -1748,9 +1717,6 @@ final class DetailVC: NSViewController {
 
         var items: [NSView] = [
             blockTitle("switch.title"),
-            NeuralLayoutSettingsView(settings: settings, presentation: neuralPresentation),
-            sub(L10n.t("switch.sub")),
-            group(8),
             card([
                 switchRow(L10n.t("switch.auto"), L10n.t("switch.autoSub"), settings.autoEnabled, #selector(toggleAuto),
                           help: L10n.t("switch.autoHelp"), key: "switch.auto"),
@@ -1766,10 +1732,11 @@ final class DetailVC: NSViewController {
                 controlRow(L10n.t("switch.manual"), HotkeyControl(),
                            subtitle: manualCapsFailure() ?? L10n.t("switch.manualSub"),
                            help: L10n.t("switch.manualHelp"),
-                           key: "switch.manual"),
+                           key: "switch.manual", keepSubtitle: manualCapsFailure() != nil),
                 groupConvertRow()            // «переключать несколько слов» — сразу после ручного хоткея
             ]),
-            group(6),
+            NeuralLayoutSettingsView(settings: settings, presentation: neuralPresentation),
+            group(2),
             sectionTitle(L10n.t("is.title")),
             card([
                 switchRow(L10n.t("is.enable"), L10n.t("is.enableSub"),
@@ -4353,7 +4320,7 @@ final class DetailVC: NSViewController {
                            enabled: Bool, help: String? = nil, key: String? = nil, wraps: Bool = false) -> NSView {
         let sw = NSSwitch(); sw.state = on ? .on : .off; sw.target = self; sw.action = action
         sw.isEnabled = enabled
-        let row = settingRow(title, subtitle, trailing: sw, help: help, key: key, wraps: wraps)
+        let row = settingRow(title, subtitle, trailing: sw, help: help, key: key, wraps: wraps, keepSubtitle: !enabled)
         row.alphaValue = enabled ? 1.0 : 0.5
         return row
     }
@@ -4370,13 +4337,13 @@ final class DetailVC: NSViewController {
     /// Строка с произвольным контролом справа (popup / segmented / hotkey).
     private func controlRow(_ title: String, _ control: NSView, enabled: Bool = true,
                             subtitle: String? = nil, help: String? = nil, key: String? = nil,
-                            wraps: Bool = false) -> NSView {
+                            wraps: Bool = false, keepSubtitle: Bool = false) -> NSView {
         control.setContentHuggingPriority(.required, for: .horizontal)
         control.setContentCompressionResistancePriority(.required, for: .horizontal)
         // Выключенная функция не должна предлагать настраивать себя (нелогично и путает): гасим
         // контрол вместе со вложенными — правые контролы часто контейнеры из нескольких кнопок.
         if !enabled { Self.setEnabledDeep(control, false) }
-        let row = settingRow(title, subtitle, trailing: control, help: help, key: key, wraps: wraps)
+        let row = settingRow(title, subtitle, trailing: control, help: help, key: key, wraps: wraps, keepSubtitle: keepSubtitle || !enabled)
         if !enabled { row.alphaValue = 0.45 }
         return row
     }
@@ -4431,7 +4398,11 @@ final class DetailVC: NSViewController {
     /// видит приложение впервые, и обрезанное «Переключит…» там хуже, чем лишние двадцать пунктов
     /// высоты. Высота строки задана как `>= 44`, поэтому она просто вырастет.
     private func settingRow(_ title: String, _ subtitle: String?, trailing: NSView,
-                            help: String? = nil, key: String? = nil, wraps: Bool = false) -> NSView {
+                            help: String? = nil, key: String? = nil, wraps: Bool = false, keepSubtitle: Bool = false) -> NSView {
+        if !wraps, let control = trailing as? NSControl {
+            control.controlSize = .small
+            control.font = .systemFont(ofSize: 12)
+        }
         // ⚠️ У ПЕРЕНОСИМОЙ ПОДПИСИ ШИРИНУ СЧИТАЕМ ПО ФАКТУ, А НЕ ПО КОНСТАНТЕ. `RowMetrics.wideControl`
         // это ЗАПАС под самый широкий контрол в проекте, и для узкой строки он съедал половину
         // колонки: текст переносился на пять строк рядом с пустым местом (снимок 15.08).
@@ -4439,13 +4410,14 @@ final class DetailVC: NSViewController {
                             : ((trailing is NSSwitch) ? RowMetrics.nsSwitch : RowMetrics.wideControl)
         let avail = contentW - 28 - reserve - 10 - (help == nil ? 0 : RowMetrics.helpSlot + 10)
         let l = NSTextField(labelWithString: title)
-        l.font = .systemFont(ofSize: 13); l.textColor = .labelColor
+        l.font = .systemFont(ofSize: wraps ? 13 : 12); l.textColor = .labelColor
         l.lineBreakMode = .byTruncatingTail
         l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         // tooltip — только если заголовок реально усекается (обычно короткий → нет tooltip)
         if truncates(title, font: l.font!, within: avail) { l.toolTip = title }
         let textCol: NSView
-        if let sub = subtitle {
+        let visibleSubtitle = !wraps && help != nil && !keepSubtitle ? nil : subtitle
+        if let sub = visibleSubtitle {
             // Однострочная подсказка с усечением «…»; полный текст — в tooltip ТОЛЬКО когда не
             // умещается (откат правки с переносом на 2 строки — она ломала выравнивание).
             let s: NSTextField
@@ -4492,45 +4464,21 @@ final class DetailVC: NSViewController {
         // Правильно наоборот: кружок вставляем ПЕРЕД контролом и только при наличии текста. Тогда
         // правый край контролов у всех строк одинаковый, а кружок просто стоит рядом со своим.
         var items: [NSView] = [textCol, spacer]
-        if let help { items.append(HelpButton(text: help, title: title)) }
+        if let help {
+            let explanation = !wraps ? [subtitle, help].compactMap { $0 }.joined(separator: "\n\n") : help
+            items.append(HelpButton(text: explanation, title: title))
+        }
         items.append(trailing)
         let row = NSStackView(views: items)
-        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = 10
+        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = wraps ? 10 : 8
         row.setClippingResistancePriority(.required, for: .vertical)
-        // Переносимой подписи нужен воздух: две-три строки, прижатые к разделителю сверху и снизу,
-        // читаются как слипшийся текст (автор 15.08: «используем перенос, но у нас нет отступов»).
-        // ⚠️ 20, А НЕ 14 (автор 15.08, второй заход: «всё ещё нет отступов»). Замер по снимку показал,
-        // что 14 пунктов давали между строками 23 пункта воздуха на три строки текста, и рядом с
-        // такой высокой подписью это читается как слипшийся список. Считать надо не «сколько
-        // добавили», а сколько видно между последней строкой одной подписи и первой строкой следующей.
-        // ⚠️ ПОЛЯ ЗДЕСЬ ОПТИЧЕСКИЕ, И СЧИТАЮТСЯ ОНИ НЕ ТАМ, ГДЕ КАЖЕТСЯ (автор 17.08: «верхний
-        // отступ больше, нижний до черты меньше, а должны быть одинаковые»).
-        //
-        // Замер живого окна: у строки текста своя внутренняя пустота, и она РАЗНАЯ сверху и снизу.
-        // Над прописными заголовка 6.5 pt, под строчной линией последней строки подписи 3.5 pt.
-        // Отсюда и перекос: при геометрически равных полях глаз видит сверху на три пункта больше.
-        //
-        // ⚠️ И `edgeInsets` САМОЙ СТРОКИ ЭТОГО НЕ ЛЕЧАТ. Проверено опытом: смена полей с 10.5/14.5
-        // на 9/16 не сдвинула текст НИ НА ПИКСЕЛЬ (кадры глифов совпали до десятой). Горизонтальный
-        // стек с `alignment = .centerY` центрирует содержимое по своей середине, а поля задают
-        // только высоту. Поэтому лишний воздух добавляем ВНУТРЬ текстовой колонки снизу: тогда
-        // центрирование само опускает текст на половину добавленного.
-        // ⚠️ ПЛОТНЫЕ СТРОКИ PRO НЕ ТРОГАЕМ: у них 9/9 и одна строка подписи, перекос там незаметен,
-        // а стартовая высота Pro-окна посчитана по первому разделу с этими строками.
-        let opticalPad: CGFloat = 16, boxTopSlack: CGFloat = 6.5
-        let vTop: CGFloat = wraps ? opticalPad - boxTopSlack : 9
-        let vBot = vTop
-        row.edgeInsets = NSEdgeInsets(top: vTop, left: wraps ? 16 : 14,
-                                      bottom: vBot, right: wraps ? 16 : 14)
-        // ⚠️ ВЫСОТУ СТРОКИ ПРИВЯЗЫВАЕМ К ТЕКСТУ ЯВНО, А НЕ ЖДЁМ ЭТОГО ОТ СТЕКА (автор 17.08: «текст
-        // подсказки прилип к разделителю»). У строк с кнопкой «i» `NSStackView.fittingSize` отдавал
-        // высоту 62 при текстовой колонке в 61 плюс поля 40: собственную высоту колонки он в расчёт
-        // не брал, и текст рисовался ЗА рамкой строки, поверх разделителя. Поля при этом честно
-        // стояли 20/20 — потому и выглядели разными в каждой строке, что разной была не подкладка,
-        // а то, насколько текст из неё вылезал. Замер живого окна: строка 0 кадр 62 при нужном 101.
+        let verticalPadding: CGFloat = wraps ? 9.5 : 5
+        let horizontalPadding: CGFloat = wraps ? 16 : 11
+        row.edgeInsets = NSEdgeInsets(top: verticalPadding, left: horizontalPadding,
+                                      bottom: verticalPadding, right: horizontalPadding)
         row.heightAnchor.constraint(greaterThanOrEqualTo: textCol.heightAnchor,
-                                    constant: vTop + vBot).isActive = true
-        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+                                    constant: verticalPadding * 2).isActive = true
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: wraps ? 44 : 35).isActive = true
         // Ключ L10n остаётся на самой вью: собранная строка это просто NSStackView, и по нему уже
         // не понять, какая настройка внутри. Простому режиму нужно уметь отбирать строки после
         // сборки — по заголовку нельзя, он переводится и меняется вместе с языком.
@@ -4577,7 +4525,7 @@ final class DetailVC: NSViewController {
         // content-hugging и центрируется по дефолтному .centerX вертикального стека → уезжает вправо.
         s.alignment = .leading
         s.distribution = .fill
-        s.spacing = DS.itemGap
+        s.spacing = showingRoot ? 10 : DS.itemGap
         // Растягиваемые (multiline-текст, скроллы, поля, row-стеки) пиним по ширине к стеку — иначе
         // .leading даёт им intrinsic-ширину, и multiline-текст не знает ширину для переноса.
         for v in views {

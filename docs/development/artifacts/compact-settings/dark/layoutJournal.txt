@@ -1,0 +1,4 @@
+windowW=760 windowH=560 screenVisibleH=1017
+pane=760 docView=588 clip=-1 column=528 colX=20 safeArea(l/r/t/b)=172/0/32/0
+paneH=560 viewportH=-1 docH=-1 columnH=1003 СКРОЛЛ=нет
+column.w=528 colX=20 pane=760

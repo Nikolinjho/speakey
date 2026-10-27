@@ -703,6 +703,7 @@ final class AppSettings {
     /// откроет настройки и увидит, что половина его настроек исчезла.
     /// Высота окна подробных настроек, как её оставил человек. 0 — ещё не трогал, тогда высота
     /// считается по первому разделу. Ширина не хранится: она фиксирована.
+    var compactWindowHeight: Double { get { d.double(forKey: "compactWindowHeight") } set { d.set(newValue, forKey: "compactWindowHeight") } }
     var proWindowHeight: Double { get { d.double(forKey: "proWindowHeight") } set { d.set(newValue, forKey: "proWindowHeight") } }
     var simpleMode: Bool { get { d.bool(forKey: "simpleMode") } set { d.set(newValue, forKey: "simpleMode") } }
     /// Показывали ли окно-приветствие (онбординг) — один раз при первом запуске.

@@ -43,10 +43,10 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     init(runtime: LayoutDiagnosticsRuntime) {
         self.runtime = runtime
         super.init(frame: .zero)
-        orientation = .vertical; alignment = .leading; spacing = 16
+        orientation = .vertical; alignment = .leading; spacing = 8
         translatesAutoresizingMaskIntoConstraints = false
         let title = text(L10n.t("sec.layoutJournal"))
-        title.font = .systemFont(ofSize: 21, weight: .semibold)
+        title.font = .systemFont(ofSize: 20, weight: .semibold)
         addArrangedSubview(title)
         collection.state = runtime.enabled ? .on : .off
         collection.target = self; collection.action = #selector(toggleCollection)
@@ -71,8 +71,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         stream.setLabel(L10n.journal("errors"), forSegment: 1)
         stream.selectedSegment = 0; stream.target = self; stream.action = #selector(filterChanged)
         stream.setAccessibilityIdentifier("journal.stream")
-        addArrangedSubview(stream)
-        addArrangedSubview(app)
+        addArrangedSubview(row([stream, app]))
         caseFilters.orientation = .vertical; caseFilters.alignment = .leading; caseFilters.spacing = 8
         caseFilters.addArrangedSubview(kind); caseFilters.addArrangedSubview(row([status, sort]))
         addArrangedSubview(caseFilters)
@@ -81,14 +80,15 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         dictionary.addItems(withTitles: [L10n.journal("allDictionary")] + LayoutDictionaryMatch.allCases.map { L10n.journal("dictionary." + $0.rawValue) })
         for (popup, id) in [(decisionAction, "action"), (decisionReason, "reason"), (dictionary, "dictionary")] { configure(popup, id: id) }
         decisionFilters.orientation = .vertical; decisionFilters.alignment = .leading; decisionFilters.spacing = 8
-        decisionFilters.addArrangedSubview(row([decisionAction, decisionReason])); decisionFilters.addArrangedSubview(dictionary)
+        decisionFilters.addArrangedSubview(row([decisionAction, decisionReason]))
+        decisionFilters.addArrangedSubview(dictionary)
         addArrangedSubview(decisionFilters)
         kind.widthAnchor.constraint(equalToConstant: 200).isActive = true
         status.widthAnchor.constraint(equalToConstant: 200).isActive = true
         sort.widthAnchor.constraint(equalToConstant: 180).isActive = true
         message.textColor = .secondaryLabelColor; message.font = .systemFont(ofSize: 12)
         addArrangedSubview(message)
-        body.orientation = .vertical; body.alignment = .leading; body.spacing = 12
+        body.orientation = .vertical; body.alignment = .leading; body.spacing = 8
         addArrangedSubview(body)
         for view in [body, message] { view.widthAnchor.constraint(equalTo: widthAnchor).isActive = true }
     }
@@ -358,15 +358,22 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     private func button(_ key: String, id: String = "", action: @escaping () -> Void) -> NSButton { JournalButton(L10n.journal(key), id: id, action: action) }
     private func label(_ key: String, secondary: Bool = false) -> NSTextField { text(L10n.journal(key), secondary: secondary) }
     private func text(_ value: String, secondary: Bool = false) -> NSTextField {
-        let label = NSTextField(wrappingLabelWithString: value); label.font = .systemFont(ofSize: secondary ? 12 : 13)
+        let label = NSTextField(wrappingLabelWithString: value); label.font = .systemFont(ofSize: secondary ? 11 : 12)
         label.textColor = secondary ? .secondaryLabelColor : .labelColor; return label
     }
-    private func row(_ views: [NSView]) -> NSStackView { let stack = NSStackView(views: views); stack.spacing = 8; return stack }
+    private func row(_ views: [NSView]) -> NSStackView {
+        for case let control as NSControl in views {
+            control.controlSize = .small
+            control.font = .systemFont(ofSize: 12)
+        }
+        let stack = NSStackView(views: views); stack.spacing = 8
+        return stack
+    }
     private func card(_ views: [NSView]) -> NSView {
         let card = CardView(); card.wantsLayer = true; card.translatesAutoresizingMaskIntoConstraints = false
         let stack = NSStackView(views: views); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(stack)
-        NSLayoutConstraint.activate([card.widthAnchor.constraint(equalToConstant: DS.contentWidth), stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16), stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16), stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 14), stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -14)])
+        NSLayoutConstraint.activate([card.widthAnchor.constraint(equalToConstant: DS.contentWidth), stack.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 11), stack.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -11), stack.topAnchor.constraint(equalTo: card.topAnchor, constant: 9), stack.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -9)])
         return card
     }
 }
