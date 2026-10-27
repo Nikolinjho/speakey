@@ -4,7 +4,7 @@ Tests/NeuralLayout/CoordinatorTests.swift:25:35: error: cannot find type 'Neural
  25 |     func receive(_ result: Result<NeuralLayoutResult, Error>) { count += 1 }
     |                                   `- error: cannot find type 'NeuralLayoutResult' in scope
  26 | }
- 27 | 
+ 27 |
 
 Tests/NeuralLayout/CoordinatorTests.swift:34:63: error: cannot find type 'NeuralLayoutRequest' in scope
  32 |         let epoch = UUID()
