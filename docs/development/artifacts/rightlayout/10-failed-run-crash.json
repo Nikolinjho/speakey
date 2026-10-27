@@ -1,0 +1,40 @@
+{
+  "exception": {
+    "codes": "0x0000000000000001, 0x0000000104a9452c",
+    "rawCodes": [
+      1,
+      4373169452
+    ],
+    "type": "EXC_BREAKPOINT",
+    "signal": "SIGTRAP"
+  },
+  "termination": {
+    "flags": 0,
+    "code": 5,
+    "namespace": "SIGNAL",
+    "indicator": "Trace/BPT trap: 5",
+    "byProc": "exc handler",
+    "byPid": 36795
+  },
+  "faultingThread": 0,
+  "frames": [
+    {
+      "imageOffset": 66860,
+      "symbol": "stress(_:name:)",
+      "symbolLocation": 3288,
+      "imageIndex": 0
+    },
+    {
+      "imageOffset": 60332,
+      "symbol": "main",
+      "symbolLocation": 3100,
+      "imageIndex": 0
+    },
+    {
+      "imageOffset": 204416,
+      "symbol": "start",
+      "symbolLocation": 6688,
+      "imageIndex": 1
+    }
+  ]
+}

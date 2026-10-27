@@ -54,6 +54,7 @@ enum CoordinatorTests: DiagnosticSuite {
             coordinator.submit(request("A"))
             coordinator.submit(request("B"))
             coordinator.submit(request("C", revision: 2))
+            t.check("Занят один worker и один pending", coordinator.activeRequestCount == 1 && coordinator.pendingRequestCount == 1)
             t.check("До выполнения назначена только одна работа", queues.work.count == 1 && backend.words.isEmpty)
             queues.runWork()
             t.check("Backend завершён до обработки delivery", backend.words == ["A"] && results.isEmpty && queues.work.isEmpty)

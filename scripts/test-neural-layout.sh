@@ -55,3 +55,7 @@ if [ "${#model_args[@]}" -gt 0 ]; then
     swift scripts/compile-rightlayout-model.swift Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel "${model_args[0]}"
 fi
 KEYBOOP_DATA_DIR="$PWD/Sources/Keyboop/Resources" "$work/tests" "$suite" "${model_args[@]}"
+
+if [ "$suite" = model ] || [ "$suite" = all ]; then
+    bash scripts/test-neural-layout-factory.sh
+fi

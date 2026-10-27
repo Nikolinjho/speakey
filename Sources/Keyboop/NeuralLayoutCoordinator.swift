@@ -26,6 +26,17 @@ final class NeuralLayoutCoordinator {
         self.onResult = onResult
     }
 
+    // Только чтение на главном потоке для диагностики ограниченной очереди.
+    var activeRequestCount: Int {
+        precondition(Thread.isMainThread)
+        return busy ? 1 : 0
+    }
+
+    var pendingRequestCount: Int {
+        precondition(Thread.isMainThread)
+        return pending == nil ? 0 : 1
+    }
+
     func submit(_ request: NeuralLayoutRequest) {
         precondition(Thread.isMainThread)
         pending = request

@@ -67,7 +67,7 @@ enum ModelTests: DiagnosticSuite {
             try RightLayoutModel.validateArray(type: .multiArray, dataType: .double, shape: [1, 20], isInput: true)
         }
         rejects("Вход неверной формы отклонён", as: .invalidOutput) {
-            try RightLayoutModel.validateArray(type: .multiArray, dataType: .int32, shape: [20], isInput: true)
+            try RightLayoutModel.validateArray(type: .multiArray, dataType: .float32, shape: [20], isInput: true)
         }
         rejects("Выход неверного типа отклонён", as: .invalidOutput) {
             try RightLayoutModel.validateArray(type: .string, dataType: nil, shape: [9], isInput: false)
