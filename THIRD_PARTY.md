@@ -95,3 +95,22 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND...
 
 AppKit, Carbon (Text Input Services), CoreGraphics, IOKit, AVFoundation, Speech,
 Translation и прочие — часть macOS, отдельной атрибуции не требуют.
+
+## 7. RightLayout – модель определения раскладки
+
+Модель `LayoutClassifier.mlmodel` из [chernistry/RightLayout](https://github.com/chernistry/RightLayout),
+лицензия **Apache-2.0**. Зафиксирована ревизия
+[`58658d8d4c3b71ed4cfd6b20627196a8145f17f9`](https://github.com/chernistry/RightLayout/tree/58658d8d4c3b71ed4cfd6b20627196a8145f17f9).
+
+Исходный файл: `RightLayout/Sources/Resources/LayoutClassifier.mlmodel`.
+SHA256: `5fab7216bce448129fe89e3e5d3fa63896cee8612364a72c631e24034e59f704`,
+размер: 13 880 886 байт, число параметров: 3 462 292.
+Происхождение и контракт записаны в `Resources/RightLayout/model.json`.
+Веса скачиваются командой `bash scripts/fetch-rightlayout-model.sh` с проверкой размера и SHA256.
+
+В приложение входят скомпилированная модель
+`Contents/Resources/RightLayout/LayoutClassifier.mlmodelc`, манифест и лицензия.
+Полный текст лицензии из той же ревизии сохранён в `Resources/RightLayout/LICENSE`
+и `Sources/Keyboop/Resources/RightLayout/LICENSE` для SwiftPM.
+В дереве исходного проекта на указанной ревизии файла NOTICE нет. Дополнительные уведомления
+от имени авторов не создавались. При сборке меняется только формат модели: веса не обучались заново.

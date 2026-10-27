@@ -162,6 +162,16 @@ if [ -n "$DUPES" ]; then
   exit 1
 fi
 
+# Проверяем и компилируем модель до изменения существующего приложения.
+bash scripts/fetch-rightlayout-model.sh --check-only
+RIGHTLAYOUT_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-rightlayout-build.XXXXXX")"
+trap 'rm -rf "$RIGHTLAYOUT_STAGE"' EXIT
+swift scripts/compile-rightlayout-model.swift \
+  Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel \
+  "$RIGHTLAYOUT_STAGE/LayoutClassifier.mlmodelc"
+cp Resources/RightLayout/model.json "$RIGHTLAYOUT_STAGE/model.json"
+cp Resources/RightLayout/LICENSE "$RIGHTLAYOUT_STAGE/LICENSE"
+
 echo "▸ swiftc compile…"
 # Close the bounded-wait race: a GUI may have launched while the old helper was finishing. Perform
 # one final exact-path check immediately before replacing any bundle contents.
@@ -172,7 +182,9 @@ if [ -n "$blocking_pids" ]; then
   exit 1
 fi
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/RightLayout"
+cp -R "$RIGHTLAYOUT_STAGE/LayoutClassifier.mlmodelc" "$APP/Contents/Resources/RightLayout/"
+cp "$RIGHTLAYOUT_STAGE/model.json" "$RIGHTLAYOUT_STAGE/LICENSE" "$APP/Contents/Resources/RightLayout/"
 
 # ⚠️ КРИТИЧНО (24.07): arm64-сборка whisper.cpp ДОЛЖНА быть с CMAKE_OSX_DEPLOYMENT_TARGET=14.0.
 # Без него cmake берёт таргет текущей системы (собирали на macOS 26) → ggml-metal делает STRONG-ссылку

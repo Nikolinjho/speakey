@@ -45,3 +45,7 @@ node_modules/
 # Патчи к чужим библиотекам — ЕДИНСТВЕННОЕ, что мы храним от vendor (см. docs/VENDOR_PATCHES.md).
 # Сама библиотека вендорится скриптами, а вот наши правки к ней восстановить неоткуда.
 !vendor-patches/
+
+# RightLayout: воспроизводимые веса и скомпилированный ресурс
+/Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel
+/Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodelc/

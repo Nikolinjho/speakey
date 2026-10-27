@@ -1,0 +1,1 @@
+bash: /Users/itsnikoko/keybop local/scripts/fetch-rightlayout-model.sh: No such file or directory
