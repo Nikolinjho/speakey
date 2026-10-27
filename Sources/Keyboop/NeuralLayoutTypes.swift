@@ -33,7 +33,7 @@ protocol NeuralLayoutBackend {
     func predict(_ word: String) throws -> NeuralLayoutScores
 }
 
-struct NeuralLayoutRequest: Equatable {
+struct NeuralLayoutRequest: Hashable {
     let epoch: UUID
     let revision: UInt64
     let occurrenceID: UUID

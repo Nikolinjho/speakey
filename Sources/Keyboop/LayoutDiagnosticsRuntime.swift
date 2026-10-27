@@ -17,6 +17,9 @@ final class LayoutDiagnosticsRuntime {
     private(set) var rulesReady = false
     private(set) var lastError: Error?
     private var changeScheduled = false
+    private lazy var neuralEvidence = NeuralLayoutEvidenceBuffer(store: store, enabled: enabled) { [weak self] result in
+        self?.finished(result)
+    }
     var journalEditing = false {
         didSet { if journalEditing != oldValue { controller.resetContext() } }
     }
@@ -64,8 +67,22 @@ final class LayoutDiagnosticsRuntime {
     var frozenRecent: [LayoutObservation] { controller.frozenRecent }
     func setEnabled(_ enabled: Bool) {
         settings.layoutDiagnosticsEnabled = enabled
+        neuralEvidence.setEnabled(enabled)
         controller.setEnabled(enabled)
         notifyChange()
+    }
+    func noteNeuralRequest(_ request: NeuralLayoutRequest) { neuralEvidence.note(request) }
+    func acceptNeuralResult(_ request: NeuralLayoutRequest, evidence: NeuralLayoutEvidence) {
+        neuralEvidence.accept(request, evidence: evidence)
+    }
+    func bindNeuralObservation(_ observation: LayoutObservation, to request: NeuralLayoutRequest) {
+        guard enabled else { return }
+        neuralEvidence.bind(observation.id, to: request)
+    }
+    func clearJournal(completion: @escaping LayoutJournalStore.Completion = { _ in }) {
+        neuralEvidence.reset()
+        controller.clearTemporaryState()
+        store.clear(completion: completion)
     }
     func freezeRecent() { controller.freezeRecent() }
     func clearTemporaryState() { controller.clearTemporaryState() }

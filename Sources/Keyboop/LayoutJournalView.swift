@@ -276,8 +276,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         let alert = NSAlert(); alert.messageText = L10n.journal("clearQuestion"); alert.informativeText = L10n.journal("clearHelp")
         alert.addButton(withTitle: L10n.journal("clear")); alert.addButton(withTitle: L10n.journal("cancel"))
         if alert.runModal() == .alertFirstButtonReturn {
-            runtime.clearTemporaryState()
-            operate { runtime.store.clear(completion: $0) }
+            operate { runtime.clearJournal(completion: $0) }
         }
     }
     private func export(_ confirmed: Bool) {

@@ -5,7 +5,7 @@ case "${1:-}" in baseline|rules|all) ;; *) echo "Неизвестный или �
 work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-detector.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 sources=()
-for name in Keymap DynamicKeymap LayoutData ExtraWords ExceptionStore LayoutDetector LayoutObservation LayoutJournalStore LayoutRuleService LayoutRuleBackend; do
+for name in NeuralLayoutTypes NeuralLayoutPolicy NeuralLayoutEvidence NeuralLayoutEvidenceBuffer Keymap DynamicKeymap LayoutData ExtraWords ExceptionStore LayoutDetector LayoutObservation LayoutJournalStore LayoutRuleService LayoutRuleBackend; do
     sources+=("Sources/Keyboop/$name.swift")
 done
 swiftc -swift-version 5 -framework Carbon "${sources[@]}" \

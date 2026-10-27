@@ -1,0 +1,151 @@
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:5:52: error: cannot find type 'NeuralLayoutEvidence' in scope
+ 3 | enum NeuralEvidenceTests: DiagnosticSuite {
+ 4 |     static let name = "neural-evidence"
+ 5 |     static func evidence(_ score: Double = 0.8) -> NeuralLayoutEvidence {
+   |                                                    `- error: cannot find type 'NeuralLayoutEvidence' in scope
+ 6 |         NeuralLayoutEvidence(modelID: "test", modelSHA256: String(repeating: "a", count: 64), mode: .observe,
+ 7 |             ru: 0.01, en: 0.01, ruFromEn: score, enFromRu: 0.01, unsupported: 0.17,
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:10:52: error: cannot find type 'NeuralLayoutRequest' in scope
+ 8 |             durationMs: 1, proposedCyrillic: true, block: nil, disagreesWithDetector: true)
+ 9 |     }
+10 |     static func request(_ revision: UInt64 = 0) -> NeuralLayoutRequest {
+   |                                                    `- error: cannot find type 'NeuralLayoutRequest' in scope
+11 |         NeuralLayoutRequest(epoch: UUID(), revision: revision, occurrenceID: UUID(), bundleID: "test", layoutCode: "en", word: "ghbdtn")
+12 |     }
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:6:9: error: cannot find 'NeuralLayoutEvidence' in scope
+ 4 |     static let name = "neural-evidence"
+ 5 |     static func evidence(_ score: Double = 0.8) -> NeuralLayoutEvidence {
+ 6 |         NeuralLayoutEvidence(modelID: "test", modelSHA256: String(repeating: "a", count: 64), mode: .observe,
+   |         `- error: cannot find 'NeuralLayoutEvidence' in scope
+ 7 |             ru: 0.01, en: 0.01, ruFromEn: score, enFromRu: 0.01, unsupported: 0.17,
+ 8 |             durationMs: 1, proposedCyrillic: true, block: nil, disagreesWithDetector: true)
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:11:9: error: cannot find 'NeuralLayoutRequest' in scope
+ 9 |     }
+10 |     static func request(_ revision: UInt64 = 0) -> NeuralLayoutRequest {
+11 |         NeuralLayoutRequest(epoch: UUID(), revision: revision, occurrenceID: UUID(), bundleID: "test", layoutCode: "en", word: "ghbdtn")
+   |         `- error: cannot find 'NeuralLayoutRequest' in scope
+12 |     }
+13 |     static func run(_ t: DiagnosticTests) {
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:33:277: error: value of type 'LayoutObservation' has no member 'neural'
+31 |         let old = LayoutJournalStore(directory: directory, now: { JournalStoreTests.date })
+32 |         let restored = JournalStoreTests.wait { old.snapshot(completion: $0) }
+33 |         t.check("Старый schemaVersion 1 сохраняет случаи и правила без neural", restored.loadError == nil && restored.cases == before.cases && restored.rules == before.rules && restored.observations == [observation] && restored.observations[0].neural == nil)
+   |                                                                                                                                                                                                                                                     `- error: value of type 'LayoutObservation' has no member 'neural'
+34 |         let encoded = try! JSONEncoder().encode(observation)
+35 |         t.check("nil neural опущен в JSON", !(String(data: encoded, encoding: .utf8)!.contains("neural")))
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:36:57: error: value of type 'LayoutJournalStore' has no member 'neuralWriteGeneration'
+34 |         let encoded = try! JSONEncoder().encode(observation)
+35 |         t.check("nil neural опущен в JSON", !(String(data: encoded, encoding: .utf8)!.contains("neural")))
+36 |         let generation = JournalStoreTests.wait { store.neuralWriteGeneration(completion: $0) }
+   |                                                         `- error: value of type 'LayoutJournalStore' has no member 'neuralWriteGeneration'
+37 |         t.check("Нейросведения прикреплены", sync { store.attachNeural(observationID: observation.id, generation: generation, evidence: evidence(), completion: $0) })
+38 |         var expected = observation
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:37:83: error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+35 |         t.check("nil neural опущен в JSON", !(String(data: encoded, encoding: .utf8)!.contains("neural")))
+36 |         let generation = JournalStoreTests.wait { store.neuralWriteGeneration(completion: $0) }
+37 |         t.check("Нейросведения прикреплены", sync { store.attachNeural(observationID: observation.id, generation: generation, evidence: evidence(), completion: $0) })
+   |                                                           `- error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+38 |         var expected = observation
+39 |         expected.neural = evidence()
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:39:18: error: value of type 'LayoutObservation' has no member 'neural'
+37 |         t.check("Нейросведения прикреплены", sync { store.attachNeural(observationID: observation.id, generation: generation, evidence: evidence(), completion: $0) })
+38 |         var expected = observation
+39 |         expected.neural = evidence()
+   |                  `- error: value of type 'LayoutObservation' has no member 'neural'
+40 |         t.check("Обогащение меняет только neural", snapshot().observations == [expected] && snapshot().cases == before.cases && snapshot().rules == before.rules)
+41 |         var submitted = observation
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:45:26: error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+43 |         _ = sync { store.recordObservation(submitted, completion: $0) }
+44 |         _ = sync { store.updateSubmission(observationID: submitted.id, submitted: true, completion: $0) }
+45 |         _ = sync { store.attachNeural(observationID: submitted.id, generation: generation, evidence: evidence(), completion: $0) }
+   |                          `- error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+46 |         t.check("Поздние сведения сохраняют submitted", snapshot().observations.last?.submission == .submitted && snapshot().observations.last?.neural == evidence())
+47 |         let file = directory.appendingPathComponent("layout-journal-v1.json")
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:46:169: error: value of type 'LayoutObservation' has no member 'neural'
+44 |         _ = sync { store.updateSubmission(observationID: submitted.id, submitted: true, completion: $0) }
+45 |         _ = sync { store.attachNeural(observationID: submitted.id, generation: generation, evidence: evidence(), completion: $0) }
+46 |         t.check("Поздние сведения сохраняют submitted", snapshot().observations.last?.submission == .submitted && snapshot().observations.last?.neural == evidence())
+   |                                                                                                                                                 `- error: value of type 'LayoutObservation' has no member 'neural'
+47 |         let file = directory.appendingPathComponent("layout-journal-v1.json")
+48 |         let bytes = try! Data(contentsOf: file)
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:49:26: error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+47 |         let file = directory.appendingPathComponent("layout-journal-v1.json")
+48 |         let bytes = try! Data(contentsOf: file)
+49 |         _ = sync { store.attachNeural(observationID: UUID(), generation: generation, evidence: evidence(), completion: $0) }
+   |                          `- error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+50 |         t.check("Неизвестный id не меняет файл", (try? Data(contentsOf: file)) == bytes)
+51 |         t.check("Невалидные оценки отклонены", !sync { store.attachNeural(observationID: observation.id, generation: generation, evidence: evidence(.nan), completion: $0) } && (try? Data(contentsOf: file)) == bytes)
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:51:87: error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+49 |         _ = sync { store.attachNeural(observationID: UUID(), generation: generation, evidence: evidence(), completion: $0) }
+50 |         t.check("Неизвестный id не меняет файл", (try? Data(contentsOf: file)) == bytes)
+51 |         t.check("Невалидные оценки отклонены", !sync { store.attachNeural(observationID: observation.id, generation: generation, evidence: evidence(.nan), completion: $0) } && (try? Data(contentsOf: file)) == bytes)
+   |                                                              `- error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+52 |         _ = sync { store.clear(completion: $0) }
+53 |         _ = sync { store.recordObservation(observation, completion: $0) }
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:54:26: error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+52 |         _ = sync { store.clear(completion: $0) }
+53 |         _ = sync { store.recordObservation(observation, completion: $0) }
+54 |         _ = sync { store.attachNeural(observationID: observation.id, generation: generation, evidence: evidence(), completion: $0) }
+   |                          `- error: value of type 'LayoutJournalStore' has no member 'attachNeural'
+55 |         t.check("Очистка инвалидирует старый generation даже при повторном id", snapshot().observations == [observation])
+56 |         let buffer = NeuralLayoutEvidenceBuffer(store: store, enabled: true)
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:56:22: error: cannot find 'NeuralLayoutEvidenceBuffer' in scope
+54 |         _ = sync { store.attachNeural(observationID: observation.id, generation: generation, evidence: evidence(), completion: $0) }
+55 |         t.check("Очистка инвалидирует старый generation даже при повторном id", snapshot().observations == [observation])
+56 |         let buffer = NeuralLayoutEvidenceBuffer(store: store, enabled: true)
+   |                      `- error: cannot find 'NeuralLayoutEvidenceBuffer' in scope
+57 |         let first = request()
+58 |         buffer.note(first); buffer.accept(first, evidence: evidence()); buffer.bind(observation.id, to: first)
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:60:120: error: value of type 'LayoutObservation' has no member 'neural'
+58 |         buffer.note(first); buffer.accept(first, evidence: evidence()); buffer.bind(observation.id, to: first)
+59 |         _ = snapshot(); _ = snapshot()
+60 |         t.check("Результат до наблюдения привязан точно", snapshot().observations[0].neural == evidence())
+   |                                                                                      `- error: value of type 'LayoutObservation' has no member 'neural'
+61 |         _ = sync { store.clear(completion: $0) }; buffer.reset()
+62 |         _ = sync { store.recordObservation(observation, completion: $0) }
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:67:113: error: value of type 'LayoutObservation' has no member 'neural'
+65 |         _ = snapshot()
+66 |         buffer.accept(second, evidence: evidence())
+67 |         t.check("Наблюдение до результата обогащено", snapshot().observations[0].neural == evidence())
+   |                                                                                  `- error: value of type 'LayoutObservation' has no member 'neural'
+68 |         _ = sync { store.clear(completion: $0) }; buffer.reset()
+69 |         _ = sync { store.recordObservation(observation, completion: $0) }
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:75:135: error: value of type 'LayoutObservation' has no member 'neural'
+73 |         buffer.accept(late, evidence: evidence())
+74 |         _ = snapshot(); _ = snapshot()
+75 |         t.check("Выключение отменяет также ожидающий callback generation", snapshot().observations[0].neural == nil)
+   |                                                                                                       `- error: value of type 'LayoutObservation' has no member 'neural'
+76 |         buffer.setEnabled(false)
+77 |         let disabled = request(); buffer.note(disabled); buffer.bind(observation.id, to: disabled); buffer.accept(disabled, evidence: evidence())
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:79:131: error: value of type 'LayoutObservation' has no member 'neural'
+77 |         let disabled = request(); buffer.note(disabled); buffer.bind(observation.id, to: disabled); buffer.accept(disabled, evidence: evidence())
+78 |         _ = snapshot()
+79 |         t.check("Выключенный сбор не принимает новые сведения", snapshot().observations[0].neural == nil)
+   |                                                                                            `- error: value of type 'LayoutObservation' has no member 'neural'
+80 |         buffer.setEnabled(true)
+81 |         let evicted = request(); buffer.note(evicted)
+
+Tests/LayoutDiagnostics/NeuralEvidenceTests.swift:86:138: error: value of type 'LayoutObservation' has no member 'neural'
+84 |         _ = snapshot()
+85 |         buffer.bind(observation.id, to: evicted); buffer.accept(evicted, evidence: evidence())
+86 |         t.check("Буфер ограничен 64 и не пишет префиксы", buffer.count == 64 && snapshot().observations[0].neural == nil && (try? Data(contentsOf: file)) == prefixBytes)
+   |                                                                                                            `- error: value of type 'LayoutObservation' has no member 'neural'
+87 |         let pendingClear = request(); buffer.note(pendingClear); buffer.bind(observation.id, to: pendingClear)
+88 |         buffer.reset(); _ = sync { store.clear(completion: $0) }

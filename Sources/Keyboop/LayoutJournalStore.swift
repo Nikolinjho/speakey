@@ -18,7 +18,7 @@ struct LayoutJournalSnapshot {
 }
 
 enum LayoutJournalError: Error {
-    case unsupportedSchema, invalidWord, missingCase, conflictingCase, missingReceipt, duplicateReceipt, sizeLimit, invalidExportDestination
+    case unsupportedSchema, invalidWord, missingCase, conflictingCase, missingReceipt, duplicateReceipt, sizeLimit, invalidExportDestination, invalidNeuralEvidence
 }
 
 final class LayoutJournalStore {
@@ -69,6 +69,7 @@ final class LayoutJournalStore {
     private let maxBytes: Int
     private let maxWordLength: Int
     private var state = Envelope()
+    private var neuralGeneration: UInt64 = 0
     private var loadError: Error?
     private var storageError: Error?
 
@@ -87,6 +88,7 @@ final class LayoutJournalStore {
 
     func recordObservation(_ observation: LayoutObservation, completion: @escaping Completion = { _ in }) {
         mutate(completion, preservingObservationID: observation.id) { next in
+            if let evidence = observation.neural { try evidence.validate() }
             try self.validate(observation.typed, observation.typed)
             if let proposed = observation.proposed { try self.validate(proposed, proposed) }
             if let alternative = observation.alternative { try self.validate(alternative, alternative) }
@@ -100,6 +102,30 @@ final class LayoutJournalStore {
         }
     }
 
+    func neuralWriteGeneration(completion: @escaping (UInt64) -> Void) {
+        queue.async {
+            let generation = self.neuralGeneration
+            DispatchQueue.main.async { completion(generation) }
+        }
+    }
+
+    func invalidateNeuralWrites(completion: @escaping Completion = { _ in }) {
+        queue.async {
+            self.neuralGeneration &+= 1
+            DispatchQueue.main.async { completion(.success(())) }
+        }
+    }
+
+    func attachNeural(observationID: UUID, generation: UInt64, evidence: NeuralLayoutEvidence,
+                      completion: @escaping Completion = { _ in }) {
+        mutate(completion, preservingObservationID: observationID, skipUnchanged: true) { next in
+            guard generation == self.neuralGeneration,
+                  let index = next.observations.firstIndex(where: { $0.id == observationID }) else { return }
+            try evidence.validate()
+            next.observations[index].neural = evidence
+        }
+    }
+
     func updateSubmission(observationID: UUID, submitted: Bool, completion: @escaping Completion = { _ in }) {
         mutate(completion) { next in
             guard let index = next.observations.firstIndex(where: { $0.id == observationID }),
@@ -110,6 +136,7 @@ final class LayoutJournalStore {
 
     func record(_ feedback: LayoutFeedback, completion: @escaping Completion = { _ in }) {
         mutate(completion) { next in
+            if let evidence = feedback.observation.neural { try evidence.validate() }
             try self.validate(feedback.observation.typed, feedback.expected)
             if let proposed = feedback.observation.proposed { try self.validate(proposed, feedback.expected) }
             if let alternative = feedback.observation.alternative { try self.validate(alternative, feedback.expected) }
@@ -198,6 +225,7 @@ final class LayoutJournalStore {
     // Запись выполняется сразу в той же очереди, поэтому старый отложенный снимок не восстановит случаи после очистки.
     func clear(completion: @escaping Completion = { _ in }) {
         mutate(completion) { next in
+            self.neuralGeneration &+= 1
             next.cases.removeAll()
             next.observations.removeAll()
             next.observationIDs.removeAll()
@@ -227,12 +255,13 @@ final class LayoutJournalStore {
         }
     }
 
-    private func mutate(_ completion: @escaping Completion, preservingObservationID: UUID? = nil, change: @escaping (inout Envelope) throws -> Void) {
+    private func mutate(_ completion: @escaping Completion, preservingObservationID: UUID? = nil, skipUnchanged: Bool = false, change: @escaping (inout Envelope) throws -> Void) {
         queue.async {
             let result = Result<Void, Error> {
                 if let error = self.storageError { throw error }
                 var next = self.state
                 try change(&next)
+                if skipUnchanged && next == self.state { return }
                 let data = try self.retainedData(&next, preservingObservationID: preservingObservationID)
                 try self.write(data, to: self.file)
                 self.state = next

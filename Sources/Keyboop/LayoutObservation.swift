@@ -28,6 +28,7 @@ struct LayoutObservation: Codable, Equatable, Identifiable {
     var proposed: String?
     var alternative: String? = nil
     var dictionaryMatch: LayoutDictionaryMatch? = nil
+    var neural: NeuralLayoutEvidence? = nil
     var path: LayoutPath
     var reason: LayoutReason
     var action: LayoutAction
