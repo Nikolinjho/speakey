@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+<title id="title">Speakey – Диалог клавиш</title>
+<desc id="desc">Две клавиши-реплики: текст, языки и обмен сообщениями. Более дружелюбный и цветной образ.</desc>
+<defs><linearGradient id="v4-bg" x1="12" y1="12" x2="244" y2="244" gradientUnits="userSpaceOnUse"><stop stop-color="#FFFCF4"/><stop offset="1" stop-color="#EDE7DA"/></linearGradient></defs>
+<rect x="12" y="12" width="232" height="232" rx="52" fill="url(#v4-bg)"/>
+<rect x="13" y="13" width="230" height="230" rx="51" fill="none" stroke="#FFFFFF" stroke-opacity=".8" stroke-width="2"/>
+<path d="M51 73a19 19 0 0 1 19-19h65a19 19 0 0 1 19 19v51a19 19 0 0 1-19 19h-18l-22 19v-19H70a19 19 0 0 1-19-19Z" fill="#F57759"/>
+<path d="M76 89h52M76 108h32" stroke="#FFF8EA" stroke-width="9" stroke-linecap="round"/>
+<path d="M116 127a19 19 0 0 1 19-19h51a19 19 0 0 1 19 19v52a19 19 0 0 1-19 19h-15v17l-23-17h-13a19 19 0 0 1-19-19Z" fill="#3D65D9" stroke="#F7F2E7" stroke-width="6"/>
+<path d="M179 134v21h-33m0 0 10-10m-10 10 10 10" fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

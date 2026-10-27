@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+<title id="title">Speakey – Поток ввода</title>
+<desc id="desc">Звуковая волна переходит в Enter. Показывает превращение речи в готовый текст.</desc>
+<defs><linearGradient id="v5-bg" x1="30" y1="12" x2="226" y2="244" gradientUnits="userSpaceOnUse"><stop stop-color="#194E47"/><stop offset="1" stop-color="#092E2D"/></linearGradient><linearGradient id="v5-line" x1="58" y1="99" x2="197" y2="163" gradientUnits="userSpaceOnUse"><stop stop-color="#91F2C7"/><stop offset="1" stop-color="#E8FFF1"/></linearGradient></defs>
+<rect x="12" y="12" width="232" height="232" rx="52" fill="url(#v5-bg)"/>
+<rect x="13" y="13" width="230" height="230" rx="51" fill="none" stroke="#A8FFD8" stroke-opacity=".15" stroke-width="2"/>
+<path d="M54 125h14l12-32 19 70 20-88 18 50h18" fill="none" stroke="url(#v5-line)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M194 94v47a24 24 0 0 1-24 24h-33m0 0 17-17m-17 17 17 17" fill="none" stroke="url(#v5-line)" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
