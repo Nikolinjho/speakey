@@ -176,11 +176,11 @@ Sources/Keyboop/ParakeetEngine.swift:63:18: warning: instance method 'lock' is u
  65 |             loadGate.unlock()
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'lock()' declared here
- 13 | 
+ 13 |
  14 | /// Attempts to acquire a lock, blocking a thread's execution until the lock can be acquired.
  15 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
     | `- note: 'lock()' declared here
- 16 | 
+ 16 |
  17 | /// Relinquishes a previously acquired lock.
 
 Sources/Keyboop/ParakeetEngine.swift:65:22: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
@@ -192,11 +192,11 @@ Sources/Keyboop/ParakeetEngine.swift:65:22: warning: instance method 'unlock' is
  67 |         }
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:18:1: note: 'unlock()' declared here
- 16 | 
+ 16 |
  17 | /// Relinquishes a previously acquired lock.
  18 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
     | `- note: 'unlock()' declared here
- 19 | 
+ 19 |
  20 | @end
 
 Sources/Keyboop/ParakeetEngine.swift:70:18: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
@@ -208,11 +208,11 @@ Sources/Keyboop/ParakeetEngine.swift:70:18: warning: instance method 'unlock' is
  72 |         // Неудачу НЕ запоминаем: человек мог просто не скачать модель, а через минуту скачать.
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:18:1: note: 'unlock()' declared here
- 16 | 
+ 16 |
  17 | /// Relinquishes a previously acquired lock.
  18 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
     | `- note: 'unlock()' declared here
- 19 | 
+ 19 |
  20 | @end
 
 Sources/Keyboop/ParakeetEngine.swift:77:18: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
@@ -224,11 +224,11 @@ Sources/Keyboop/ParakeetEngine.swift:77:18: warning: instance method 'lock' is u
  79 |     }
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'lock()' declared here
- 13 | 
+ 13 |
  14 | /// Attempts to acquire a lock, blocking a thread's execution until the lock can be acquired.
  15 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
     | `- note: 'lock()' declared here
- 16 | 
+ 16 |
  17 | /// Relinquishes a previously acquired lock.
 
 Sources/Keyboop/ParakeetEngine.swift:77:50: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
@@ -240,11 +240,11 @@ Sources/Keyboop/ParakeetEngine.swift:77:50: warning: instance method 'unlock' is
  79 |     }
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:18:1: note: 'unlock()' declared here
- 16 | 
+ 16 |
  17 | /// Relinquishes a previously acquired lock.
  18 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
     | `- note: 'unlock()' declared here
- 19 | 
+ 19 |
  20 | @end
 
 Sources/Keyboop/ParakeetEngine.swift:271:18: warning: instance method 'lock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
@@ -256,11 +256,11 @@ Sources/Keyboop/ParakeetEngine.swift:271:18: warning: instance method 'lock' is 
 273 |     }
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:15:1: note: 'lock()' declared here
- 13 | 
+ 13 |
  14 | /// Attempts to acquire a lock, blocking a thread's execution until the lock can be acquired.
  15 | - (void)lock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
     | `- note: 'lock()' declared here
- 16 | 
+ 16 |
  17 | /// Relinquishes a previously acquired lock.
 
 Sources/Keyboop/ParakeetEngine.swift:271:58: warning: instance method 'unlock' is unavailable from asynchronous contexts; Use async-safe scoped locking instead; this is an error in the Swift 6 language mode
@@ -272,11 +272,11 @@ Sources/Keyboop/ParakeetEngine.swift:271:58: warning: instance method 'unlock' i
 273 |     }
 
 /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Headers/NSLock.h:18:1: note: 'unlock()' declared here
- 16 | 
+ 16 |
  17 | /// Relinquishes a previously acquired lock.
  18 | - (void)unlock NS_SWIFT_UNAVAILABLE_FROM_ASYNC("Use async-safe scoped locking instead");
     | `- note: 'unlock()' declared here
- 19 | 
+ 19 |
  20 | @end
 Sources/Keyboop/NotchIsland.swift:458:31: warning: immutable value 'nH' was never used; consider replacing with '_' or removing it [#NoUsage]
 456 |     func silhouette() -> CGPath {
@@ -284,7 +284,7 @@ Sources/Keyboop/NotchIsland.swift:458:31: warning: immutable value 'nH' was neve
 458 |         let nW = notch.width, nH = notch.height
     |                               `- warning: immutable value 'nH' was never used; consider replacing with '_' or removing it [#NoUsage]
 459 |         let w = max(nW, min(drawnW, W))
-460 | 
+460 |
 
 [#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
 Sources/Keyboop/Engine.swift:1586:48: warning: 'weak' ownership of capture 'self' differs from implicitly-captured strong reference in outer scope [#ImplicitStrongCapture]
@@ -331,7 +331,7 @@ Sources/Keyboop/Engine.swift:1960:69: warning: backward matching of the unlabele
 
 Sources/Keyboop/TextReplacer.swift:260:17: note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 258 |     }
-259 | 
+259 |
 260 |     static func replace(deleteCount: Int, with text: String,
     |                 `- note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 261 |                         firstKeySettleMicros: UInt32? = nil, thenReturn: Bool = false,
@@ -363,7 +363,7 @@ Sources/Keyboop/Engine.swift:2257:86: warning: backward matching of the unlabele
 
 Sources/Keyboop/TextReplacer.swift:260:17: note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 258 |     }
-259 | 
+259 |
 260 |     static func replace(deleteCount: Int, with text: String,
     |                 `- note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 261 |                         firstKeySettleMicros: UInt32? = nil, thenReturn: Bool = false,
@@ -379,7 +379,7 @@ Sources/Keyboop/Engine.swift:2311:86: warning: backward matching of the unlabele
 
 Sources/Keyboop/TextReplacer.swift:260:17: note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 258 |     }
-259 | 
+259 |
 260 |     static func replace(deleteCount: Int, with text: String,
     |                 `- note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 261 |                         firstKeySettleMicros: UInt32? = nil, thenReturn: Bool = false,
@@ -395,7 +395,7 @@ Sources/Keyboop/Engine.swift:2352:93: warning: backward matching of the unlabele
 
 Sources/Keyboop/TextReplacer.swift:260:17: note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 258 |     }
-259 | 
+259 |
 260 |     static func replace(deleteCount: Int, with text: String,
     |                 `- note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 261 |                         firstKeySettleMicros: UInt32? = nil, thenReturn: Bool = false,
@@ -411,7 +411,7 @@ Sources/Keyboop/Engine.swift:2372:86: warning: backward matching of the unlabele
 
 Sources/Keyboop/TextReplacer.swift:260:17: note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 258 |     }
-259 | 
+259 |
 260 |     static func replace(deleteCount: Int, with text: String,
     |                 `- note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 261 |                         firstKeySettleMicros: UInt32? = nil, thenReturn: Bool = false,
@@ -427,7 +427,7 @@ Sources/Keyboop/Engine.swift:2530:86: warning: backward matching of the unlabele
 
 Sources/Keyboop/TextReplacer.swift:260:17: note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 258 |     }
-259 | 
+259 |
 260 |     static func replace(deleteCount: Int, with text: String,
     |                 `- note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 261 |                         firstKeySettleMicros: UInt32? = nil, thenReturn: Bool = false,
@@ -443,7 +443,7 @@ Sources/Keyboop/Engine.swift:2814:107: warning: backward matching of the unlabel
 
 Sources/Keyboop/TextReplacer.swift:260:17: note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 258 |     }
-259 | 
+259 |
 260 |     static func replace(deleteCount: Int, with text: String,
     |                 `- note: 'replace(deleteCount:with:firstKeySettleMicros:thenReturn:onSubmission:completion:)' declared here
 261 |                         firstKeySettleMicros: UInt32? = nil, thenReturn: Bool = false,
