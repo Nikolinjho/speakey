@@ -56,6 +56,12 @@ final class KeystrokeBuffer {
         lastActivity = now
     }
 
+    var deletionSource: (word: String, occurrenceID: UUID)? {
+        if !currentWord.isEmpty, let id = currentOccurrenceID { return (currentWord, id) }
+        if !lastWord.isEmpty, let id = lastOccurrenceID { return (lastWord, id) }
+        return nil
+    }
+
     func backspace() {
         lastActivity = Date()
         if !currentWord.isEmpty {

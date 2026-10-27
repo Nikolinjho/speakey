@@ -87,19 +87,22 @@ struct LayoutObservationFacts {
     static func evaluate(_ typed: String, wordsRu: Set<String>?, wordsEn: Set<String>?,
                          convert: (String, Bool) -> String) -> LayoutObservationFacts {
         let value = typed.lowercased()
-        let latin = !value.isEmpty && value.unicodeScalars.allSatisfy { (97...122).contains($0.value) }
-        let cyrillic = !value.isEmpty && value.unicodeScalars.allSatisfy { (1072...1103).contains($0.value) || $0.value == 1105 }
-        guard latin || cyrillic else { return LayoutObservationFacts(alternative: nil, dictionaryMatch: .unavailable) }
-        let alternative = convert(typed, latin)
-        let opposite = alternative.lowercased().unicodeScalars.allSatisfy {
-            latin ? ((1072...1103).contains($0.value) || $0.value == 1105) : (97...122).contains($0.value)
+        guard !typed.isEmpty, !typed.unicodeScalars.contains(where: { CharacterSet.whitespacesAndNewlines.contains($0) || CharacterSet.controlCharacters.contains($0) }) else {
+            return LayoutObservationFacts(alternative: nil, dictionaryMatch: .unavailable)
         }
-        guard opposite, alternative != typed, convert(alternative, !latin) == typed else {
+        let pair = [true, false].compactMap { direction -> (String, Bool)? in
+            let candidate = convert(typed, direction)
+            guard candidate.count == typed.count,
+                  zip(typed, candidate).allSatisfy({ $0 != $1 }),
+                  convert(candidate, !direction) == typed else { return nil }
+            return (candidate, direction)
+        }.first
+        guard let (alternative, toCyrillic) = pair else {
             return LayoutObservationFacts(alternative: nil, dictionaryMatch: .unavailable)
         }
         guard let wordsRu, let wordsEn else { return LayoutObservationFacts(alternative: alternative, dictionaryMatch: .unavailable) }
-        let sourceFound = (latin ? wordsEn : wordsRu).contains(value)
-        let alternativeFound = (latin ? wordsRu : wordsEn).contains(alternative.lowercased())
+        let sourceFound = (toCyrillic ? wordsEn : wordsRu).contains(value)
+        let alternativeFound = (toCyrillic ? wordsRu : wordsEn).contains(alternative.lowercased())
         let match: LayoutDictionaryMatch = sourceFound ? (alternativeFound ? .both : .source) : (alternativeFound ? .alternative : .neither)
         return LayoutObservationFacts(alternative: alternative, dictionaryMatch: match)
     }

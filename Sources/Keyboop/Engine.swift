@@ -16,10 +16,10 @@ final class Engine: EventTapHandler {
     }
 
     private func recordDecision(word: String, proposed: String? = nil, path: LayoutPath,
-                                reason: LayoutReason, action: LayoutAction, completed: Bool) -> LayoutObservation? {
+                                reason: LayoutReason, action: LayoutAction, completed: Bool, occurrenceID: UUID? = nil) -> LayoutObservation? {
         guard diagnostics.enabled, !Pause.active, !pendingContextClear, !pendingSoftReset,
               !diagnostics.bypassesJournal(bundleID: frontAppBID),
-              let occurrence = completed ? buffer.lastOccurrenceID : buffer.currentOccurrenceID else { return nil }
+              let occurrence = occurrenceID ?? (completed ? buffer.lastOccurrenceID : buffer.currentOccurrenceID) else { return nil }
         let facts = observationFacts(word)
         return diagnostics.controller.record(occurrenceID: occurrence, bundleID: frontAppBID, typed: word,
             proposed: proposed, alternative: facts.alternative, dictionaryMatch: facts.dictionaryMatch,
@@ -35,9 +35,9 @@ final class Engine: EventTapHandler {
     }
 
     private func recordEditingBeforeDeletion() {
-        guard !muted, !buffer.currentWord.isEmpty, let occurrence = buffer.currentOccurrenceID,
-              !diagnostics.recent.contains(where: { $0.occurrenceID == occurrence && $0.contextID == diagnostics.controller.contextID }) else { return }
-        _ = recordDecision(word: buffer.currentWord, path: .editing, reason: .editingObserved, action: .keep, completed: false)
+        guard !muted, let source = buffer.deletionSource,
+              !diagnostics.recent.contains(where: { $0.occurrenceID == source.occurrenceID && $0.contextID == diagnostics.controller.contextID }) else { return }
+        _ = recordDecision(word: source.word, path: .editing, reason: .editingObserved, action: .keep, completed: false, occurrenceID: source.occurrenceID)
     }
 
     private func clearForAntiResonance(word: String, proposed: String, path: LayoutPath, completed: Bool) {

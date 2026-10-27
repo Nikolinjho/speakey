@@ -70,9 +70,13 @@ enum RuleDetectorTests {
             let facts = LayoutObservationFacts.evaluate("дд", wordsRu: ru, wordsEn: en) { Keymap.convert($0, toCyrillic: $1, table: nil) }
             t.check("Словарный факт не подменяет причину решения: \(expected)", facts.dictionaryMatch == expected)
         }
-        for typed in ["дд1", "aд", "two words", "ж"] {
+        for typed in ["дд1", "aд", "two words", "🙂"] {
             let facts = LayoutObservationFacts.evaluate(typed, wordsRu: [], wordsEn: []) { Keymap.convert($0, toCyrillic: $1, table: nil) }
             t.check("Контрфактическая пара требует двух буквенных алфавитов и roundtrip: \(typed)", facts.alternative == nil)
+        }
+        for (source, target) in [("[kt,", "хлеб"), ("хлеб", "[kt,"), ("yj;", "нож"), ("нож", "yj;")] {
+            let facts = LayoutObservationFacts.evaluate(source, wordsRu: ["хлеб", "нож"], wordsEn: []) { Keymap.convert($0, toCyrillic: $1, table: nil) }
+            t.check("Клавиши знаков входят в реальную пару раскладок: \(source)", facts.alternative == target && facts.dictionaryMatch == (source == "хлеб" || source == "нож" ? .source : .alternative))
         }
         t.check("Короткое дд сохраняет исходное решение детектора", decide("дд") == .keep)
         let unavailable = LayoutObservationFacts.evaluate("дд", wordsRu: nil, wordsEn: nil) { Keymap.convert($0, toCyrillic: $1, table: nil) }

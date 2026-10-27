@@ -114,7 +114,7 @@ enum TrackerTests: DiagnosticSuite {
         _ = continued.observeRetyping(occurrenceID: keep.occurrenceID, contextID: keep.contextID, current: "ghbdtnx", uptime: 0.2)
         tests.check("Продолжение оставленного слова отменяет связь", manual(continued, keep, from: "ghbdtn", to: "привет") == nil)
 
-        for (source, alternative) in [("дд", "ll"), ("ll", "дд")] {
+        for (source, alternative) in [("дд", "ll"), ("ll", "дд"), ("[kt,", "хлеб"), ("хлеб", "[kt,")] {
             var event = observation(typed: source)
             event.alternative = alternative
             for values in [[String(source.prefix(1)), "", String(alternative.prefix(1)), alternative], ["", alternative]] {

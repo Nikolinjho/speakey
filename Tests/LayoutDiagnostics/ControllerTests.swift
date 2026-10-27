@@ -96,7 +96,7 @@ enum ControllerTests: DiagnosticSuite {
         tests.check("Сохраняется фактическое наблюдение без выдуманной замены", recorded.last == persisted && persisted.proposed == nil && persisted.alternative == "ll")
         controller.clearTemporaryState()
         controller.submission(observationID: persisted.id, contextID: persisted.contextID, submitted: true)
-        tests.check("Позднее подтверждение не возвращает очищенное наблюдение", acknowledgements.isEmpty)
+        tests.check("Позднее подтверждение передаётся хранилищу без восстановления временной связи", acknowledgements == [persisted.id] && controller.recent.isEmpty)
         for tail in ["", " "] {
             controller.clearTemporaryState()
             let sourceBuffer = KeystrokeBuffer()
@@ -141,6 +141,47 @@ enum ControllerTests: DiagnosticSuite {
         clock += 11; controller.resetContext()
         controller.mark(observation: oldObservation, expected: "ll", kind: .missedConversion)
         tests.check("Явная отметка сохранённого решения не зависит от кольца и контекста", feedback.last?.observationID == oldObservation.id && feedback.last?.source == .explicit)
+        for bulk in [false, true] {
+            controller.clearTemporaryState()
+            let sourceBuffer = KeystrokeBuffer(); sourceBuffer.append("дд"); sourceBuffer.boundary(" ")
+            let source = sourceBuffer.deletionSource!
+            let event = controller.record(occurrenceID: source.occurrenceID, bundleID: "test", typed: source.word, proposed: nil, alternative: "ll", path: .editing, reason: .editingObserved, action: .keep, complete: false)!
+            let before = feedback.count
+            if bulk { sourceBuffer.clear(); controller.resetContext() }
+            else {
+                for _ in 0..<3 {
+                    sourceBuffer.backspace()
+                    controller.observeRetyping(occurrenceID: sourceBuffer.retypingOccurrenceID ?? sourceBuffer.currentOccurrenceID, current: sourceBuffer.currentWord)
+                }
+                for letter in "ll" {
+                    sourceBuffer.append(String(letter))
+                    controller.observeRetyping(occurrenceID: sourceBuffer.retypingOccurrenceID ?? sourceBuffer.currentOccurrenceID, current: sourceBuffer.currentWord)
+                }
+            }
+            tests.check("Удаление до отложенного решения сохраняет полный источник, групповое не связывается: \(bulk)", recorded.last?.typed == "дд" && recorded.last?.id == event.id && feedback.count == before + (bulk ? 0 : 1))
+        }
+        for reset in ["context", "off", "expiry", "clear"] {
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: directory) }
+            let store = LayoutJournalStore(directory: directory)
+            var now: TimeInterval = 0
+            let durable = LayoutDiagnosticsController(enabled: true, uptime: { now }, sink: { _ in })
+            durable.onObservation = { store.recordObservation($0) }
+            durable.onSubmission = { store.updateSubmission(observationID: $0, submitted: $1) }
+            let event = durable.record(occurrenceID: UUID(), bundleID: "test", typed: "hello", proposed: "руддщ", path: .live, reason: .detectorConvert, action: .replace, complete: false)!
+            if reset == "off" { durable.setEnabled(false) }
+            else if reset == "expiry" { now = 11 }
+            else { durable.resetContext() }
+            if reset == "clear" {
+                let _: Result<Void, Error> = JournalStoreTests.wait { store.clear(completion: $0) }
+            }
+            durable.submission(observationID: event.id, contextID: event.contextID, submitted: true)
+            let saved: LayoutJournalSnapshot = JournalStoreTests.wait { store.snapshot(completion: $0) }
+            let restarted = LayoutJournalStore(directory: directory)
+            let loaded: LayoutJournalSnapshot = JournalStoreTests.wait { restarted.snapshot(completion: $0) }
+            tests.check("Поздний фактический ответ сохраняется после перезапуска без возвращения удалённого: \(reset)", reset == "clear" ? saved.observations.isEmpty && loaded.observations.isEmpty : saved.observations.count == 1 && loaded.observations.count == 1 && loaded.observations.first?.submission == .submitted)
+            tests.check("Поздний фактический ответ не восстанавливает временный контекст: \(reset)", durable.recent.isEmpty)
+        }
         let buffer = KeystrokeBuffer()
         buffer.onContextReset = { controller.resetContext() }
         buffer.append("hello")

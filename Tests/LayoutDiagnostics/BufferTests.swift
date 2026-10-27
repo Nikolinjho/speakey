@@ -28,6 +28,11 @@ enum BufferTests: DiagnosticSuite {
         buffer.backspace()
         buffer.backspace()
         tests.check("Стирание однобуквенного завершённого слова сохраняет связь", buffer.retypingOccurrenceID == single)
+        let trailing = KeystrokeBuffer(); trailing.append("дд"); trailing.boundary(" ")
+        let completedID = trailing.lastOccurrenceID
+        tests.check("Источник удаления до решения на границе включает полное завершённое слово", trailing.deletionSource?.word == "дд" && trailing.deletionSource?.occurrenceID == completedID)
+        trailing.backspace()
+        tests.check("Удаление хвоста не обрезает источник следующего удаления", trailing.deletionSource?.word == "дд" && trailing.deletionSource?.occurrenceID == completedID)
         var resets = 0
         buffer.onContextReset = { resets += 1 }
         buffer.clear()

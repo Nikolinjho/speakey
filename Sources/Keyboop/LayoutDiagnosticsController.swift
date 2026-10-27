@@ -50,9 +50,9 @@ final class LayoutDiagnosticsController {
     }
 
     func submission(observationID: UUID, contextID: UUID, submitted: Bool) {
+        onSubmission?(observationID, submitted)
         guard enabled, self.contextID == contextID else { return }
         guard recent.contains(where: { $0.id == observationID }) else { return }
-        onSubmission?(observationID, submitted)
         tracker.setSubmission(observationID: observationID, submitted: submitted)
         onChange?()
     }
