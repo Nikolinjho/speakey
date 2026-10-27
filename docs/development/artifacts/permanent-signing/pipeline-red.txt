@@ -1,0 +1,68 @@
+..FF...FFF.F
+======================================================================
+FAIL: test_default_identity_signs_inside_out (__main__.SigningPipelineTests.test_default_identity_signs_inside_out)
+Постоянная подпись применяется изнутри наружу, затем строго проверяется.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/itsnikoko/keybop local/Tests/NeuralLayout/SigningPipelineTests.py", line 64, in test_default_identity_signs_inside_out
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 127 != 0 : bash: /Users/itsnikoko/keybop local/scripts/sign-keyboop-app.sh: No such file or directory
+
+
+======================================================================
+FAIL: test_identity_check_uses_exact_name_or_hash (__main__.SigningPipelineTests.test_identity_check_uses_exact_name_or_hash)
+Проверка принимает точное имя или полный хеш без подписи бандла.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/itsnikoko/keybop local/Tests/NeuralLayout/SigningPipelineTests.py", line 114, in test_identity_check_uses_exact_name_or_hash
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 127 != 0 : bash: /Users/itsnikoko/keybop local/scripts/sign-keyboop-app.sh: No such file or directory
+
+
+======================================================================
+FAIL: test_nested_failure_stops_before_outer (__main__.SigningPipelineTests.test_nested_failure_stops_before_outer)
+Ошибка вложенного XPC останавливает все последующие подписи.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/itsnikoko/keybop local/Tests/NeuralLayout/SigningPipelineTests.py", line 97, in test_nested_failure_stops_before_outer
+    self.assertEqual(len(self.calls()), 1)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 1
+
+======================================================================
+FAIL: test_outer_failure_stops_before_verification (__main__.SigningPipelineTests.test_outer_failure_stops_before_verification)
+Ошибка внешней подписи возвращается вызывающему скрипту.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/itsnikoko/keybop local/Tests/NeuralLayout/SigningPipelineTests.py", line 102, in test_outer_failure_stops_before_verification
+    self.assertEqual(len(self.calls()), 6)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 6
+
+======================================================================
+FAIL: test_release_keeps_runtime_timestamp_and_entitlements (__main__.SigningPipelineTests.test_release_keeps_runtime_timestamp_and_entitlements)
+Релиз сохраняет hardened runtime, timestamp и релизные entitlements.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/itsnikoko/keybop local/Tests/NeuralLayout/SigningPipelineTests.py", line 129, in test_release_keeps_runtime_timestamp_and_entitlements
+    self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 127 != 0 : bash: /Users/itsnikoko/keybop local/scripts/sign-keyboop-app.sh: No such file or directory
+
+
+======================================================================
+FAIL: test_verify_failure_is_fatal (__main__.SigningPipelineTests.test_verify_failure_is_fatal)
+Невалидная итоговая подпись не считается готовой сборкой.
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Users/itsnikoko/keybop local/Tests/NeuralLayout/SigningPipelineTests.py", line 108, in test_verify_failure_is_fatal
+    self.assertEqual(len(self.calls()), 7)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: 0 != 7
+
+----------------------------------------------------------------------
+Ran 12 tests in 0.185s
+
+FAILED (failures=6)

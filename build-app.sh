@@ -1,9 +1,12 @@
 #!/bin/bash
 # Собирает Keyboop.app напрямую через swiftc (SwiftPM в этой CLT сломан),
-# кладёт Info.plist (LSUIElement) и ad-hoc подписывает.
+# кладёт Info.plist (LSUIElement) и подписывает постоянным сертификатом.
 set -e
 cd "$(dirname "$0")"
 PROJECT_ROOT="$(pwd -P)"
+
+# Проверяем сертификат до компиляции и изменения подготовленного бандла.
+bash "$PROJECT_ROOT/scripts/sign-keyboop-app.sh" --check-identity
 
 # Ежедневная резервная копия, привязанная к работе, а не к календарю. Сборка — самый честный
 # признак того, что сегодня в проекте что-то менялось: в дни без сборок и терять нечего.
@@ -394,56 +397,11 @@ if [ "${KEYBOOP_RELEASE:-}" != "1" ]; then
   echo "  dev: bundle id → ru.keyboop.app.dev (TCC изолирован от боевой), SUFeedURL + Spotlight-ключи сняты"
 fi
 
-# Подпись. Два режима:
-#   • DEV (по умолчанию) — self-signed "Keyboop Dev", без timestamp/hardened runtime; entitlements
-#     с disable-library-validation, чтобы загрузить встроенный Sparkle.framework. Для локалки.
-#   • RELEASE (KEYBOOP_RELEASE=1) — Developer ID + hardened runtime + timestamp (нотаризация). Один
-#     Developer ID на всё → Library Validation проходит сама, ослаблять её НЕ нужно.
-SIGN_ID="${KEYBOOP_SIGN_ID:-Keyboop Dev}"
-if [ "${KEYBOOP_RELEASE:-}" = "1" ]; then
-  ENT="Keyboop.entitlements"
-  CS_OPTS="--options runtime --timestamp"
-else
-  ENT="Keyboop-dev.entitlements"
-  CS_OPTS="--timestamp=none"
-fi
-
-# Встраиваем Sparkle.framework в бандл (ditto сохраняет симлинки версий и права).
+# Встраиваем Sparkle.framework до подписи. ditto сохраняет симлинки версий и права.
 mkdir -p "$APP/Contents/Frameworks"
 ditto "$SPARKLE/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
-# Переподписываем вложенные бинари Sparkle нашим SIGN_ID ИЗНУТРИ НАРУЖУ, без --deep (Xcode делает это
-# сам, swiftc — нет; --deep — частый источник ошибок нотаризации). XPC сохраняют свои entitlements.
-FW="$APP/Contents/Frameworks/Sparkle.framework"; FV="$FW/Versions/B"
-codesign -f -s "$SIGN_ID" $CS_OPTS --preserve-metadata=entitlements "$FV/XPCServices/Downloader.xpc"
-codesign -f -s "$SIGN_ID" $CS_OPTS --preserve-metadata=entitlements "$FV/XPCServices/Installer.xpc"
-codesign -f -s "$SIGN_ID" $CS_OPTS "$FV/Updater.app"
-codesign -f -s "$SIGN_ID" $CS_OPTS "$FV/Autoupdate"
-codesign -f -s "$SIGN_ID" $CS_OPTS "$FW" \
-  && echo "  Sparkle.framework встроен и переподписан ($SIGN_ID)" \
-  || { echo "  ⚠️  ОШИБКА переподписи Sparkle"; [ "${KEYBOOP_RELEASE:-}" = "1" ] && exit 1; }
-
-# Подписываем само приложение (после вложенных — печатает бандл целиком).
-if codesign --force --sign "$SIGN_ID" --entitlements "$ENT" $CS_OPTS "$APP" 2>/dev/null; then
-  echo "  подпись: «$SIGN_ID» + entitlements + Sparkle"
-elif [ "${KEYBOOP_RELEASE:-}" = "1" ]; then
-  echo "  ⚠️  ОШИБКА: не удалось подписать релиз «$SIGN_ID» (есть ли Developer ID в связке?)"; exit 1
-else
-  codesign --force --sign - --entitlements "$ENT" "$APP" >/dev/null 2>&1 || true
-  echo "  подпись: ⚠️  ad-hoc (нет '$SIGN_ID')"
-fi
-
-# Пост-проверка целостности подписи. Строгая верификация ловит «unsealed contents»
-# (напр. случайно вложенный бандл от 'cp -R app существующая_папка') и битую подпись ДО установки.
-# Битый бандл → trustd видит сломанную подпись → TCC переспрашивает Accessibility каждый раз.
-# Прецедент (2026-06-09): ручной 'cp -R Keyboop.app /Applications/Keyboop.app' при существующем
-# приёмнике вложил бандл внутрь (Keyboop.app/Keyboop.app) → unsealed contents → слетал TCC, и
-# запускалась СТАРАЯ версия. Установку делать ТОЛЬКО через install-local.sh (rm -rf + cp -R).
-if codesign --verify --deep --strict "$APP" 2>/dev/null; then
-  echo "  проверка: codesign --deep --strict OK (бандл запечатан, TCC стабилен)"
-else
-  echo "  ⚠️  ОШИБКА: codesign --deep --strict НЕ прошёл — бандл битый, TCC будет слетать:"
-  codesign --verify --deep --strict "$APP" 2>&1 | sed 's/^/      /'
-fi
+# Скрипт сохраняет параметры dev/release и XPC entitlements. Любая ошибка останавливает сборку.
+bash "$PROJECT_ROOT/scripts/sign-keyboop-app.sh" "$APP"
 
 echo "✓ Готово: $APP"
 echo "  Запуск:  open \"$APP\"  (или bash install-local.sh — чистая установка в /Applications)"
