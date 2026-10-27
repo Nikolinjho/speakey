@@ -361,10 +361,12 @@ final class EventTap {
         // ранний детектор врал «всё быстро» ровно тогда, когда у человека вставал ввод.
         // event.timestamp — наносекунды с загрузки в той же базе, что mach_absolute_time.
         let sourceUserData = event.getIntegerValueField(.eventSourceUserData)
+        let neuralToken = neuralLayoutMarkerCodec.token(from: sourceUserData)
         let origin = InputEventOrigin.classify(
             sourceUserData: sourceUserData,
             syntheticMarker: kbSyntheticMarker,
-            pauseMarker: kbPauseFixMarker
+            pauseMarker: kbPauseFixMarker,
+            isNeuralMarker: neuralToken != nil
         )
         let ageMs = Self.eventAgeMs(event)
         let tapT0 = CACurrentMediaTime()
@@ -390,6 +392,10 @@ final class EventTap {
         // замену нечему (тот же принцип, что inline-путь). Обрабатываем до handleKeyDown/handleFlags:
         // пустышка не должна трогать буфер и взводы хоткеев. keyUp у неё нет (мы его не шлём),
         // поэтому глотание не нарушает инвариант парности.
+        if type == .keyDown, let token = neuralToken {
+            (handler as? Engine)?.handleNeuralFixMarker(token: token, post: { $0.tapPostEvent(proxy) })
+            return nil
+        }
         if type == .keyDown,
            sourceUserData == kbPauseFixMarker {
             (handler as? Engine)?.handlePauseFixMarker(post: { $0.tapPostEvent(proxy) })

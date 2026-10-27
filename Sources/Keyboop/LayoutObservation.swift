@@ -1,11 +1,11 @@
 import Foundation
 
 enum LayoutPath: String, Codable, Equatable {
-    case boundary, enter, inlineLive, pauseLive, live, manual, editing
+    case boundary, enter, inlineLive, pauseLive, neuralLive, live, manual, editing
 }
 
 enum LayoutReason: String, Codable, Equatable, CaseIterable {
-    case detectorKeep, detectorConvert, mixedRescue, sessionProtected, softShort, softGap
+    case detectorKeep, detectorConvert, neuralConvert, mixedRescue, sessionProtected, softShort, softGap
     case notReady, unsupportedScript, appDisabled, developerMode, autoDisabled, triggerDisabled
     case antiResonance, writeNotSubmitted, explicit, editingObserved
 }

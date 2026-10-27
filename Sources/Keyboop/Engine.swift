@@ -21,6 +21,7 @@ final class Engine: EventTapHandler {
         self?.invalidateNeuralContext()
     }
     var neuralFocusTrackingAvailable: Bool { neuralFocus.available }
+    private var neuralMailbox = NeuralLayoutMailbox()
     private var neuralOccurrenceFence = NeuralOccurrenceFence()
     private var neuralModeObserver: NSObjectProtocol?
     private var proposalReason: LayoutReason = .detectorKeep
@@ -43,18 +44,73 @@ final class Engine: EventTapHandler {
 
     private func invalidateNeuralContext() {
         neuralOccurrenceFence.invalidate(current: buffer.currentOccurrenceID, completed: buffer.lastOccurrenceID)
+        neuralMailbox.invalidate()
         neural.invalidateContext()
     }
 
+    private func neuralAssistancePolicy(_ result: NeuralLayoutResult) -> NeuralLayoutPolicyResult {
+        let word = buffer.currentWord
+        let held: CGEventFlags = [.maskShift, .maskAlternate, .maskCommand, .maskControl]
+        let gates = NeuralLayoutLiveGuards(running: AppHealth.engineRunning, ready: neural.status == .ready,
+            focusAvailable: neuralFocus.available, autoEnabled: settings.autoEnabled,
+            inlineEnabled: settings.inlineLiveFix, inlineHealthy: inlineHealthy, liveEnabled: settings.liveFixEnabled,
+            warm: Warm.isReady, occurrenceAllowed: neuralOccurrenceFence.allows(result.request.occurrenceID),
+            paused: Pause.active, secureInput: secureInputWasOn,
+            modifiers: !CGEventSource.flagsState(.combinedSessionState).intersection(held).isEmpty,
+            muted: muted, markerInFlight: pauseFixMarkerInFlight, edited: wordEdited,
+            contextPending: pendingContextClear || pendingSoftReset, journalEditing: diagnostics.journalEditing,
+            developer: settings.developerMode && frontAppIsDev,
+            appBlocked: !frontAppMode.isEmpty || frontAppIsChromium || diagnostics.bypassesJournal(bundleID: frontAppBID),
+            sameAsLast: word == liveFixLast,
+            undo: UndoLearner.shared.shouldSuppress(current: word) || UndoLearner.shared.isSessionProtected(word))
+        return NeuralLayoutAssistance.policy(result: result, mode: neural.mode,
+            modelSHA256: neural.modelSHA256, profile: neural.profile,
+            fresh: neural.session.matches(result.request, occurrenceID: buffer.currentOccurrenceID,
+                bundleID: frontAppBID, layoutCode: KeyboardLayoutCache.cachedSourceID ?? "", word: word),
+            block: gates.block, word: word,
+            ruleBlocked: Warm.isReady && LayoutDetector.neuralRuleBlock(word: word, exceptions: .shared))
+    }
+
     private func evaluateNeuralResult(_ result: NeuralLayoutResult) {
-        let request = result.request
-        let admission = NeuralLayoutAdmission(mode: neural.mode, modelSHA256: neural.modelSHA256, profile: neural.profile,
-            fresh: neural.session.matches(request, occurrenceID: buffer.currentOccurrenceID,
-                bundleID: frontAppBID, layoutCode: KeyboardLayoutCache.cachedSourceID ?? "", word: buffer.currentWord),
-            block: neuralFocus.available ? nil : .unavailable, wordLength: request.word.count,
-            sourceCyrillic: request.word.hasCyrillic)
-        let policy = NeuralLayoutPolicy.evaluate(scores: result.scores, admission: admission)
-        neural.recordPolicy(policy, for: request)
+        let policy = neuralAssistancePolicy(result)
+        neural.recordPolicy(policy, for: result.request)
+        guard case .propose = policy, let token = neuralMailbox.offer(result: result) else { return }
+        guard let event = CGEvent(keyboardEventSource: nil, virtualKey: 255, keyDown: true) else {
+            neuralMailbox.cancel(token: token)
+            return
+        }
+        event.flags = []
+        event.setIntegerValueField(.eventSourceUserData, value: neuralLayoutMarkerCodec.encode(token: token))
+        event.post(tap: .cghidEventTap)
+    }
+
+    func handleNeuralFixMarker(token: UInt32, post: (CGEvent) -> Void) {
+        precondition(Thread.isMainThread)
+        guard let result = neuralMailbox.take(token: token) else { return }
+        let policy = neuralAssistancePolicy(result)
+        neural.recordPolicy(policy, for: result.request)
+        guard case .propose(let toCyr) = policy else { return }
+        let word = buffer.currentWord
+        guard let converted = Keymap.liveConvert(word, toCyrillic: toCyr, isValidTarget: Self.ruWordValidator),
+              converted != word, antiResonance.allow(word: word, produced: converted) else { return }
+        let observation = recordDecision(word: word, proposed: converted, path: .neuralLive,
+            reason: .neuralConvert, action: .replace, completed: false, neuralRequest: result.request)
+        NeuralLayoutAssistance.submit({
+            TextReplacer.replaceInline(deleteCount: word.count, with: converted, post: post)
+        }, submission: submissionHandler(observation), committed: {
+            neural.changed()
+            buffer.applyConversion(converted: converted)
+            liveFixLast = converted
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.layout.selectLayout(cyrillic: toCyr)
+                UndoLearner.shared.noteConversion(original: word, converted: converted)
+                self.settings.rescuedCount += 1
+                self.onLayoutMaybeChanged?()
+                self.playSound()
+                self.noteConvRepeat(word: word, produced: converted, path: "neural")
+            }
+        })
     }
 
     private func neuralRequest() -> NeuralLayoutRequest? {
@@ -368,6 +424,8 @@ final class Engine: EventTapHandler {
 
     func start() -> Bool {
         _ = neural
+        _ = UndoLearner.shared
+        _ = neuralLayoutMarkerCodec
         if !didSetup {
             systemDoubleSpacePeriodEnabled = Self.readSystemDoubleSpacePeriodEnabled()
             eventTap.handler = self

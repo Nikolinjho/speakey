@@ -5,9 +5,11 @@ enum InputEventOrigin: Equatable {
     case real
     case synthetic
     case pauseMarker
+    case neuralMarker
 
-    /// Pause wins whenever the source matches its marker, then synthetic, otherwise real.
-    static func classify(sourceUserData: Int64, syntheticMarker: Int64, pauseMarker: Int64) -> InputEventOrigin {
+    /// Нейромаркер имеет приоритет, затем паузный маркер, синтетика и реальный ввод.
+    static func classify(sourceUserData: Int64, syntheticMarker: Int64, pauseMarker: Int64, isNeuralMarker: Bool = false) -> InputEventOrigin {
+        if isNeuralMarker { return .neuralMarker }
         if sourceUserData == pauseMarker { return .pauseMarker }
         if sourceUserData == syntheticMarker { return .synthetic }
         return .real
@@ -19,6 +21,8 @@ enum InputEventOrigin: Equatable {
             return "реальный ввод"
         case .synthetic:
             return "наша синтетика"
+        case .neuralMarker:
+            return "нейромаркер"
         case .pauseMarker:
             return "маркер паузы"
         }

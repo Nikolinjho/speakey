@@ -1,0 +1,15 @@
+Tests/NeuralLayout/AssistanceTests.swift:86:97: error: extra argument 'submission' in call
+84 |         var commits = 0
+85 |         var submissions: [Bool] = []
+86 |         let rejected = NeuralLayoutAssistance.submit({ writes += 1; return false }, submission: { submissions.append($0) }, committed: { commits += 1 })
+   |                                                                                                 `- error: extra argument 'submission' in call
+87 |         t.check("Rejected не меняет состояние", !rejected && commits == 0)
+88 |         let submitted = NeuralLayoutAssistance.submit({ writes += 1; return true }, submission: { submissions.append($0) }, committed: { commits += 1 })
+
+Tests/NeuralLayout/AssistanceTests.swift:88:97: error: extra argument 'submission' in call
+86 |         let rejected = NeuralLayoutAssistance.submit({ writes += 1; return false }, submission: { submissions.append($0) }, committed: { commits += 1 })
+87 |         t.check("Rejected не меняет состояние", !rejected && commits == 0)
+88 |         let submitted = NeuralLayoutAssistance.submit({ writes += 1; return true }, submission: { submissions.append($0) }, committed: { commits += 1 })
+   |                                                                                                 `- error: extra argument 'submission' in call
+89 |         t.check("Submitted меняет состояние ровно один раз", submitted && commits == 1)
+90 |         t.check("Каждая actual submission записана ровно один раз", submissions == [false, true])

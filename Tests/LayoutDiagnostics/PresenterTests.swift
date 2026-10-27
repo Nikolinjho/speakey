@@ -20,6 +20,11 @@ enum PresenterTests: DiagnosticSuite {
         observation.action = .keep; observation.reason = .detectorKeep
         b.evidence[0].observation = observation
         tests.check("Подтверждённый случай доступен для проверки пары", presenter.allowedActions(for: b).contains(.force))
+        b.evidence[0].observation.path = .neuralLive
+        tests.check("Частичный neuralLive не становится глобальным правилом", presenter.allowedActions(for: b) == [.review])
+        b.evidence[0].observation.reason = .neuralConvert
+        b.evidence[0].observation.isCompleteWord = false
+        tests.check("Нейрозамена части слова доступна только для ревью", presenter.allowedActions(for: b) == [.review])
         var older = observation; older.recordedAt = Date(timeIntervalSince1970: 1)
         var latest = observation; latest.id = UUID(); latest.recordedAt = Date(timeIntervalSince1970: 2); latest.bundleID = "other"; latest.dictionaryMatch = .neither
         tests.check("Решения по умолчанию показывают свежие первыми", presenter.observations([older, latest], filter: .init()).map(\.id) == [latest.id, older.id])

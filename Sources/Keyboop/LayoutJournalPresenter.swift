@@ -42,7 +42,7 @@ struct LayoutJournalPresenter {
 
     func allowedActions(for item: LayoutCase) -> [Action] {
         guard item.status == .confirmed, item.isCompleteWord, let last = item.evidence.last,
-              last.observation.isCompleteWord, last.observation.action != .blocked,
+              last.observation.isCompleteWord, last.observation.path != .neuralLive, last.observation.action != .blocked,
               [.detectorKeep, .detectorConvert, .mixedRescue, .sessionProtected, .softShort, .softGap, .explicit].contains(last.observation.reason) else { return [.review] }
         return [.review, item.typed == item.expected ? .keep : .force]
     }
