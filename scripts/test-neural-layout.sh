@@ -3,17 +3,26 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 suite="${1:-model}"
 case "$suite" in
-    model|all) ;;
+    model|coordinator|all) ;;
     *) echo "Неизвестный набор: $suite" >&2; exit 2 ;;
 esac
 work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-neural-layout.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
-sources=(Tests/LayoutDiagnostics/TestSupport.swift)
-for name in NeuralLayoutTypes RightLayoutModel; do
-    source="Sources/Keyboop/$name.swift"
-    [ ! -f "$source" ] || sources+=("$source")
-done
-sources+=(Tests/NeuralLayout/ModelTests.swift Tests/NeuralLayout/main.swift)
-swiftc -swift-version 5 -framework CoreML "${sources[@]}" -o "$work/tests"
-swift scripts/compile-rightlayout-model.swift Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel "$work/LayoutClassifier.mlmodelc"
-"$work/tests" "$suite" "$work/LayoutClassifier.mlmodelc"
+sources=(Tests/LayoutDiagnostics/TestSupport.swift Sources/Keyboop/NeuralLayoutTypes.swift)
+options=(-swift-version 5)
+model_args=()
+if [ "$suite" = model ] || [ "$suite" = all ]; then
+    sources+=(Sources/Keyboop/RightLayoutModel.swift Tests/NeuralLayout/ModelTests.swift)
+    options+=(-D MODEL_TESTS -framework CoreML)
+    model_args+=("$work/LayoutClassifier.mlmodelc")
+fi
+if [ "$suite" = coordinator ] || [ "$suite" = all ]; then
+    sources+=(Sources/Keyboop/NeuralLayoutCoordinator.swift Tests/NeuralLayout/CoordinatorTests.swift)
+    options+=(-D COORDINATOR_TESTS)
+fi
+sources+=(Tests/NeuralLayout/main.swift)
+swiftc "${options[@]}" "${sources[@]}" -o "$work/tests"
+if [ "${#model_args[@]}" -gt 0 ]; then
+    swift scripts/compile-rightlayout-model.swift Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel "${model_args[0]}"
+fi
+"$work/tests" "$suite" "${model_args[@]}"
