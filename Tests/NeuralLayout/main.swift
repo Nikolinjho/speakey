@@ -6,4 +6,7 @@ DiagnosticTestRegistry.add(ModelTests.self)
 #if COORDINATOR_TESTS
 DiagnosticTestRegistry.add(CoordinatorTests.self)
 #endif
+#if POLICY_TESTS
+DiagnosticTestRegistry.add(PolicyTests.self)
+#endif
 DiagnosticTestRegistry.run(CommandLine.arguments.dropFirst().first ?? "")

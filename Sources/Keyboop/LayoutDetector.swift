@@ -61,6 +61,35 @@ enum HyphenTokenShape {
 /// Двусторонний детектор «слово набрано не в той раскладке».
 /// Каскад: guard'ы → force-swap → словарь → триграммная плаузивность (margin).
 enum LayoutDetector {
+    /// Явные правила и защитные keep-гейты, без повторного статистического решения.
+    static func neuralRuleBlock(word raw: String, exceptions: ExceptionStore) -> Bool {
+        let literal = letterCore(of: raw).lowercased()
+        let typed = Keymap.core(of: literal)
+        var core = Substring(literal)
+        while let first = core.first, first.isNumber { core = core.dropFirst() }
+        while let last = core.last, last.isNumber { core = core.dropLast() }
+        let word = String(core)
+        let forms = Set([raw.lowercased(), literal, typed, letterCore(of: typed), word])
+        for form in forms {
+            if exceptions.ignored.contains(form) || exceptions.learned.contains(form)
+                || isExceptionOrPrefix(form, cyrillic: form.hasCyrillic, exceptions: exceptions) {
+                return true
+            }
+        }
+        if isEmoticon(raw) { return true }
+        let cyrillic = word.hasCyrillic
+        guard cyrillic != word.hasLatinLetter else { return false }
+        let swapped = Keymap.convert(word, toCyrillic: !cyrillic).lowercased()
+        // Force выбирает победителя пары. Ни исходное, ни целевое намерение модель не меняет.
+        if exceptions.forceSwap.contains(word) || exceptions.forceSwap.contains(swapped) { return true }
+        if forceSwap.contains(word) || (!cyrillic && ExtraWords.techLatinTokens.contains(word)) { return true }
+        if hasValidSourceBeforeTrailingPunctuation(word, forcedSource: exceptions.forceSwap) { return true }
+        let data = LayoutData.shared
+        let sourceIsReal = data.wordsRu.contains(word) || data.wordsEn.contains(word)
+            || (deElongated(word)?.contains { data.wordsRu.contains($0) || data.wordsEn.contains($0) } ?? false)
+        return word.count >= 2 && sourceIsReal && !(!cyrillic && ExtraWords.forceRuAmb.contains(word))
+    }
+
     static let margin = 2.0
     /// Порог «EN-форма короткого кир-фрагмента — не мусор» (плаузибельность ≥ этого → реальное слово).
     /// Отсекает nm/cz/cm/tn (< −11), пропускает it/in/of/the/so (> −9.5). См. enSwapNotJunk в decide().

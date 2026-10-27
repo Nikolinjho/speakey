@@ -5,7 +5,7 @@ enum NeuralLayoutMode: String, Codable, CaseIterable {
 }
 
 enum NeuralLayoutError: Error, Equatable {
-    case invalidToken, invalidOutput, unavailable, invalidManifest
+    case invalidToken, invalidOutput, unavailable, invalidManifest, invalidProfile
 }
 
 enum NeuralLayoutClass: Int, Codable, CaseIterable {
@@ -65,4 +65,57 @@ struct NeuralLayoutSession {
             && request.occurrenceID == occurrenceID && request.bundleID == bundleID
             && request.layoutCode == layoutCode && request.word == word
     }
+}
+
+struct NeuralLayoutProfile: Codable {
+    let modelSHA256: String
+    let enabled: Bool
+    let minimumScore: Double
+    let minimumMargin: Double
+
+    init(modelSHA256: String, enabled: Bool, minimumScore: Double, minimumMargin: Double) throws {
+        guard modelSHA256.utf8.count == 64,
+              modelSHA256.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) || (65...70).contains($0) }),
+              minimumScore.isFinite, (0...1).contains(minimumScore),
+              minimumMargin.isFinite, (0...1).contains(minimumMargin) else {
+            throw NeuralLayoutError.invalidProfile
+        }
+        self.modelSHA256 = modelSHA256
+        self.enabled = enabled
+        self.minimumScore = minimumScore
+        self.minimumMargin = minimumMargin
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case modelSHA256, enabled, minimumScore, minimumMargin
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(modelSHA256: values.decode(String.self, forKey: .modelSHA256),
+                      enabled: values.decode(Bool.self, forKey: .enabled),
+                      minimumScore: values.decode(Double.self, forKey: .minimumScore),
+                      minimumMargin: values.decode(Double.self, forKey: .minimumMargin))
+    }
+}
+
+enum NeuralLayoutBlock: String, Codable, Equatable {
+    case disabled, unavailable, profile, stale, length, unsupported, confidence
+    case app, developer, secureInput, modifiers, editing, syntheticFlight, undo, rule, resonance, keymap
+}
+
+enum NeuralLayoutPolicyResult: Equatable {
+    case observe
+    case blocked(NeuralLayoutBlock)
+    case propose(toCyrillic: Bool)
+}
+
+struct NeuralLayoutAdmission {
+    let mode: NeuralLayoutMode
+    let modelSHA256: String
+    let profile: NeuralLayoutProfile?
+    let fresh: Bool
+    let block: NeuralLayoutBlock?
+    let wordLength: Int
+    let sourceCyrillic: Bool
 }

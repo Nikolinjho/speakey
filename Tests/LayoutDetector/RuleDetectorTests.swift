@@ -61,6 +61,37 @@ enum RuleDetectorTests {
         for key in ["didSeedExcExamples", "didSeedExcVkLatin", "didUnseedExcSpotlight"] { defaults.set(true, forKey: key) }
         let exceptions = ExceptionStore(defaults: defaults)
         let backend = ExceptionLayoutRuleBackend(exceptions: exceptions)
+        func neuralBlocked(_ word: String) -> Bool { LayoutDetector.neuralRuleBlock(word: word, exceptions: exceptions) }
+        t.check("Обычный keep не становится явным запретом нейромодели", LayoutDetector.decide(word: "дд", exceptions: exceptions) == .keep && !neuralBlocked("дд"))
+        t.check("Каша без правила допускает проверку модели", !neuralBlocked("ghbdtn"))
+        for word in ["hello", "привет", "coooool", "круууто", "hello.", "api", "xlsx", ":D"] {
+            t.check("Защитный keep сохраняет валидный исходник: \(word)", neuralBlocked(word))
+        }
+        for (source, target) in [("ghbdtn", "привет"), ("руддщ", "hello"), ("[kt,", "хлеб")] {
+            exceptions.addForceSwap(source)
+            t.check("Force исходника блокирует модель: \(source)", neuralBlocked(source))
+            exceptions.removeForceSwap(source)
+            exceptions.addForceSwap(target)
+            t.check("Force цели блокирует модель: \(source)", neuralBlocked(source))
+            t.check("Настоящий детектор сохраняет force цели: \(source)", LayoutDetector.decide(word: source, exceptions: exceptions) == .convert(toCyrillic: !source.hasCyrillic))
+            exceptions.removeForceSwap(target)
+        }
+        for saved in ["ghbdtn", "1ghbdtn", "ghbdtn.", ":ghbdtn"] {
+            exceptions.addIgnored(saved)
+            t.check("Сохраняется полная пользовательская защита: \(saved)", neuralBlocked(saved.uppercased()))
+            exceptions.removeIgnored(saved)
+        }
+        exceptions.addIgnored("1ghbdtn")
+        t.check("Числовой префикс исключения сохраняется", neuralBlocked("1ghbd"))
+        t.check("Пунктуация вокруг числового исключения сохраняется", neuralBlocked("(1GHBDTN)."))
+        exceptions.removeIgnored("1ghbdtn")
+        exceptions.addIgnored("ghbdtn")
+        t.check("Keep защищает префикс", neuralBlocked("ghbd"))
+        t.check("Keep ядра сохраняется при внешних цифрах", neuralBlocked("1ghbdtn2"))
+        exceptions.removeIgnored("ghbdtn")
+        exceptions.addLearned("ghbdtn")
+        t.check("Выученная отмена защищает префикс", neuralBlocked("ghbd"))
+        exceptions.removeLearned("ghbdtn")
         func decide(_ word: String) -> SwapDecision { LayoutDetector.decide(word: word, exceptions: exceptions) }
         for (source, counterpart) in [("дд", "ll"), ("ll", "дд")] {
             let facts = LayoutObservationFacts.evaluate(source, wordsRu: [], wordsEn: []) { Keymap.convert($0, toCyrillic: $1, table: nil) }
