@@ -1,0 +1,30 @@
+{
+  "installedMSK": "2026-10-27T19:30:52.758097+03:00",
+  "target": "/Applications/Speakey.app",
+  "previousPath": "/Applications/Speakey.app",
+  "backup": "/Users/itsnikoko/Library/Application Support/KeyboopLocalBackups/speakey-rename-final-20261027-193052-MSK",
+  "displayName": "Speakey",
+  "bundleID": "ru.keyboop.app.dev",
+  "sameSigningIdentity": true,
+  "strictCodesign": true,
+  "oldExecutableSHA256": "1b8000f50e3db94ea845bed5c9e618b8c590a78ad208f1e91a43f65d6541c5a3",
+  "newExecutableSHA256": "2f5138ee9d2a13441a720140012c8aac36d8c468c5dcf7c1569c922613090c74",
+  "iconSHA256": "991290c3f6bbee99071ef88225c82406010214b7e817ed6dbee531091e1ad50f",
+  "preferencesPreservedBeforeLaunch": true,
+  "journalPreservedBeforeLaunch": true,
+  "countsBefore": {
+    "observations": 1726,
+    "cases": 4,
+    "rules": 1
+  },
+  "logOffsetBeforeLaunch": 462534,
+  "engineStarted": true,
+  "accessibilityGranted": true,
+  "inputMonitoringGranted": true,
+  "allJournalIDsPreserved": true,
+  "mode": "observe",
+  "collectionEnabled": true,
+  "runningApplicationName": "Speakey",
+  "windowTitle": "Speakey",
+  "oldPathRemoved": true
+}

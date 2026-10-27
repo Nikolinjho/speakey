@@ -125,7 +125,7 @@ enum Permissions {
 
     /// Почта разработчику для фидбэка (открывает почтовый клиент с готовой темой).
     static func openFeedbackMail() {
-        let subject = "Keyboop — отзыв".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Keyboop"
+        let subject = "Speakey – отзыв".addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "Speakey"
         open("mailto:hi@keyboop.com?subject=\(subject)")
     }
 

@@ -202,7 +202,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.isRestorable = false
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
-        window.title = "Keyboop"
+        window.title = "Speakey"
         // Нижняя граница по высоте задана БОКОВЫМ МЕНЮ, а не содержимым (оно прокручивается):
         // разделы стоят сверху вниз, а «Поддержать проект» и версия прибиты к низу — в коротком
         // окне они наезжают друг на друга. Считано по пикселям: последний из девяти разделов
@@ -429,7 +429,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         icon.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: DS.brandIconSize),
                                      icon.heightAnchor.constraint(equalToConstant: DS.brandIconSize)])
-        let name = NSTextField(labelWithString: "Keyboop")
+        let name = NSTextField(labelWithString: "Speakey")
         name.font = .systemFont(ofSize: 15, weight: .semibold)
         let v = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.1"
         let ver = NSTextField(labelWithString: v + (Changelog.codename(for: v).map { " · \($0)" } ?? ""))
@@ -882,7 +882,7 @@ final class SidebarVC: NSViewController {
     private var rows: [SidebarRow] = []
     private let pill = NSView()
     private let brandIcon = NSImageView()
-    private let brand = NSTextField(labelWithString: "Keyboop")
+    private let brand = NSTextField(labelWithString: "Speakey")
     private let tag = NSTextField(labelWithString: L10n.t("tagline"))
     /// ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМА, внизу меню (переделан 11.08.2026 по замечанию автора).
     ///
@@ -3966,7 +3966,7 @@ final class DetailVC: NSViewController {
         let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 90),
                             styleMask: [.titled, .closable, .nonactivatingPanel],
                             backing: .buffered, defer: false)
-        panel.title = "Keyboop"
+        panel.title = "Speakey"
         panel.isReleasedWhenClosed = false
         panel.level = .floating   // иначе уезжает за окно настроек и человек её теряет из виду
         let lbl = NSTextField(labelWithString: L10n.t("voice.hkTestPrompt"))

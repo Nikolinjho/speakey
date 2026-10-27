@@ -33,7 +33,7 @@ fi
 # Куда собирать. По умолчанию в рабочую папку, но агент собирает в /tmp: пока автор работает в
 # своей копии по обычному пути, пересборка туда же означала бы гасить приложение у него под руками,
 # а перенос копии в другое место ломает выданные доступы (TCC привязан к пути и подписи).
-APP="${KEYBOOP_BUILD_APP:-Keyboop.app}"
+APP="${KEYBOOP_BUILD_APP:-Speakey.app}"
 
 # Local admin tools share the exact process classifier. Source releases may omit Tools/, so keep a
 # minimal equivalent fallback here: v3 wins over the legacy flag it also carries.
@@ -288,8 +288,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <key>CFBundleName</key>            <string>Keyboop</string>
-    <key>CFBundleDisplayName</key>     <string>Keyboop</string>
+    <key>CFBundleName</key>            <string>Speakey</string>
+    <key>CFBundleDisplayName</key>     <string>Speakey</string>
     <key>CFBundleIdentifier</key>      <string>ru.keyboop.app</string>
     <key>CFBundleVersion</key>         <string>0.4.10</string>
     <key>CFBundleShortVersionString</key> <string>0.4.10</string>
@@ -319,8 +319,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     </dict>
     <key>LSUIElement</key>             <true/>
     <key>NSAccentColorName</key>       <string>AccentColor</string>
-    <key>NSAudioCaptureUsageDescription</key> <string>Keyboop записывает системный звук и микрофон только по вашему ⌥-клику по значку, расшифровывает запись на этом Mac и никуда не отправляет.</string>
-    <key>NSMicrophoneUsageDescription</key> <string>Keyboop распознаёт надиктованный текст локально, на вашем Mac. Аудио никуда не отправляется.</string>
+    <key>NSAudioCaptureUsageDescription</key> <string>Speakey записывает системный звук и микрофон только по вашему ⌥-клику по значку, расшифровывает запись на этом Mac и никуда не отправляет.</string>
+    <key>NSMicrophoneUsageDescription</key> <string>Speakey распознаёт надиктованный текст локально, на вашем Mac. Аудио никуда не отправляется.</string>
     <!-- ⚠️ ЯВНЫЙ ОТКАЗ ОТ РЕЖИМА СОВМЕСТИМОСТИ С КОРПУСОМ КАМЕРЫ (13.08.2026).
          На маках с чёлкой система умеет менять активную область экрана так, чтобы она обходила
          корпус камеры: тогда вырез исчезает, сверху появляется ровная полоса, а safeAreaInsets
@@ -332,7 +332,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
          developer.apple.com/documentation/bundleresources/information-property-list/nsprefersdisplaysafeareacompatibilitymode -->
     <key>NSPrefersDisplaySafeAreaCompatibilityMode</key> <false/>
     <key>NSPrincipalClass</key>        <string>NSApplication</string>
-    <key>NSHumanReadableCopyright</key><string>Keyboop — free &amp; open source</string>
+    <key>NSHumanReadableCopyright</key><string>Speakey – free &amp; open source</string>
     <!-- Sparkle (автообновления). Проверка ВКЛ + фоновое скачивание. SUAutomaticallyUpdate=true
          включает «тихий» путь, но мы его ПЕРЕХВАТЫВАЕМ делегатом willInstallUpdateOnQuit
          (UpdaterController) и по умолчанию НЕ ставим молча, а показываем СВОЁ уведомление «Обновить
@@ -390,8 +390,8 @@ if [ "${KEYBOOP_RELEASE:-}" != "1" ]; then
   /usr/libexec/PlistBuddy -c "Set :SUEnableAutomaticChecks false" "$APP/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Add :KeyboopLocalBuild bool true" "$APP/Contents/Info.plist"
   /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ru.keyboop.app.dev" "$APP/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleName Keyboop_local" "$APP/Contents/Info.plist" 2>/dev/null || true
-  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Keyboop_local" "$APP/Contents/Info.plist" 2>/dev/null || true
+  /usr/libexec/PlistBuddy -c "Set :CFBundleName Speakey" "$APP/Contents/Info.plist" 2>/dev/null || true
+  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Speakey" "$APP/Contents/Info.plist" 2>/dev/null || true
   /usr/libexec/PlistBuddy -c "Delete :SUFeedURL" "$APP/Contents/Info.plist" 2>/dev/null || true
   /usr/libexec/PlistBuddy -c "Delete :MDItemKeywords" "$APP/Contents/Info.plist" 2>/dev/null || true
   echo "  dev: bundle id → ru.keyboop.app.dev (TCC изолирован от боевой), SUFeedURL + Spotlight-ключи сняты"

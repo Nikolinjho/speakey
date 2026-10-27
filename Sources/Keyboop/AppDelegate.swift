@@ -1060,7 +1060,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// промптом. Локально, без сети (принцип №2). Если запрещено — тихо (слово и так в «Выученных»).
     /// «Выучил слово» — НАШ баннер (не системное уведомление), сам скрывается через 4с.
     private func notifyLearned(_ word: String) {
-        AppBanner.shared.show(title: "Keyboop", body: String(format: L10n.t("learn.toast"), word), autoDismiss: 5)
+        AppBanner.shared.show(title: "Speakey", body: String(format: L10n.t("learn.toast"), word), autoDismiss: 5)
     }
 
     /// Откат авто-конверсии → баннер вверху справа с вопросом. «Добавить» → слово в исключения;

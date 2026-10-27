@@ -234,7 +234,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     /// Флаг для языка, а если такого флага у нас нет — обычный значок клавиатуры.
     private func flagOrKeyboard(_ lang: String) -> NSImage? {
         Self.flagImage(lang: lang)
-            ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keyboop")
+            ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Speakey")
     }
 
     /// Применить выбранный стиль значка (brand/letter/layout/keyboard/hidden). Зовётся из init,
@@ -248,7 +248,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         guard statusItem.isVisible, voiceState == .idle, let button = statusItem.button else { return }
         switch style {
         case "brand":
-            button.image = Self.brandStatusImage ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keyboop")
+            button.image = Self.brandStatusImage ?? NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Speakey")
             button.imagePosition = .imageLeading
         case "flag":
             let lang = layout.currentCodeLive()
@@ -259,7 +259,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
             button.image = nil
             button.imagePosition = .noImage       // значка нет — остаётся только язык (см. updateTitle)
         default:   // "keyboard"
-            button.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Keyboop")
+            button.image = NSImage(systemSymbolName: "keyboard", accessibilityDescription: "Speakey")
             button.imagePosition = .imageLeading
         }
         updateTitle()
@@ -598,7 +598,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         // Имя версии подставляет Changelog.versionWithName — тот же помощник, что у низа списка
         // настроек и у «О программе», чтобы формат не разъехался. В релизе шапка читается как
         // «Keyboop 0.3.2 · Pika», в dev как «Keyboop 0.3.2-dev · Pika».
-        var headerTitle = "Keyboop " + Changelog.versionWithName(ver + (isDev ? "-dev" : ""))
+        var headerTitle = "Speakey " + Changelog.versionWithName(ver + (isDev ? "-dev" : ""))
         // В dev-сборке показываем ВРЕМЯ СБОРКИ прямо в шапке меню (просьба автора 24.07): за вечер
         // мы оба дважды путались, какую именно сборку тестируем. Дата не нужна — за день их много,
         // различает время. В релизе не показываем: пользователю штамп ни о чём не говорит.

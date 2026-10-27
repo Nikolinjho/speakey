@@ -420,7 +420,7 @@ final class FeedbackWindowController: NSWindowController, NSWindowDelegate, NSTe
         // (баг с поиском латиницы по языковому тегу). Только названия, ничего пользовательского.
         let layouts = LayoutManager.enabledLayoutNamesForDiagnostics().joined(separator: ", ")
         var out = """
-        Keyboop \(ver) [\(stamp)] · интерфейс \(L10n.current == .ru ? "ru" : "en") · работает \(AppHealth.uptimeDescription)
+        Speakey \(ver) [\(stamp)] · интерфейс \(L10n.current == .ru ? "ru" : "en") · работает \(AppHealth.uptimeDescription)
         macOS \(ProcessInfo.processInfo.operatingSystemVersionString) · \(model) · \(arch)
         состояние: \(health)
         доступы: Accessibility=\(Permissions.isTrusted()) · InputMonitoring=\(Permissions.inputMonitoringGranted()) · движок запущен=\(AppHealth.engineRunning) · secure input сейчас=\(AppHealth.secureInputOn)
@@ -718,7 +718,7 @@ final class FeedbackWindowController: NSWindowController, NSWindowDelegate, NSTe
         let text = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.count >= 3 else { status.stringValue = L10n.t("fb.tooShort"); return }
         let ver = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "?"
-        var parts = ["Keyboop \(ver)", "", text]
+        var parts = ["Speakey \(ver)", "", text]
         let c = contact.stringValue.trimmingCharacters(in: .whitespaces)
         if !c.isEmpty { parts += ["", "Контакт: \(c)"] }
         if diagCheck.state == .on { parts += ["", "--- диагностика ---", Self.buildDiagnostics()] }
@@ -727,7 +727,7 @@ final class FeedbackWindowController: NSWindowController, NSWindowDelegate, NSTe
         // «Загрузках» превращаются в «Keyboop-отчёт 2», по которому потом не понять, какой из них какой.
         let fmt = DateFormatter()
         fmt.dateFormat = "yyyy-MM-dd-HHmm"
-        let name = "Keyboop-\(ver)-\(fmt.string(from: Date())).txt"
+        let name = "Speakey-\(ver)-\(fmt.string(from: Date())).txt"
         let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let url = dir.appendingPathComponent(name)

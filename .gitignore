@@ -7,6 +7,7 @@
 build/
 Keyboop.app/
 Keyboop_local.app/
+Speakey.app/
 *.dmg
 *.delta
 sparkle-updates/            # 860 МБ старых сборок, и они же лежат на сервере

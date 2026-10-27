@@ -631,7 +631,7 @@ final class VoiceHistoryWindowController: NSWindowController, NSWindowDelegate, 
         panel.canCreateDirectories = true
         panel.isMovable = true
         panel.isExtensionHidden = false
-        panel.nameFieldStringValue = "Keyboop-\(exportDF.string(from: all[s.tag].date)).m4a"
+        panel.nameFieldStringValue = "Speakey-\(exportDF.string(from: all[s.tag].date)).m4a"
 
         // Это отдельная системная панель, а не sheet окна истории. Sheet нельзя двигать, и у
         // истории, припаркованной у края экрана, широкая панель неизбежно вылезала за границу.
@@ -821,7 +821,7 @@ final class VoiceHistoryWindowController: NSWindowController, NSWindowDelegate, 
         panel.canCreateDirectories = true
         panel.isMovable = true
         panel.isExtensionHidden = false
-        let base = (e.app.map { ($0 as NSString).deletingPathExtension } ?? "Keyboop").replacingOccurrences(of: "/", with: "-")
+        let base = (e.app.map { ($0 as NSString).deletingPathExtension } ?? "Speakey").replacingOccurrences(of: "/", with: "-")
         panel.nameFieldStringValue = "\(base)-\(exportDF.string(from: e.date)).txt"
         s.isEnabled = false
         NSApp.activate(ignoringOtherApps: true)

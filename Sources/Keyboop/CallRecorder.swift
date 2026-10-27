@@ -42,7 +42,7 @@ final class SystemAudioCapture {
     /// Тап и агрегатное устройство: после этого известна частота, а звука ещё нет.
     func prepare(micUID: String?) throws {
         let desc = CATapDescription(monoGlobalTapButExcludeProcesses: [])
-        desc.name = "Keyboop call tap"
+        desc.name = "Speakey call tap"
         desc.isPrivate = true
         desc.muteBehavior = .unmuted
         var tap = AudioObjectID(kAudioObjectUnknown)
@@ -55,7 +55,7 @@ final class SystemAudioCapture {
             subDevices.append([kAudioSubDeviceUIDKey: mic, kAudioSubDeviceDriftCompensationKey: true])
         }
         var dict: [String: Any] = [
-            kAudioAggregateDeviceNameKey: "Keyboop Call",
+            kAudioAggregateDeviceNameKey: "Speakey Call",
             kAudioAggregateDeviceUIDKey: "ru.keyboop.call." + UUID().uuidString,
             kAudioAggregateDeviceIsPrivateKey: true,
             // ⚠️ `kAudioAggregateDeviceTapAutoStartKey` УБРАН НАМЕРЕННО (13.09.2026, отзыв #269).
