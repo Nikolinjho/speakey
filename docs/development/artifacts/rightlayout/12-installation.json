@@ -1,0 +1,57 @@
+{
+  "installedMSK": "2026-10-27T16:19:43.109795+03:00",
+  "target": "/Applications/Keyboop_local.app",
+  "stage": "/private/tmp/keyboop-rollout-4ssq6666/Keyboop_local.app",
+  "backup": "/Users/itsnikoko/Library/Application Support/KeyboopLocalBackups/rightlayout-20261027-160912-MSK",
+  "bundleID": "ru.keyboop.app.dev",
+  "oldExecutableSHA256": "1d3e19bffd1fe066efcf3a3a10204d224f6c172c746204012750b91eb0a07acf",
+  "newExecutableSHA256": "06b745412a3db5898f5fe7ea9893747b31fdec404d1ec250adc429dc59a2f206",
+  "strictCodesign": true,
+  "preservedPreferences": true,
+  "mode": "observe",
+  "journalPreservedBeforeLaunch": true,
+  "observationsBeforeLaunch": 1021,
+  "casesBeforeLaunch": 2,
+  "pidsBefore": [
+    82180,
+    82181
+  ],
+  "pidsAfter": [
+    30222
+  ],
+  "logOffsetBeforeLaunch": 281484,
+  "engineStartedConfirmed": true,
+  "profileEnabled": false,
+  "startupEvents": [
+    {
+      "timeMSK": "2026-10-27T16:19:45+03:00",
+      "message": "launched; v0.4.10-dev [build 2026-10-27 16:11] (prev 0.4.10); AX=false InputMon=false"
+    },
+    {
+      "timeMSK": "2026-10-27T16:20:17+03:00",
+      "message": "launched; v0.4.10-dev [build 2026-10-27 16:11] (prev 0.4.10); AX=false InputMon=false"
+    },
+    {
+      "timeMSK": "2026-10-27T16:20:27+03:00",
+      "message": "launched; v0.4.10-dev [build 2026-10-27 16:11] (prev 0.4.10); AX=false InputMon=false"
+    },
+    {
+      "timeMSK": "2026-10-27T16:20:34+03:00",
+      "message": "engine STARTED ok (AX=true InputMon=false)"
+    },
+    {
+      "timeMSK": "2026-10-27T16:20:56+03:00",
+      "message": "launched; v0.4.10-dev [build 2026-10-27 16:11] (prev 0.4.10); AX=true InputMon=true"
+    },
+    {
+      "timeMSK": "2026-10-27T16:20:56+03:00",
+      "message": "engine STARTED ok (AX=true InputMon=true)"
+    }
+  ],
+  "journalIDsPreservedAfterLaunch": true,
+  "collecting": true,
+  "actualMode": "observe",
+  "observationsAfterLaunch": 1033,
+  "neuralEvidenceAfterLaunch": 7,
+  "enginePermissionsConfirmed": true
+}
