@@ -21,6 +21,7 @@ final class Engine: EventTapHandler {
         self?.invalidateNeuralContext()
     }
     var neuralFocusTrackingAvailable: Bool { neuralFocus.available }
+    private var neuralOccurrenceFence = NeuralOccurrenceFence()
     private var neuralModeObserver: NSObjectProtocol?
     private var proposalReason: LayoutReason = .detectorKeep
 
@@ -31,6 +32,7 @@ final class Engine: EventTapHandler {
         }
         neuralModeObserver = NotificationCenter.default.addObserver(forName: .neuralLayoutModeChanged, object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
+            self.invalidateNeuralContext()
             self.neural.setMode(self.settings.neuralLayoutMode)
         }
     }
@@ -39,7 +41,10 @@ final class Engine: EventTapHandler {
         if let neuralModeObserver { NotificationCenter.default.removeObserver(neuralModeObserver) }
     }
 
-    private func invalidateNeuralContext() { neural.invalidateContext() }
+    private func invalidateNeuralContext() {
+        neuralOccurrenceFence.invalidate(current: buffer.currentOccurrenceID, completed: buffer.lastOccurrenceID)
+        neural.invalidateContext()
+    }
 
     private func evaluateNeuralResult(_ result: NeuralLayoutResult) {
         let request = result.request
@@ -55,7 +60,8 @@ final class Engine: EventTapHandler {
     private func neuralRequest() -> NeuralLayoutRequest? {
         guard !secureInputWasOn, !Pause.active, neural.mode != .off, !diagnostics.journalEditing,
               frontAppMode != "off", frontAppMode != "soft", !(settings.developerMode && frontAppIsDev),
-              let occurrence = buffer.currentOccurrenceID, let sourceID = KeyboardLayoutCache.cachedSourceID else { return nil }
+              let occurrence = buffer.currentOccurrenceID, neuralOccurrenceFence.allows(occurrence),
+              let sourceID = KeyboardLayoutCache.cachedSourceID else { return nil }
         return neural.request(occurrenceID: occurrence, word: buffer.currentWord,
                               bundleID: frontAppBID, layoutCode: sourceID)
     }
@@ -65,7 +71,7 @@ final class Engine: EventTapHandler {
               !diagnostics.bypassesJournal(bundleID: frontAppBID),
               frontAppMode != "off", frontAppMode != "soft",
               !(settings.developerMode && frontAppIsDev), let occurrence = buffer.currentOccurrenceID,
-              let sourceID = KeyboardLayoutCache.cachedSourceID else { return }
+              neuralOccurrenceFence.allows(occurrence), let sourceID = KeyboardLayoutCache.cachedSourceID else { return }
         neural.observe(occurrenceID: occurrence, word: buffer.currentWord, bundleID: frontAppBID,
                        layoutCode: sourceID, collecting: diagnostics.enabled)
     }
@@ -2752,6 +2758,7 @@ final class Engine: EventTapHandler {
             DispatchQueue.main.asyncAfter(deadline: .now() + self.muteDrain) { self.endSyntheticFlight() }
         }
         buffer.commitSnippet(expansion: expansion, whitespace: ws)   // буфер: триггер→раскрытие, затем граница
+        neuralOccurrenceFence.reset()
         buffer.invalidateGroupHistory()   // сниппет изменил длину экрана не 1:1 → группа недействительна (G1)
         // ⚠️ ЗВУК И ЛОГ — С КОЛБЭКА ДОЛОЙ (01.08). `playSound()` создаёт NSSound, и первый вызов
         // ЧИТАЕТ ФАЙЛ С ДИСКА (/System/Library/Sounds или наш ресурс) прямо внутри окна, которое

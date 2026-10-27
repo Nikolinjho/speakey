@@ -107,6 +107,7 @@ enum ObservationIntegrationTests: DiagnosticSuite {
         checkLifetime(t)
         checkFocus(t)
         checkPolicyEvidence(t)
+        checkRetainedOccurrence(t)
     }
     private static func wait(_ ready: () -> Bool) -> Bool {
         let limit = Date().addingTimeInterval(5)
@@ -234,6 +235,63 @@ enum ObservationIntegrationTests: DiagnosticSuite {
         t.check("Policy не стирает независимое предложение raw scores", saved?.proposedCyrillic == true && runtime.modelSHA256 == String(repeating: "d", count: 64))
         runtime.stop()
         runtime = nil
+    }
+
+    private static func checkRetainedOccurrence(_ t: DiagnosticTests) {
+        for event in ["фокус другого поля", "стрелка при arrowsCancel=false", "смена раскладки", "смена режима"] {
+            let buffer = KeystrokeBuffer()
+            var fence = NeuralOccurrenceFence()
+            let queues = IntegrationQueues()
+            let backend = IntegrationBackend()
+            let runtime = NeuralLayoutRuntime(mode: .observe, factory: {
+                NeuralLayoutLoadedBackend(backend: backend, modelID: "fence", sha256: String(repeating: "e", count: 64))
+            }, work: { queues.work.append($0) }, deliver: { queues.delivery.append($0) })
+            queues.run(); queues.deliver()
+            var snapshots: [String] { backend.words }
+            func observe() {
+                guard let occurrence = buffer.currentOccurrenceID, fence.allows(occurrence) else { return }
+                runtime.changed()
+                runtime.observe(occurrenceID: occurrence, word: buffer.currentWord, bundleID: "editor", layoutCode: "source.id", collecting: false)
+                queues.run(); queues.deliver()
+            }
+            buffer.onContextReset = {
+                fence.invalidate(current: buffer.currentOccurrenceID, completed: buffer.lastOccurrenceID)
+                runtime.invalidateContext()
+            }
+            buffer.append("ghbd")
+            let original = buffer.currentOccurrenceID
+            observe()
+            fence.invalidate(current: buffer.currentOccurrenceID, completed: buffer.lastOccurrenceID)
+            buffer.append("t")
+            observe()
+            t.check("Карантин сохраняет baseline buffer, но запрещает snapshot: \(event)",
+                buffer.currentWord == "ghbdt" && buffer.currentOccurrenceID == original && snapshots == ["ghbd"])
+            buffer.boundary(" ")
+            buffer.append("hello")
+            observe()
+            t.check("Новое естественное occurrence разрешает observation: \(event)", snapshots == ["ghbd", "hello"])
+            buffer.softContextReset()
+            buffer.append("t")
+            observe()
+            t.check("Soft reset с новым id и прежним префиксом также остаётся в карантине: \(event)", snapshots == ["ghbd", "hello"])
+            buffer.clear()
+            buffer.append("world")
+            observe()
+            t.check("Полный clear снимает карантин: \(event)", snapshots == ["ghbd", "hello", "world"])
+            buffer.boundary(" ")
+            fence.invalidate(current: buffer.currentOccurrenceID, completed: buffer.lastOccurrenceID)
+            buffer.backspace()
+            buffer.backspace()
+            observe()
+            t.check("Backspace в старое завершённое occurrence не обходит карантин: \(event)", snapshots == ["ghbd", "hello", "world"])
+            runtime.stop()
+        }
+        var changes = 0
+        let monitor = NeuralFocusMonitor(install: { _, _ in {} }, changed: { changes += 1 })
+        monitor.track(pid: 123)
+        monitor.track(pid: 123)
+        monitor.track(pid: 456)
+        t.check("Смена процесса того же bundle инвалидирует контекст ровно при смене PID", changes == 2)
     }
 
 }

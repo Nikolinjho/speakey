@@ -21,6 +21,7 @@ final class NeuralFocusMonitor {
         guard self.pid != pid else { return }
         stop()
         self.pid = pid
+        changed()
         guard let pid else { return }
         cancel = install(pid) { [weak self] in self?.changed() }
         available = cancel != nil
