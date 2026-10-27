@@ -63,6 +63,7 @@ final class LayoutJournalStore {
     private let file: URL
     private let now: () -> Date
     private let maxCases: Int
+    private let maxObservations: Int
     private let maxAge: TimeInterval
     private let maxBytes: Int
     private let maxWordLength: Int
@@ -70,12 +71,13 @@ final class LayoutJournalStore {
     private var loadError: Error?
     private var storageError: Error?
 
-    init(directory: URL, now: @escaping () -> Date = Date.init, maxCases: Int = 2000,
+    init(directory: URL, now: @escaping () -> Date = Date.init, maxCases: Int = 2000, maxObservations: Int = 2000,
          maxAge: TimeInterval = 30 * 86400, maxBytes: Int = 20 * 1024 * 1024, maxWordLength: Int = 128) {
         self.directory = directory
         file = directory.appendingPathComponent("layout-journal-v1.json")
         self.now = now
         self.maxCases = max(0, maxCases)
+        self.maxObservations = max(0, maxObservations)
         self.maxAge = max(0, maxAge)
         self.maxBytes = max(0, maxBytes)
         self.maxWordLength = max(0, maxWordLength)
@@ -83,7 +85,7 @@ final class LayoutJournalStore {
     }
 
     func recordObservation(_ observation: LayoutObservation, completion: @escaping Completion = { _ in }) {
-        mutate(completion) { next in
+        mutate(completion, preservingObservationID: observation.id) { next in
             try self.validate(observation.typed, observation.typed)
             if let proposed = observation.proposed { try self.validate(proposed, proposed) }
             if let alternative = observation.alternative { try self.validate(alternative, alternative) }
@@ -215,13 +217,13 @@ final class LayoutJournalStore {
         }
     }
 
-    private func mutate(_ completion: @escaping Completion, change: @escaping (inout Envelope) throws -> Void) {
+    private func mutate(_ completion: @escaping Completion, preservingObservationID: UUID? = nil, change: @escaping (inout Envelope) throws -> Void) {
         queue.async {
             let result = Result<Void, Error> {
                 if let error = self.storageError { throw error }
                 var next = self.state
                 try change(&next)
-                let data = try self.retainedData(&next)
+                let data = try self.retainedData(&next, preservingObservationID: preservingObservationID)
                 try self.write(data, to: self.file)
                 self.state = next
             }
@@ -268,12 +270,13 @@ final class LayoutJournalStore {
         } catch { loadError = error }
     }
 
-    private func retainedData(_ next: inout Envelope) throws -> Data {
+    private func retainedData(_ next: inout Envelope, preservingObservationID: UUID? = nil) throws -> Data {
         prune(&next)
         var data = try encoder.encode(next)
-        while data.count > maxBytes && (!next.observations.isEmpty || !next.cases.isEmpty) {
-            if !next.observations.isEmpty { removeOldestObservation(&next) }
-            else { removeOldest(&next) }
+        while data.count > maxBytes {
+            guard removeOldestForSize(&next, preservingObservationID: preservingObservationID) else {
+                throw LayoutJournalError.sizeLimit
+            }
             data = try encoder.encode(next)
         }
         guard data.count <= maxBytes else { throw LayoutJournalError.sizeLimit }
@@ -316,10 +319,26 @@ final class LayoutJournalStore {
         }
         next.prunedCount += count - next.observations.count
         for item in next.cases.filter({ $0.lastSeen < cutoff }) { remove(item.id, from: &next) }
-        while next.cases.count + next.observations.count > maxCases {
-            if !next.observations.isEmpty { removeOldestObservation(&next) }
-            else { removeOldest(&next) }
+        while next.cases.count > maxCases { removeOldest(&next) }
+        while next.observations.count > maxObservations { removeOldestObservation(&next) }
+    }
+
+    private func removeOldestForSize(_ next: inout Envelope, preservingObservationID: UUID?) -> Bool {
+        let observation = next.observations.filter { $0.id != preservingObservationID }.min { $0.recordedAt < $1.recordedAt }
+        let item = next.cases.min {
+            if $0.lastSeen != $1.lastSeen { return $0.lastSeen < $1.lastSeen }
+            return $0.firstSeen < $1.firstSeen
         }
+        if let item, item.lastSeen <= (observation?.recordedAt ?? .distantFuture) {
+            remove(item.id, from: &next)
+            return true
+        }
+        if let observation {
+            next.observations.removeAll { $0.id == observation.id }
+            next.prunedCount += 1
+            return true
+        }
+        return false
     }
 
     private func removeOldestObservation(_ next: inout Envelope) {

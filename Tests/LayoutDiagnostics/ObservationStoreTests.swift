@@ -101,8 +101,40 @@ enum ObservationStoreTests: DiagnosticSuite {
         let _: Result<Void, Error> = JournalStoreTests.wait { legacyRestored.clear(completion: $0) }
         t.check("Очистка наблюдений сохраняет активную квитанцию", snapshot(legacyRestored).observations.isEmpty && snapshot(legacyRestored).rules.first?.status == .active)
 
+        let saturatedDirectory = directory.appendingPathComponent("saturated")
+        let saturated = LayoutJournalStore(directory: saturatedDirectory, now: { JournalStoreTests.date }, maxCases: 1)
+        let _: Result<Void, Error> = JournalStoreTests.wait { saturated.record(feedback, completion: $0) }
+        let saturatedAccepted = record(current, into: saturated)
+        let saturatedRestarted = LayoutJournalStore(directory: saturatedDirectory, now: { JournalStoreTests.date }, maxCases: 1)
+        t.check("Заполненный лимит случаев не вытесняет новое наблюдение", saturatedAccepted && snapshot(saturatedRestarted).observations == [current] && snapshot(saturatedRestarted).cases.count == 1)
+
+        let saturatedBytesDirectory = directory.appendingPathComponent("saturated-bytes")
+        let saturatedBytes = LayoutJournalStore(directory: saturatedBytesDirectory, now: { JournalStoreTests.date })
+        var oldFeedback = feedback
+        oldFeedback.createdAt = JournalStoreTests.date.addingTimeInterval(-60)
+        let _: Result<Void, Error> = JournalStoreTests.wait { saturatedBytes.record(oldFeedback, completion: $0) }
+        let oldCase = snapshot(saturatedBytes).cases[0]
+        let activeReceipt = LayoutRuleReceipt(sourceCaseID: oldCase.id, typed: oldCase.typed, expected: oldCase.expected, before: [:], written: [:])
+        let _: Result<Void, Error> = JournalStoreTests.wait { saturatedBytes.prepareRule(activeReceipt, completion: $0) }
+        let _: Result<Void, Error> = JournalStoreTests.wait { saturatedBytes.activateRule(id: activeReceipt.id, completion: $0) }
+        let byteBudget = try! Data(contentsOf: saturatedBytesDirectory.appendingPathComponent("layout-journal-v1.json")).count
+        let byteConstrained = LayoutJournalStore(directory: saturatedBytesDirectory, now: { JournalStoreTests.date }, maxBytes: byteBudget)
+        let bytesAccepted = record(current, into: byteConstrained)
+        let bytesRestarted = LayoutJournalStore(directory: saturatedBytesDirectory, now: { JournalStoreTests.date }, maxBytes: byteBudget)
+        let persistedBytes = snapshot(bytesRestarted)
+        t.check("Бюджет байтов вытесняет старый случай вместо нового наблюдения", bytesAccepted && persistedBytes.observations == [current] && persistedBytes.cases.isEmpty && persistedBytes.prunedCount == 1)
+        t.check("Вытеснение случая по байтам сохраняет активную квитанцию", persistedBytes.rules.first?.id == activeReceipt.id && persistedBytes.rules.first?.status == .active)
+
+        let _: Result<Void, Error> = JournalStoreTests.wait { bytesRestarted.clear(completion: $0) }
+        let ledgerFile = saturatedBytesDirectory.appendingPathComponent("layout-journal-v1.json")
+        let ledgerBytes = try! Data(contentsOf: ledgerFile)
+        let ledgerConstrained = LayoutJournalStore(directory: saturatedBytesDirectory, now: { JournalStoreTests.date }, maxBytes: ledgerBytes.count)
+        let ledgerAccepted = record(current, into: ledgerConstrained)
+        let ledgerAfter = snapshot(ledgerConstrained)
+        t.check("Недостаточный бюджет квитанций возвращает ошибку вместо потери нового решения", !ledgerAccepted && ledgerAfter.observations.isEmpty && ledgerAfter.rules.first?.status == .active && (try? Data(contentsOf: ledgerFile)) == ledgerBytes)
+
         let limitedDirectory = directory.appendingPathComponent("limited")
-        let limited = LayoutJournalStore(directory: limitedDirectory, now: { JournalStoreTests.date }, maxCases: 2)
+        let limited = LayoutJournalStore(directory: limitedDirectory, now: { JournalStoreTests.date }, maxCases: 2, maxObservations: 1)
         let _: Result<Void, Error> = JournalStoreTests.wait { limited.record(feedback, completion: $0) }
         for index in 0..<3 {
             var value = observation
@@ -112,16 +144,18 @@ enum ObservationStoreTests: DiagnosticSuite {
             let _ = record(value, into: limited)
         }
         let limitedState = snapshot(limited)
-        t.check("Общий лимит сначала удаляет старые наблюдения", limitedState.cases.count == 1 && limitedState.observations.map(\.typed) == ["word2"] && limitedState.prunedCount == 2)
+        t.check("Отдельный лимит наблюдений сохраняет новые решения и случаи", limitedState.cases.count == 1 && limitedState.observations.map(\.typed) == ["word2"] && limitedState.prunedCount == 2)
         let aged = LayoutJournalStore(directory: limitedDirectory, now: { JournalStoreTests.date.addingTimeInterval(31 * 86400) })
         t.check("Наблюдения старше тридцати дней удалены при загрузке", snapshot(aged).observations.isEmpty && snapshot(aged).cases.isEmpty && snapshot(aged).prunedCount == 4)
         let bytesDirectory = directory.appendingPathComponent("bytes")
         let bytes = LayoutJournalStore(directory: bytesDirectory, now: { JournalStoreTests.date })
         let _: Result<Void, Error> = JournalStoreTests.wait { bytes.record(feedback, completion: $0) }
         let caseBytes = try! Data(contentsOf: bytesDirectory.appendingPathComponent("layout-journal-v1.json")).count
-        let _ = record(current, into: bytes)
+        var olderObservation = current
+        olderObservation.recordedAt = JournalStoreTests.date.addingTimeInterval(-60)
+        let _ = record(olderObservation, into: bytes)
         let constrained = LayoutJournalStore(directory: bytesDirectory, now: { JournalStoreTests.date }, maxBytes: caseBytes)
-        t.check("Лимит байтов удаляет наблюдения раньше случаев", snapshot(constrained).observations.isEmpty && snapshot(constrained).cases.count == 1 && snapshot(constrained).prunedCount == 1)
+        t.check("Лимит байтов удаляет наблюдение старше случая", snapshot(constrained).observations.isEmpty && snapshot(constrained).cases.count == 1 && snapshot(constrained).prunedCount == 1)
         let loadedDirectory = directory.appendingPathComponent("loaded-invalid")
         let loadedStore = LayoutJournalStore(directory: loadedDirectory, now: { JournalStoreTests.date })
         let _ = record(current, into: loadedStore)
@@ -133,7 +167,7 @@ enum ObservationStoreTests: DiagnosticSuite {
         try! JSONSerialization.data(withJSONObject: loadedJSON).write(to: loadedFile)
         let invalidRestored = LayoutJournalStore(directory: loadedDirectory, now: { JournalStoreTests.date })
         t.check("Загруженная длинная альтернатива удаляется без усечения", snapshot(invalidRestored).observations.isEmpty && snapshot(invalidRestored).prunedCount == 1)
-        let zero = LayoutJournalStore(directory: directory.appendingPathComponent("zero"), now: { JournalStoreTests.date }, maxCases: 0)
+        let zero = LayoutJournalStore(directory: directory.appendingPathComponent("zero"), now: { JournalStoreTests.date }, maxObservations: 0)
         t.check("Нулевой лимит удаляет наблюдение и учитывает удаление", record(current, into: zero) && snapshot(zero).observations.isEmpty && snapshot(zero).prunedCount == 1)
         let invalidDirectory = LayoutJournalStore(directory: file, now: { JournalStoreTests.date })
         t.check("Ошибка каталога не принимает наблюдение", !record(current, into: invalidDirectory) && snapshot(invalidDirectory).loadError != nil)
