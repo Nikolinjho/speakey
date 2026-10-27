@@ -1,0 +1,24 @@
+{
+  "identity": "Keyboop Local Dev",
+  "certificateSHA1": "749281C2A0E19FC82DA85918A28F5BCC195C5597",
+  "certificateSHA256": "E8:7D:D5:87:FD:1F:DC:E5:61:8E:4B:F5:D6:4E:5B:86:6C:A0:A7:A5:F2:5F:68:31:10:00:40:E8:48:4B:3F:CC",
+  "certificateExpiresMSK": "2036-10-27T17:35:50+03:00",
+  "certificatePurpose": "Code Signing only, CA=false, digitalSignature",
+  "privateKeyExported": false,
+  "userTrustPolicy": "codeSign only",
+  "binaries": [
+    {
+      "name": "a",
+      "requirement": "identifier \"ru.keyboop.signing-proof\" and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+      "cdhash": "7501c482896a5854b49fec8d930e72500c10bf79"
+    },
+    {
+      "name": "b",
+      "requirement": "identifier \"ru.keyboop.signing-proof\" and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+      "cdhash": "ed0a357a2543600a3b9ef52cdbaf2eb2e32e79ad"
+    }
+  ],
+  "differentCdhash": true,
+  "sameDesignatedRequirement": true,
+  "bothSatisfyFirstRequirement": true
+}

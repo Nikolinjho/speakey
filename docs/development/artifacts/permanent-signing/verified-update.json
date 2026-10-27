@@ -1,0 +1,39 @@
+{
+  "installedMSK": "2026-10-27T17:44:18.640728+03:00",
+  "target": "/Applications/Keyboop_local.app",
+  "stage": "/private/tmp/keyboop-signing-update-mov95166/Keyboop_local.app",
+  "backup": "/Users/itsnikoko/Library/Application Support/KeyboopLocalBackups/permanent-signing-update-20261027-174409-MSK",
+  "bundleID": "ru.keyboop.app.dev",
+  "oldExecutableSHA256": "1c1d75814e90ba31b2350b48fc2788facd6a4f9d1b085ff4dd9f25d1559c6aab",
+  "newExecutableSHA256": "5561a4ed397759782019eb0c8dbebc5c9b3afbb43ecb64aea232b2df355b189d",
+  "strictCodesign": true,
+  "preservedPreferences": true,
+  "mode": "observe",
+  "journalPreservedBeforeLaunch": true,
+  "observationsBeforeLaunch": 1255,
+  "casesBeforeLaunch": 2,
+  "pidsBefore": [
+    51080,
+    51081
+  ],
+  "pidsAfter": [
+    56093
+  ],
+  "logOffsetBeforeLaunch": 327152,
+  "engineStartedConfirmed": true,
+  "profileEnabled": false,
+  "accessibilityGranted": true,
+  "inputMonitoringGranted": true,
+  "permissionsRetainedOnUpdate": true,
+  "startupMSK": "2026-10-27T17:44:19+03:00",
+  "allJournalIDsPreserved": true,
+  "journalCountsAfter": {
+    "observations": 1255,
+    "cases": 2,
+    "rules": 1
+  },
+  "currentMode": "observe",
+  "settingsWindowConfirmed": true,
+  "settingsWindowProcess": 56093,
+  "settingsWindowTitle": "Keyboop"
+}

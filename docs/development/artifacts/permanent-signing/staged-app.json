@@ -1,0 +1,38 @@
+{
+  "stage": "/tmp/keyboop-signing-h2otl7ih/Keyboop_local.app",
+  "executableSHA256": "1c1d75814e90ba31b2350b48fc2788facd6a4f9d1b085ff4dd9f25d1559c6aab",
+  "components": [
+    {
+      "path": ".",
+      "requirement": "identifier \"ru.keyboop.app.dev\" and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+      "strictVerified": true
+    },
+    {
+      "path": "Contents/Frameworks/Sparkle.framework/Versions/B",
+      "requirement": "identifier \"org.sparkle-project.Sparkle\" and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+      "strictVerified": true
+    },
+    {
+      "path": "Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc",
+      "requirement": "identifier \"org.sparkle-project.DownloaderService\" and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+      "strictVerified": true
+    },
+    {
+      "path": "Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc",
+      "requirement": "identifier \"org.sparkle-project.InstallerLauncher\" and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+      "strictVerified": true
+    },
+    {
+      "path": "Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app",
+      "requirement": "identifier \"org.sparkle-project.Sparkle.Updater\" and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+      "strictVerified": true
+    },
+    {
+      "path": "Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate",
+      "requirement": "identifier Autoupdate and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+      "strictVerified": true
+    }
+  ],
+  "devEntitlementsPreserved": true,
+  "assistProfileEnabled": false
+}

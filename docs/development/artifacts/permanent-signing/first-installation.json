@@ -1,0 +1,25 @@
+{
+  "installedMSK": "2026-10-27T17:40:26.811466+03:00",
+  "target": "/Applications/Keyboop_local.app",
+  "stage": "/private/tmp/keyboop-signing-h2otl7ih/Keyboop_local.app",
+  "backup": "/Users/itsnikoko/Library/Application Support/KeyboopLocalBackups/permanent-signing-20261027-173850-MSK",
+  "bundleID": "ru.keyboop.app.dev",
+  "oldExecutableSHA256": "156d6663f6541569cfa48da02e90b1e0194cff0f4270a7b590a4b0afdbe25986",
+  "newExecutableSHA256": "1c1d75814e90ba31b2350b48fc2788facd6a4f9d1b085ff4dd9f25d1559c6aab",
+  "strictCodesign": true,
+  "preservedPreferences": true,
+  "mode": "observe",
+  "journalPreservedBeforeLaunch": true,
+  "observationsBeforeLaunch": 1255,
+  "casesBeforeLaunch": 2,
+  "pidsBefore": [
+    26468,
+    26470
+  ],
+  "pidsAfter": [
+    49780
+  ],
+  "logOffsetBeforeLaunch": 324005,
+  "engineStartedConfirmed": false,
+  "profileEnabled": false
+}

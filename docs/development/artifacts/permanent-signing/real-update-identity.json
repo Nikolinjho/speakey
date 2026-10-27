@@ -1,0 +1,18 @@
+{
+  "before": {
+    "requirement": "identifier \"ru.keyboop.app.dev\" and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+    "cdhash": "378511a0e198858c6146fd6dee4b468d41242d91",
+    "executableSHA256": "1c1d75814e90ba31b2350b48fc2788facd6a4f9d1b085ff4dd9f25d1559c6aab"
+  },
+  "afterBuild": {
+    "requirement": "identifier \"ru.keyboop.app.dev\" and certificate leaf = H\"749281c2a0e19fc82da85918a28f5bcc195c5597\"",
+    "cdhash": "2de0e57b468d9b4da65b10b535ce238b0cb71675",
+    "executableSHA256": "5561a4ed397759782019eb0c8dbebc5c9b3afbb43ecb64aea232b2df355b189d"
+  },
+  "sameRequirement": true,
+  "differentCdhash": true,
+  "newBuildSatisfiesOldRequirement": true,
+  "buildIdentityOverride": false,
+  "backup": "/Users/itsnikoko/Library/Application Support/KeyboopLocalBackups/permanent-signing-update-20261027-174409-MSK",
+  "stage": "/private/tmp/keyboop-signing-update-mov95166/Keyboop_local.app"
+}

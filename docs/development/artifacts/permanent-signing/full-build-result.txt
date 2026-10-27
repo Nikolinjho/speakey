@@ -1,0 +1,10 @@
+Подпись доступна: Keyboop Local Dev (749281C2A0E19FC82DA85918A28F5BCC195C5597)
+/private/tmp/Keyboop_permanent_update.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc: replacing existing signature
+/private/tmp/Keyboop_permanent_update.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc: replacing existing signature
+/private/tmp/Keyboop_permanent_update.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app: replacing existing signature
+/private/tmp/Keyboop_permanent_update.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate: replacing existing signature
+/private/tmp/Keyboop_permanent_update.app/Contents/Frameworks/Sparkle.framework: replacing existing signature
+/private/tmp/Keyboop_permanent_update.app: replacing existing signature
+Подпись и строгая проверка готовы: Keyboop Local Dev (749281C2A0E19FC82DA85918A28F5BCC195C5597)
+✓ Готово: /private/tmp/Keyboop_permanent_update.app
+  Запуск:  open "/private/tmp/Keyboop_permanent_update.app"  (или bash install-local.sh — чистая установка в /Applications)

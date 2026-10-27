@@ -78,6 +78,10 @@ macOS 15 — на macOS 14 приложение молча умрёт ещё д�
   `libFluidAudio.a`, `Modules/` и `include/` —
   [исходники](https://github.com/FluidInference/FluidAudio)
 
+Для локальной сборки нужен постоянный сертификат `Keyboop Local Dev` в Keychain
+или явно выбранный `KEYBOOP_SIGN_ID`. Сборка останавливается, если сертификат
+недоступен. [Как устроена локальная подпись](docs/development/permanent-local-signing.md).
+
 Дальше:
 
 ```bash

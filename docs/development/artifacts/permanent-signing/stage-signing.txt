@@ -1,0 +1,7 @@
+/private/tmp/keyboop-signing-h2otl7ih/Keyboop_local.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Downloader.xpc: replacing existing signature
+/private/tmp/keyboop-signing-h2otl7ih/Keyboop_local.app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices/Installer.xpc: replacing existing signature
+/private/tmp/keyboop-signing-h2otl7ih/Keyboop_local.app/Contents/Frameworks/Sparkle.framework/Versions/B/Updater.app: replacing existing signature
+/private/tmp/keyboop-signing-h2otl7ih/Keyboop_local.app/Contents/Frameworks/Sparkle.framework/Versions/B/Autoupdate: replacing existing signature
+/private/tmp/keyboop-signing-h2otl7ih/Keyboop_local.app/Contents/Frameworks/Sparkle.framework: replacing existing signature
+/private/tmp/keyboop-signing-h2otl7ih/Keyboop_local.app: replacing existing signature
+Подпись и строгая проверка готовы: Keyboop Local Dev (749281C2A0E19FC82DA85918A28F5BCC195C5597)
