@@ -1,0 +1,4 @@
+PRECHECK: AX=true InputMonitoring=true (nonprompting)
+PASS: OS HID → session → genuine EventTap.handle; own PID, keyDown/255, full 64-bit marker/token; consumed
+FAIL editing: AppKit received 0/14 synthetic events
+SCOPE: synthetic OS transport; explicit NSApplication.sendEvent → NSTextView.keyDown routing in hidden fixture; no activation, physical input, natural focus routing, Engine policy or mailbox proof

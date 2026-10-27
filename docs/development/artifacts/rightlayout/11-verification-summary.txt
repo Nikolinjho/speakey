@@ -1,0 +1,36 @@
+Baseline: feat/layout-diagnostics @ 9d58fbb
+Command: bash scripts/test-neural-transport.sh gate
+Exit: 0
+Result: PASS: 5 transport gate assertions
+Command: KEYBOOP_RELEASE=0 KEYBOOP_SIGN_ID=- KEYBOOP_BUILD_APP=/private/tmp/Keyboop_transport.app bash build-app.sh
+Exit: 0
+Result: full temporary bundle built; existing unrelated compiler warnings preserved in 11-transport-build.txt
+Formatting: trailing spaces in compiler source excerpts trimmed for git diff --check; original compiler bytes otherwise preserved
+Identity after build: ru.keyboop.app.transport / Keyboop Transport Check
+Command: codesign --force --sign - /private/tmp/Keyboop_transport.app
+Exit: 0
+Command: codesign --verify --deep --strict /private/tmp/Keyboop_transport.app
+Exit: 0
+Command: bash scripts/test-neural-transport.sh --os
+Exit: 0
+Result: global marker received by genuine EventTap.handle and consumed; exact full 64-bit marker/token; own PID/keyDown/255
+Result: genuine TextReplacer.replaceInline posted 14 marked events; downstream own-PID OS tap received all 14
+Result: explicit NSApplication.sendEvent own-window routing / native NSTextView.keyDown produced привет, caret 6
+Result: own-PID continuation and Backspace matched exact text/caret
+Command: bash scripts/test-neural-layout.sh assistance
+Exit: 0
+Result: 65 checks, 0 errors
+Command: bash scripts/test-layout-diagnostics.sh all
+Exit: 0
+Result: 295 checks, 0 errors
+Command: bash scripts/test-layout-detector.sh all
+Exit: 0
+Result: 101 checks, 0 errors
+Command: swiftc -frontend -parse Sources/Keyboop/NeuralLayoutTransportCheck.swift Sources/Keyboop/NeuralTransportEventGate.swift Sources/Keyboop/main.swift
+Exit: 0
+Command: bash -n scripts/test-neural-transport.sh
+Exit: 0
+Command: git diff --check
+Exit: 0
+Unmeasured: physical keyboard, natural focus routing, other applications, Engine policy/mailbox dispatch, installed-process TCC, quality gain
+Profile: unchanged, enabled=false

@@ -1,0 +1,6 @@
+PRECHECK: AX=true InputMonitoring=true (nonprompting)
+PASS: OS HID → session → genuine EventTap.handle; own PID, keyDown/255, full 64-bit marker/token; consumed
+PASS: downstream own-PID OS tap received 14/14 replacement events
+PASS: OS postToPid → process tap → genuine TextReplacer.replaceInline → tapPostEvent → downstream own-PID OS tap: 14/14; explicit AppKit routing: привет, caret 6
+PASS: own-PID continuation and Backspace; exact text and caret
+SCOPE: synthetic OS transport; explicit NSApplication.sendEvent → NSTextView.keyDown routing in hidden fixture; no activation, physical input, natural focus routing, Engine policy or mailbox proof

@@ -1,5 +1,10 @@
 import AppKit
 
+// Проверочный процесс не запускает AppDelegate и не касается пользовательских настроек.
+if ProcessInfo.processInfo.environment["KEYBOOP_NEURAL_TRANSPORT_CHECK"] == "1" {
+    exit(NeuralLayoutTransportCheck.run())
+}
+
 // Изолированный просмотр настроек: до любых системных guard и AppDelegate.
 if ProcessInfo.processInfo.environment["KEYBOOP_JOURNAL_PREVIEW"] == "1" || ProcessInfo.processInfo.environment["KEYBOOP_NEURAL_PREVIEW_CHECK"] == "1" {
     let previewApp = NSApplication.shared

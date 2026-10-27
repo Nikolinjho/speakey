@@ -1,0 +1,85 @@
+2026-10-27 16:00:00.283 tests[98958:5649160] TISFileInterrogator updateSystemInputSources false but old data invalid: currentCacheHeaderPtr nonNULL? 0, ->cacheFormatVersion 0, ->magicCookie 00000000, inputSourceTableCountSys 0
+2026-10-27 16:00:00.285 tests[98958:5649217] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-10-27 16:00:00.285 tests[98958:5649160] Error received in message reply handler: Connection invalid
+2026-10-27 16:00:00.286 tests[98958:5649160] Error received in message reply handler: Connection invalid
+Keyboard Layouts: duplicate keyboard layout identifier -17410.
+Keyboard Layouts: keyboard layout identifier -17410 has been replaced with -28673.
+2026-10-27 16:00:00.293 tests[98958:5649160] Error received in message reply handler: Connection invalid
+2026-10-27 16:00:00.293 tests[98958:5649160] Error received in message reply handler: Connection invalid
+2026-10-27 16:00:00.299 tests[98958:5649160] Error received in message reply handler: Connection invalid
+2026-10-27 16:00:00.301 tests[98958:5649160] Error received in message reply handler: Connection invalid
+2026-10-27 16:00:00.302 tests[98958:5649160] Error received in message reply handler: Connection invalid
+2026-10-27 16:00:00.305 tests[98958:5649160] Error received in message reply handler: Connection invalid
+2026-10-27 16:00:00.306 tests[98958:5649160] Error received in message reply handler: Connection invalid
+2026-10-27 16:00:00.307 tests[98958:5649160] Error received in message reply handler: Connection invalid
+Keyboard Layouts: duplicate keyboard layout identifier -30769.
+Keyboard Layouts: keyboard layout identifier -30769 has been replaced with -28674.
+Keyboard Layouts: duplicate keyboard layout identifier -14934.
+Keyboard Layouts: keyboard layout identifier -14934 has been replaced with -28675.
+2026-10-27 16:00:00.323 tests[98958:5649160] Error received in message reply handler: Connection invalid
+PASS: Нейромаркер имеет приоритет
+PASS: Обычный ввод остаётся реальным
+PASS: Кодек сохраняет token 1
+PASS: CGEvent сохраняет все биты 1
+PASS: Кодек сохраняет token 2147483647
+PASS: CGEvent сохраняет все биты 2147483647
+PASS: Кодек сохраняет token 4294967295
+PASS: CGEvent сохраняет все биты 4294967295
+PASS: Нулевой token отклоняется
+PASS: Чужой prefix отклоняется
+PASS: Старый A не извлекает новый B
+PASS: B остаётся доступен
+PASS: Повторный B ничего не извлекает
+PASS: Отмена старого A не отзывает новый pending
+PASS: Invalidate отзывает заявку
+PASS: Token не переиспользуется
+PASS: TTL ограничен половиной секунды
+PASS: Последний token разрешён
+PASS: Переполнение навсегда блокирует новые заявки
+PASS: Разрешённый профиль предлагает замену
+PASS: Живой запрет app отклоняет замену
+PASS: Живой запрет developer отклоняет замену
+PASS: Живой запрет secureInput отклоняет замену
+PASS: Живой запрет modifiers отклоняет замену
+PASS: Живой запрет editing отклоняет замену
+PASS: Живой запрет syntheticFlight отклоняет замену
+PASS: Живой запрет undo отклоняет замену
+PASS: Живой запрет unavailable отклоняет замену
+PASS: Живой запрет rule отклоняет замену
+PASS: Смешанное слово отклоняется
+PASS: Изменение snapshot запрещает запись
+PASS: Изменение snapshot запрещает запись
+PASS: Изменение snapshot запрещает запись
+PASS: Изменение snapshot запрещает запись
+PASS: Изменение snapshot запрещает запись
+PASS: Изменение snapshot запрещает запись
+PASS: Профиль без допуска остаётся наблюдением
+PASS: Профиль без допуска остаётся наблюдением
+PASS: Правило выше модели
+PASS: Буква перед marker меняет revision и отменяет запись
+PASS: Выключенный live guard запрещает запись
+PASS: Выключенный live guard запрещает запись
+PASS: Выключенный live guard запрещает запись
+PASS: Выключенный live guard запрещает запись
+PASS: Выключенный live guard запрещает запись
+PASS: Выключенный live guard запрещает запись
+PASS: Выключенный live guard запрещает запись
+PASS: Выключенный live guard запрещает запись
+PASS: Выключенный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Активный live guard запрещает запись
+PASS: Все live guards разрешены
+PASS: Rejected не меняет состояние
+PASS: Submitted меняет состояние ровно один раз
+PASS: Каждая actual submission записана ровно один раз
+65 проверок, 0 ошибок
