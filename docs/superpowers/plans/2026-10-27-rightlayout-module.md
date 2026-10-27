@@ -534,7 +534,7 @@ extension Notification.Name {
 ```
 - [ ] Пополнить фиксированными корректными словами из имеющихся Resources/words_ru.json и words_en.json. Учитывать лицензию keyswitcher из THIRD_PARTY. Ошибочные варианты генерировать Keymap из заранее отделённых семейств. Добавить имена, аббревиатуры, npm, kubectl, Nuxt, реьд, дд/ll, пунктуационные клавиши, смешанные токены и отрицательные примеры с правильной латиницей внутри русской фразы. Не считать семантически неоднозначные короткие слова однозначными ошибками.
 - [ ] Семейства делить стабильно по SHA256: первые семь из десяти bucket в calibration, остальные в holdout. Из одного семейства получать все префиксы только после разделения. При недостаточном размере holdout команда завершается с ошибкой и не пишет enabled=true.
-- [ ] Перебрать на calibration minimumScore от 0.50 до 0.95 с шагом 0.01 и minimumMargin от 0.05 до 0.50 с шагом 0.01. Для каждой комбинации создать временный in-memory профиль enabled=true только внутри оценочного CLI и сравнить baseline и baseline+policy на одной последовательности префиксов. Этот профиль никогда не загружается приложением и не записывается в live defaults. Выбирать максимум recall при ограничении нулевого дополнительного FP, затем более высокий score, затем margin. Порог 0.99 не навязывается.
+- [ ] Перебрать на calibration minimumScore от 0.50 до 0.95 с шагом 0.01 и minimumMargin от 0.05 до 0.50 с шагом 0.01. Базовую раннюю замену оценивать через LayoutDetector.liveDecide и те же admission/Keymap-правила, что в runtime. Основной recall относится к замене во время набора, поведение на границе полного слова отражать отдельно. Любую неверную раннюю замену на правильном слове считать FP, даже если поздняя обработка могла бы исправить результат. Предсказания модели для префиксов вычислить один раз до перебора порогов. Для каждой комбинации создать временный in-memory профиль enabled=true только внутри оценочного CLI и сравнить baseline и baseline+policy на одной последовательности префиксов. Этот профиль никогда не загружается приложением и не записывается в live defaults. Выбирать максимум recall при ограничении нулевого дополнительного FP, затем более высокий score, затем margin. Порог 0.99 не навязывается.
 - [ ] Один выбранный профиль проверить на неизменённом holdout. Для сравнения использовать тот же admission и Keymap, что у runtime. Проверка family split и минимального объёма обязательна. Никакого обучения весов модели этой задачей не выполняется.
 - [ ] Пример результата проверки готовности:
 ```python
@@ -575,7 +575,7 @@ def assistance_ready(baseline_fp, assisted_fp, baseline_recall, assisted_recall)
 **Goal:** Применять только свежие разрешённые предложения модели через существующий атомарный TextReplacer.
 
 **Files:**
-- `Sources/Keyboop/NeuralLayoutTypes.swift`
+- `Sources/Keyboop/NeuralLayoutMarkerCodec.swift`
 - `Sources/Keyboop/NeuralLayoutMarker.swift`
 - `Sources/Keyboop/Engine.swift`
 - `Sources/Keyboop/EventTap.swift`
@@ -600,7 +600,7 @@ def assistance_ready(baseline_fp, assisted_fp, baseline_recall, assisted_recall)
 
 - [ ] RED: управляемая доставка A-marker после нового pending B не применяет B. Повторная доставка marker A даёт no-op. В тесте пришедшая перед marker буква увеличивает revision, а число вызовов write остаётся нулевым.
 - [ ] Добавить чистую mailbox-структуру с `offer(result:) -> UInt32?`, `take(token:) -> NeuralLayoutResult?` и `invalidate()`. Token монотонно увеличивается от 1, хранится с конкретным pending и не переиспользуется при invalidate. При UInt32.max новые предложения блокируются до следующего запуска процесса. Несовпадающий token не извлекает mailbox. Повторный take возвращает nil. Доступ только main/event tap той же runloop.
-- [ ] Тип события и token кодировать вместе в sourceUserData, не использовать булевы или системные поля CGEvent для хранения счётчика. Чистый кодек объявить в `NeuralLayoutTypes.swift`, а production-константу neuralLayoutMarkerCodec в `NeuralLayoutMarker.swift`:
+- [ ] Тип события и token кодировать вместе в sourceUserData, не использовать булевы или системные поля CGEvent для хранения счётчика. Чистый кодек объявить в отдельном `NeuralLayoutMarkerCodec.swift`, чтобы не менять fingerprint проверенного детектора,, а production-константу neuralLayoutMarkerCodec в `NeuralLayoutMarker.swift`:
 ```swift
 import Foundation
 struct NeuralLayoutMarkerCodec {
@@ -623,7 +623,7 @@ let neuralLayoutMarkerCodec: NeuralLayoutMarkerCodec = {
     return NeuralLayoutMarkerCodec(prefix: prefix)
 }()
 ```
-Unit-тесты кодека компилируют NeuralLayoutTypes.swift и не включают NeuralLayoutMarker.swift с зависимостями TextReplacer. Проверить token 1, Int32.max, UInt32.max, чужой prefix и нулевой token. Отдельный CGEvent roundtrip обязан сохранить sourceUserData побитно.
+Unit-тесты кодека компилируют NeuralLayoutMarkerCodec.swift и не включают NeuralLayoutMarker.swift с зависимостями TextReplacer. Проверить token 1, Int32.max, UInt32.max, чужой prefix и нулевой token. Отдельный CGEvent roundtrip обязан сохранить sourceUserData побитно.
 - [ ] В InputEventOrigin добавить case neuralMarker и аргумент `isNeuralMarker: Bool = false` в classify, сохранив старые вызовы. Новый case имеет приоритет, затем прежние pause/synthetic/real. В EventTap.handle вычислить `let neuralToken = neuralLayoutMarkerCodec.token(from: sourceUserData)` и передать `isNeuralMarker: neuralToken != nil` в classify. До паузного и синтетического фильтра добавить:
 ```swift
 if type == .keyDown, let token = neuralToken {
@@ -641,7 +641,7 @@ if type == .keyDown, let token = neuralToken {
 ```json:metadata
 {
   "files": [
-    "Sources/Keyboop/NeuralLayoutTypes.swift",
+    "Sources/Keyboop/NeuralLayoutMarkerCodec.swift",
     "Sources/Keyboop/NeuralLayoutMarker.swift",
     "Sources/Keyboop/Engine.swift",
     "Sources/Keyboop/EventTap.swift",
