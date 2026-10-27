@@ -62,6 +62,21 @@ enum RuleDetectorTests {
         let exceptions = ExceptionStore(defaults: defaults)
         let backend = ExceptionLayoutRuleBackend(exceptions: exceptions)
         func decide(_ word: String) -> SwapDecision { LayoutDetector.decide(word: word, exceptions: exceptions) }
+        for (source, counterpart) in [("дд", "ll"), ("ll", "дд")] {
+            let facts = LayoutObservationFacts.evaluate(source, wordsRu: [], wordsEn: []) { Keymap.convert($0, toCyrillic: $1, table: nil) }
+            t.check("Настоящая Keymap сохраняет пару \(source) и отсутствие обоих слов", facts.alternative == counterpart && facts.dictionaryMatch == .neither)
+        }
+        for (ru, en, expected) in [(Set(["дд"]), Set(["ll"]), LayoutDictionaryMatch.both), (Set(["дд"]), Set<String>(), .source), (Set<String>(), Set(["ll"]), .alternative)] {
+            let facts = LayoutObservationFacts.evaluate("дд", wordsRu: ru, wordsEn: en) { Keymap.convert($0, toCyrillic: $1, table: nil) }
+            t.check("Словарный факт не подменяет причину решения: \(expected)", facts.dictionaryMatch == expected)
+        }
+        for typed in ["дд1", "aд", "two words", "ж"] {
+            let facts = LayoutObservationFacts.evaluate(typed, wordsRu: [], wordsEn: []) { Keymap.convert($0, toCyrillic: $1, table: nil) }
+            t.check("Контрфактическая пара требует двух буквенных алфавитов и roundtrip: \(typed)", facts.alternative == nil)
+        }
+        t.check("Короткое дд сохраняет исходное решение детектора", decide("дд") == .keep)
+        let unavailable = LayoutObservationFacts.evaluate("дд", wordsRu: nil, wordsEn: nil) { Keymap.convert($0, toCyrillic: $1, table: nil) }
+        t.check("Без готового словаря факт недоступен, пара известна", unavailable.alternative == "ll" && unavailable.dictionaryMatch == .unavailable)
         t.check("Базовое ghbdtn конвертируется", decide("ghbdtn") == .convert(toCyrillic: true))
         t.check("Базовое hello сохраняется", decide("hello") == .keep)
         let keep = try! LayoutRuleService.prepare(case: item("ghbdtn", "ghbdtn"), action: .keep, backend: backend)

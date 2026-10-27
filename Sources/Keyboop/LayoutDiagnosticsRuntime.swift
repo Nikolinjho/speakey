@@ -38,6 +38,12 @@ final class LayoutDiagnosticsRuntime {
             store.record(feedback) { result in recorded?(result) }
         })
         recorded = { [weak self] result in self?.finished(result) }
+        controller.onObservation = { observation in
+            store.recordObservation(observation) { result in recorded?(result) }
+        }
+        controller.onSubmission = { id, submitted in
+            store.updateSubmission(observationID: id, submitted: submitted) { result in recorded?(result) }
+        }
         controller.onChange = { [weak self] in self?.notifyChange() }
         store.snapshot { [weak self] snapshot in
             if let error = snapshot.loadError { self?.lastError = error; self?.notifyChange() }

@@ -114,6 +114,23 @@ enum TrackerTests: DiagnosticSuite {
         _ = continued.observeRetyping(occurrenceID: keep.occurrenceID, contextID: keep.contextID, current: "ghbdtnx", uptime: 0.2)
         tests.check("Продолжение оставленного слова отменяет связь", manual(continued, keep, from: "ghbdtn", to: "привет") == nil)
 
+        for (source, alternative) in [("дд", "ll"), ("ll", "дд")] {
+            var event = observation(typed: source)
+            event.alternative = alternative
+            for values in [[String(source.prefix(1)), "", String(alternative.prefix(1)), alternative], ["", alternative]] {
+                let subject = LayoutFeedbackTracker(); subject.record(event)
+                var found: [LayoutFeedback] = []
+                for value in values {
+                    if let feedback = subject.observeRetyping(occurrenceID: event.occurrenceID, contextID: event.contextID, current: value, uptime: 1) { found.append(feedback) }
+                }
+                tests.check("Полное стирание пропуска и точный перенабор: \(source) \(values)", found.count == 1 && found.first?.kind == .missedConversion && found.first?.expected == alternative && found.first?.observation.proposed == nil)
+            }
+            for values in [[String(source.prefix(1)), alternative], ["", "other", alternative], ["", source], ["", String(alternative.prefix(1)), "x", alternative]] {
+                let subject = LayoutFeedbackTracker(); subject.record(event)
+                let results = values.compactMap { subject.observeRetyping(occurrenceID: event.occurrenceID, contextID: event.contextID, current: $0, uptime: 1) }
+                tests.check("Частичная правка и посторонний текст не дают пропуск: \(source) \(values)", results.isEmpty)
+            }
+        }
         let ring = LayoutFeedbackTracker()
         for index in 0..<33 { ring.record(observation(uptime: Double(index) / 100)) }
         tests.check("Кольцо ограничено 32 решениями", ring.snapshot(uptime: 1).count == 32 && ring.snapshot(uptime: 1).first?.uptime == 0.01)

@@ -63,21 +63,29 @@ final class LayoutFeedbackTracker {
                          uptime: TimeInterval) -> LayoutFeedback? {
         guard let index = candidate(occurrenceID: occurrenceID, contextID: contextID, uptime: uptime) else { return nil }
         let event = entries[index].observation
-        if event.action == .keep {
-            if current.lowercased() != event.typed.lowercased() { entries[index].consumed = true }
-            return nil
-        }
-        if event.submission != .submitted {
-            let value = current.lowercased()
-            if value != event.typed.lowercased(), value != event.proposed?.lowercased() {
-                entries[index].consumed = true
+        let produced: String
+        let target: String
+        let kind: LayoutErrorKind
+        if event.action == .keep || event.action == .blocked {
+            guard let alternative = event.alternative, !alternative.isEmpty else {
+                if current.lowercased() != event.typed.lowercased() { entries[index].consumed = true }
+                return nil
             }
-            return nil
+            produced = event.typed
+            target = alternative
+            kind = .missedConversion
+        } else {
+            guard event.submission == .submitted, let replacement = event.proposed, !replacement.isEmpty else {
+                let value = current.lowercased()
+                if value != event.typed.lowercased(), value != event.proposed?.lowercased() { entries[index].consumed = true }
+                return nil
+            }
+            produced = replacement
+            target = event.typed
+            kind = .unwantedConversion
         }
-        guard event.action == .replace, event.submission == .submitted,
-              let produced = event.proposed, !produced.isEmpty else { return nil }
         let value = current.lowercased()
-        let original = event.typed.lowercased()
+        let original = target.lowercased()
         switch entries[index].retyping ?? .deleting(produced.lowercased()) {
         case .deleting(let previous):
             if value.isEmpty {
@@ -89,7 +97,7 @@ final class LayoutFeedbackTracker {
             }
         case .entering(let previous):
             if value == original, !value.isEmpty {
-                return feedback(index: index, expected: current, kind: .unwantedConversion, source: .retype)
+                return feedback(index: index, expected: current, kind: kind, source: .retype)
             } else if original.hasPrefix(value), value.hasPrefix(previous) {
                 entries[index].retyping = .entering(value)
             } else {

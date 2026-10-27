@@ -87,6 +87,60 @@ enum ControllerTests: DiagnosticSuite {
         controller.submission(observationID: beforeNavigation.id, contextID: beforeNavigation.contextID, submitted: true)
         controller.manualConverted(occurrenceID: navigationID, contextID: beforeNavigation.contextID, from: "руддщ", to: "hello", submitted: true)
         tests.check("Позднее исправление после навигации не связывается со старым решением", feedback.count == feedbackBeforeNavigation && controller.recent.isEmpty)
+        var recorded: [LayoutObservation] = []
+        var acknowledgements: [UUID] = []
+        controller.onObservation = { recorded.append($0) }
+        controller.onSubmission = { id, _ in acknowledgements.append(id) }
+        controller.clearTemporaryState()
+        let persisted = controller.record(occurrenceID: UUID(), bundleID: "test", typed: "дд", proposed: nil, alternative: "ll", dictionaryMatch: .neither, path: .editing, reason: .editingObserved, action: .keep, complete: false)!
+        tests.check("Сохраняется фактическое наблюдение без выдуманной замены", recorded.last == persisted && persisted.proposed == nil && persisted.alternative == "ll")
+        controller.clearTemporaryState()
+        controller.submission(observationID: persisted.id, contextID: persisted.contextID, submitted: true)
+        tests.check("Позднее подтверждение не возвращает очищенное наблюдение", acknowledgements.isEmpty)
+        for tail in ["", " "] {
+            controller.clearTemporaryState()
+            let sourceBuffer = KeystrokeBuffer()
+            sourceBuffer.append("дд")
+            let sourceID = sourceBuffer.currentOccurrenceID!
+            if !tail.isEmpty { sourceBuffer.boundary(tail) }
+            _ = controller.record(occurrenceID: sourceID, bundleID: "test", typed: "дд", proposed: nil, alternative: "ll", path: tail.isEmpty ? .editing : .boundary, reason: tail.isEmpty ? .editingObserved : .detectorKeep, action: .keep, complete: !tail.isEmpty)
+            let before = feedback.count
+            for _ in 0..<(2 + tail.count) {
+                sourceBuffer.backspace()
+                if let id = sourceBuffer.retypingOccurrenceID ?? sourceBuffer.currentOccurrenceID {
+                    controller.observeRetyping(occurrenceID: id, current: sourceBuffer.currentWord)
+                }
+            }
+            for letter in "ll" {
+                sourceBuffer.append(String(letter))
+                controller.observeRetyping(occurrenceID: sourceBuffer.retypingOccurrenceID ?? sourceBuffer.currentOccurrenceID, current: sourceBuffer.currentWord)
+            }
+            tests.check("Буфер связывает пропуск со старым словом без ложного удаления хвоста: \(tail.count)", feedback.count == before + 1 && feedback.last?.observationID == recorded.last?.id && feedback.last?.observation.isCompleteWord == !tail.isEmpty)
+            tests.check("Новый токен получает свою идентичность после пропуска", sourceBuffer.currentOccurrenceID != sourceID)
+        }
+        for reset in ["context", "off", "expired", "occurrence"] {
+            controller.setEnabled(true); controller.clearTemporaryState()
+            let event = controller.record(occurrenceID: UUID(), bundleID: "test", typed: "дд", proposed: nil, alternative: "ll", path: .editing, reason: .editingObserved, action: .keep, complete: false)!
+            let before = feedback.count
+            if reset == "context" { controller.resetContext() }
+            if reset == "off" { controller.setEnabled(false) }
+            if reset == "expired" { clock += 4.001 }
+            let id = reset == "occurrence" ? UUID() : event.occurrenceID
+            controller.observeRetyping(occurrenceID: id, current: "")
+            controller.observeRetyping(occurrenceID: id, current: "ll")
+            tests.check("Пропуск не синтезируется после потери связи: \(reset)", feedback.count == before)
+        }
+        let recordedWhileOff = recorded.count
+        _ = controller.record(occurrenceID: UUID(), bundleID: "test", typed: "дд", proposed: nil, alternative: "ll", path: .editing, reason: .editingObserved, action: .keep, complete: false)
+        controller.setEnabled(false)
+        let offCount = recorded.count
+        _ = controller.record(occurrenceID: UUID(), bundleID: "test", typed: "дд", proposed: nil, alternative: "ll", path: .editing, reason: .editingObserved, action: .keep, complete: false)
+        tests.check("Выключение не вызывает сохранение нового наблюдения", recorded.count == offCount && offCount >= recordedWhileOff)
+        controller.setEnabled(true)
+        let oldObservation = controller.record(occurrenceID: UUID(), bundleID: "test", typed: "дд", proposed: nil, alternative: "ll", path: .boundary, reason: .detectorKeep, action: .keep, complete: true)!
+        clock += 11; controller.resetContext()
+        controller.mark(observation: oldObservation, expected: "ll", kind: .missedConversion)
+        tests.check("Явная отметка сохранённого решения не зависит от кольца и контекста", feedback.last?.observationID == oldObservation.id && feedback.last?.source == .explicit)
         let buffer = KeystrokeBuffer()
         buffer.onContextReset = { controller.resetContext() }
         buffer.append("hello")

@@ -6,6 +6,7 @@ struct LayoutJournalSnapshot {
     let prunedCount: Int
     let loadError: Error?
     var observations: [LayoutObservation] = []
+    var markedObservationIDs: Set<UUID> = []
 
     struct Export: Codable {
         let schemaVersion: Int
@@ -99,6 +100,14 @@ final class LayoutJournalStore {
         }
     }
 
+    func updateSubmission(observationID: UUID, submitted: Bool, completion: @escaping Completion = { _ in }) {
+        mutate(completion) { next in
+            guard let index = next.observations.firstIndex(where: { $0.id == observationID }),
+                  [.pending, .unknown].contains(next.observations[index].submission) else { return }
+            next.observations[index].submission = submitted ? .submitted : .rejected
+        }
+    }
+
     func record(_ feedback: LayoutFeedback, completion: @escaping Completion = { _ in }) {
         mutate(completion) { next in
             try self.validate(feedback.observation.typed, feedback.expected)
@@ -131,7 +140,8 @@ final class LayoutJournalStore {
             self.refreshRetention()
             let snapshot = LayoutJournalSnapshot(cases: self.state.cases, rules: self.state.rules,
                                                  prunedCount: self.state.prunedCount, loadError: self.loadError,
-                                                 observations: self.state.observations)
+                                                 observations: self.state.observations,
+                                                 markedObservationIDs: Set(self.state.observationIDs.values.flatMap { $0 }))
             DispatchQueue.main.async { completion(snapshot) }
         }
     }

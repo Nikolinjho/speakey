@@ -6,6 +6,25 @@ struct LayoutJournalPresenter {
         var bundleID: String?
         var status: LayoutReviewStatus?
     }
+    struct ObservationFilter {
+        var bundleID: String?
+        var action: LayoutAction?
+        var reason: LayoutReason?
+        var dictionaryMatch: LayoutDictionaryMatch?
+    }
+
+    func observations(_ observations: [LayoutObservation], filter: ObservationFilter) -> [LayoutObservation] {
+        observations.filter {
+            (filter.bundleID == nil || $0.bundleID == filter.bundleID) &&
+            (filter.action == nil || $0.action == filter.action) &&
+            (filter.reason == nil || $0.reason == filter.reason) &&
+            (filter.dictionaryMatch == nil || ($0.dictionaryMatch ?? .unavailable) == filter.dictionaryMatch)
+        }.sorted {
+            if $0.recordedAt != $1.recordedAt { return $0.recordedAt > $1.recordedAt }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+    }
+
     enum Sort { case repeats, recent }
     enum Action: Equatable { case review, keep, force }
 

@@ -12,6 +12,8 @@ final class LayoutDiagnosticsController {
         return frozen
     }
     var onChange: (() -> Void)?
+    var onObservation: ((LayoutObservation) -> Void)?
+    var onSubmission: ((UUID, Bool) -> Void)?
 
     init(enabled: Bool, tracker: LayoutFeedbackTracker = LayoutFeedbackTracker(),
          uptime: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
@@ -31,23 +33,26 @@ final class LayoutDiagnosticsController {
     }
 
     @discardableResult
-    func record(occurrenceID: UUID, bundleID: String, typed: String, proposed: String?, path: LayoutPath,
+    func record(occurrenceID: UUID, bundleID: String, typed: String, proposed: String?, alternative: String? = nil, dictionaryMatch: LayoutDictionaryMatch? = nil, path: LayoutPath,
                 reason: LayoutReason, action: LayoutAction, complete: Bool) -> LayoutObservation? {
-        guard enabled, Self.validToken(typed), proposed.map(Self.validToken) ?? true else { return nil }
+        guard enabled, Self.validToken(typed), (proposed.map(Self.validToken) ?? true), (alternative.map(Self.validToken) ?? true) else { return nil }
         // После живой замены буфер содержит результат, а полный физический оригинал неизвестен.
         if complete, recent.contains(where: {
             $0.occurrenceID == occurrenceID && $0.contextID == contextID && !$0.isCompleteWord && $0.action == .replace
         }) { return nil }
         let event = LayoutObservation(occurrenceID: occurrenceID, contextID: contextID, bundleID: bundleID,
-            typed: typed, proposed: proposed, path: path, reason: reason, action: action,
+            typed: typed, proposed: action == .replace ? proposed : nil, alternative: alternative, dictionaryMatch: dictionaryMatch, path: path, reason: reason, action: action,
             submission: action == .replace ? .pending : .notNeeded, isCompleteWord: complete, uptime: uptime())
         tracker.record(event)
+        onObservation?(event)
         onChange?()
         return event
     }
 
     func submission(observationID: UUID, contextID: UUID, submitted: Bool) {
         guard enabled, self.contextID == contextID else { return }
+        guard recent.contains(where: { $0.id == observationID }) else { return }
+        onSubmission?(observationID, submitted)
         tracker.setSubmission(observationID: observationID, submitted: submitted)
         onChange?()
     }

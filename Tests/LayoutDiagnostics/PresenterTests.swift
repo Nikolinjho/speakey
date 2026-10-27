@@ -20,6 +20,11 @@ enum PresenterTests: DiagnosticSuite {
         observation.action = .keep; observation.reason = .detectorKeep
         b.evidence[0].observation = observation
         tests.check("Подтверждённый случай доступен для проверки пары", presenter.allowedActions(for: b).contains(.force))
+        var older = observation; older.recordedAt = Date(timeIntervalSince1970: 1)
+        var latest = observation; latest.id = UUID(); latest.recordedAt = Date(timeIntervalSince1970: 2); latest.bundleID = "other"; latest.dictionaryMatch = .neither
+        tests.check("Решения по умолчанию показывают свежие первыми", presenter.observations([older, latest], filter: .init()).map(\.id) == [latest.id, older.id])
+        tests.check("Решения фильтруются по приложению и словарю", presenter.observations([older, latest], filter: .init(bundleID: "other", dictionaryMatch: .neither)).map(\.id) == [latest.id])
+        tests.check("Решения фильтруются по причине и действию", presenter.observations([older, latest], filter: .init(action: .blocked, reason: .appDisabled)).isEmpty)
         a.count = b.count; a.lastSeen = b.lastSeen
         let expected = [a,b].sorted { $0.id.uuidString < $1.id.uuidString }.map(\.id)
         tests.check("Равные повторы имеют стабильный порядок", presenter.rows(cases: [b,a], filter: .init(), sort: .repeats).map(\.id) == expected)

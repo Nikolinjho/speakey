@@ -76,6 +76,20 @@ enum ObservationStoreTests: DiagnosticSuite {
         afterClear.typed = "new"
         store.recordObservation(afterClear) { _ in callbacksMain = callbacksMain && Thread.isMainThread }
         t.check("Очередь record clear record оставляет только новое наблюдение", snapshot().observations == [afterClear] && callbacksMain)
+        let _: Result<Void, Error> = JournalStoreTests.wait { store.updateSubmission(observationID: observation.id, submitted: true, completion: $0) }
+        t.check("Подтверждение по идентификатору не возвращает очищенную запись", snapshot().observations == [afterClear])
+        var pending = afterClear; pending.submission = .pending
+        t.check("Ожидающая запись подготовлена для подтверждения", record(pending))
+        let _: Result<Void, Error> = JournalStoreTests.wait { store.updateSubmission(observationID: pending.id, submitted: false, completion: $0) }
+        let _: Result<Void, Error> = JournalStoreTests.wait { store.updateSubmission(observationID: pending.id, submitted: true, completion: $0) }
+        t.check("Первый окончательный ответ по идентификатору сохраняется без дубля", snapshot().observations.count == 1 && snapshot().observations.first?.submission == .rejected)
+        let linkedObservation = JournalStoreTests.feedback()
+        let _: Result<Void, Error> = JournalStoreTests.wait { store.record(linkedObservation, completion: $0) }
+        for _ in 0..<6 {
+            var next = linkedObservation; next.id = UUID(); next.observationID = UUID(); next.observation.id = next.observationID
+            let _: Result<Void, Error> = JournalStoreTests.wait { store.record(next, completion: $0) }
+        }
+        t.check("Связь решения со случаем видна после удаления старого доказательства", snapshot().markedObservationIDs.contains(linkedObservation.observationID) && !snapshot().cases[0].evidence.contains { $0.observationID == linkedObservation.observationID })
         let permissions = try! FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as! NSNumber
         t.check("Наблюдения сохраняются в закрытом файле", permissions.intValue == 0o600)
 

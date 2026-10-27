@@ -30,6 +30,12 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     private let app = NSPopUpButton()
     private let status = NSPopUpButton()
     private let sort = NSPopUpButton()
+    private let stream = NSSegmentedControl()
+    private let decisionAction = NSPopUpButton()
+    private let decisionReason = NSPopUpButton()
+    private let dictionary = NSPopUpButton()
+    private let caseFilters = NSStackView()
+    private let decisionFilters = NSStackView()
     private var appIDs: [String] = []
     private var expectedField: NSTextField?
     private var ruleButtons: [(NSButton, LayoutRuleAction, LayoutCase)] = []
@@ -60,8 +66,23 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         }
         app.addItem(withTitle: L10n.journal("allApps")); configure(app, id: "app")
         app.widthAnchor.constraint(lessThanOrEqualToConstant: 150).isActive = true
-        addArrangedSubview(row([kind, app]))
-        addArrangedSubview(row([status, sort]))
+        stream.segmentCount = 2
+        stream.setLabel(L10n.journal("decisions"), forSegment: 0)
+        stream.setLabel(L10n.journal("errors"), forSegment: 1)
+        stream.selectedSegment = 0; stream.target = self; stream.action = #selector(filterChanged)
+        stream.setAccessibilityIdentifier("journal.stream")
+        addArrangedSubview(stream)
+        addArrangedSubview(app)
+        caseFilters.orientation = .vertical; caseFilters.alignment = .leading; caseFilters.spacing = 8
+        caseFilters.addArrangedSubview(kind); caseFilters.addArrangedSubview(row([status, sort]))
+        addArrangedSubview(caseFilters)
+        decisionAction.addItems(withTitles: [L10n.journal("allActions")] + LayoutAction.allCases.map { L10n.journal("action." + $0.rawValue) })
+        decisionReason.addItems(withTitles: [L10n.journal("allReasons")] + LayoutReason.allCases.map { L10n.journal("reason." + $0.rawValue) })
+        dictionary.addItems(withTitles: [L10n.journal("allDictionary")] + LayoutDictionaryMatch.allCases.map { L10n.journal("dictionary." + $0.rawValue) })
+        for (popup, id) in [(decisionAction, "action"), (decisionReason, "reason"), (dictionary, "dictionary")] { configure(popup, id: id) }
+        decisionFilters.orientation = .vertical; decisionFilters.alignment = .leading; decisionFilters.spacing = 8
+        decisionFilters.addArrangedSubview(row([decisionAction, decisionReason])); decisionFilters.addArrangedSubview(dictionary)
+        addArrangedSubview(decisionFilters)
         kind.widthAnchor.constraint(equalToConstant: 200).isActive = true
         status.widthAnchor.constraint(equalToConstant: 200).isActive = true
         sort.widthAnchor.constraint(equalToConstant: 180).isActive = true
@@ -109,13 +130,13 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
             guard !self.runtime.journalEditing else { self.pendingRefresh = true; return }
             self.snapshot = snapshot
             let selectedApp = self.app.indexOfSelectedItem > 0 ? self.appIDs[self.app.indexOfSelectedItem - 1] : nil
-            self.appIDs = Array(Set(snapshot.cases.map(\.bundleID))).sorted()
+            self.appIDs = Array(Set(snapshot.cases.map(\.bundleID) + snapshot.observations.map(\.bundleID))).sorted()
             self.app.removeAllItems(); self.app.addItem(withTitle: L10n.journal("allApps")); self.app.addItems(withTitles: self.appIDs.map(self.appName))
             if let selectedApp, let index = self.appIDs.firstIndex(of: selectedApp) { self.app.selectItem(at: index + 1) }
             self.collection.state = self.runtime.enabled ? .on : .off
             self.addButton?.isEnabled = self.runtime.enabled && !self.busy
             if self.operationFailed || snapshot.loadError != nil || self.runtime.lastError != nil { self.showError() }
-            else { self.message.textColor = .secondaryLabelColor; self.message.stringValue = "\(snapshot.cases.count) " + L10n.journal("cases") + " · \(snapshot.prunedCount) " + L10n.journal("pruned") }
+            else { self.message.textColor = .secondaryLabelColor; self.message.stringValue = "\(snapshot.cases.count) " + L10n.journal("cases") + " · \(snapshot.observations.count) " + L10n.journal("decisionsCount") + " · \(snapshot.prunedCount) " + L10n.journal("pruned") }
             self.render()
             DispatchQueue.main.async { completion?() }
         }
@@ -124,17 +145,22 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         guard !runtime.journalEditing else { pendingRefresh = true; return }
         for view in body.arrangedSubviews { body.removeArrangedSubview(view); view.removeFromSuperview() }
         expectedField = nil; ruleButtons.removeAll()
-        let filter = LayoutJournalPresenter.Filter(kind: kind.indexOfSelectedItem == 0 ? nil : (kind.indexOfSelectedItem == 1 ? .missedConversion : .unwantedConversion), bundleID: app.indexOfSelectedItem > 0 ? appIDs[app.indexOfSelectedItem - 1] : nil, status: [nil, .candidate, .confirmed, .rejected, .resolved][status.indexOfSelectedItem])
-        let cases = presenter.rows(cases: snapshot.cases, filter: filter, sort: sort.indexOfSelectedItem == 0 ? .repeats : .recent)
-        if cases.isEmpty { body.addArrangedSubview(label("empty", secondary: true)) }
-        for item in cases.prefix(page * 30) {
-            let select = JournalButton("\(item.typed)  →  \(item.produced ?? "—")  →  \(item.expected)", id: "journal.case.\(item.id)") { [weak self] in self?.selectedID = item.id; self?.render() }
-            select.contentTintColor = NSColor(srgbRed: 1, green: 122/255, blue: 89/255, alpha: 1)
-            var views: [NSView] = [label("columns", secondary: true), select, text("\(appName(item.bundleID)) · \(item.count) × · \(L10n.journal(item.kind.rawValue)) · \(L10n.journal(item.status.rawValue))", secondary: true)]
-            if selectedID == item.id { views += detail(item) }
-            body.addArrangedSubview(card(views))
+        let decisions = stream.selectedSegment == 0
+        caseFilters.isHidden = decisions; decisionFilters.isHidden = !decisions
+        if decisions { renderDecisions() }
+        else {
+            let filter = LayoutJournalPresenter.Filter(kind: kind.indexOfSelectedItem == 0 ? nil : (kind.indexOfSelectedItem == 1 ? .missedConversion : .unwantedConversion), bundleID: app.indexOfSelectedItem > 0 ? appIDs[app.indexOfSelectedItem - 1] : nil, status: [nil, .candidate, .confirmed, .rejected, .resolved][status.indexOfSelectedItem])
+            let cases = presenter.rows(cases: snapshot.cases, filter: filter, sort: sort.indexOfSelectedItem == 0 ? .repeats : .recent)
+            if cases.isEmpty { body.addArrangedSubview(label("empty", secondary: true)) }
+            for item in cases.prefix(page * 30) {
+                let select = JournalButton("\(item.typed)  →  \(item.produced ?? "—")  →  \(item.expected)", id: "journal.case.\(item.id)") { [weak self] in self?.selectedID = item.id; self?.render() }
+                select.contentTintColor = NSColor(srgbRed: 1, green: 122/255, blue: 89/255, alpha: 1)
+                var views: [NSView] = [label("columns", secondary: true), select, text("\(appName(item.bundleID)) · \(item.count) × · \(L10n.journal(item.kind.rawValue)) · \(L10n.journal(item.status.rawValue))", secondary: true)]
+                if selectedID == item.id { views += detail(item) }
+                body.addArrangedSubview(card(views))
+            }
+            if cases.count > page * 30 { body.addArrangedSubview(button("more") { [weak self] in self?.page += 1; self?.render() }) }
         }
-        if cases.count > page * 30 { body.addArrangedSubview(button("more") { [weak self] in self?.page += 1; self?.render() }) }
         let rules = snapshot.rules.filter { $0.status != .removed }
         if !rules.isEmpty {
             body.addArrangedSubview(DetailVC.eyebrowLabel(L10n.journal("rules")))
@@ -148,6 +174,56 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
             }
         }
     }
+    private func renderDecisions() {
+        let filter = LayoutJournalPresenter.ObservationFilter(
+            bundleID: app.indexOfSelectedItem > 0 ? appIDs[app.indexOfSelectedItem - 1] : nil,
+            action: decisionAction.indexOfSelectedItem > 0 ? LayoutAction.allCases[decisionAction.indexOfSelectedItem - 1] : nil,
+            reason: decisionReason.indexOfSelectedItem > 0 ? LayoutReason.allCases[decisionReason.indexOfSelectedItem - 1] : nil,
+            dictionaryMatch: dictionary.indexOfSelectedItem > 0 ? LayoutDictionaryMatch.allCases[dictionary.indexOfSelectedItem - 1] : nil)
+        let observations = presenter.observations(snapshot.observations, filter: filter)
+        body.addArrangedSubview(label("decisionsHelp", secondary: true))
+        if observations.isEmpty { body.addArrangedSubview(label("emptyDecisions", secondary: true)) }
+        let formatter = DateFormatter(); formatter.timeZone = TimeZone(secondsFromGMT: 3 * 3600)
+        formatter.dateFormat = "dd.MM.yyyy HH:mm:ss 'MSK'"
+        for item in observations.prefix(page * 30) {
+            let select = JournalButton(item.typed + " · " + L10n.journal("action." + item.action.rawValue), id: "journal.observation.\(item.id)") { [weak self] in
+                self?.window?.makeFirstResponder(nil); self?.selectedID = item.id; self?.render()
+            }
+            var views: [NSView] = [select,
+                text(appName(item.bundleID) + " · " + formatter.string(from: item.recordedAt), secondary: true),
+                text(L10n.journal("reason." + item.reason.rawValue) + " · " + L10n.journal("path." + item.path.rawValue), secondary: true),
+                text(L10n.journal("alternative") + ": " + (item.alternative ?? "—") + " · " + L10n.journal("dictionary." + (item.dictionaryMatch ?? .unavailable).rawValue), secondary: true),
+                text(L10n.journal("produced") + ": " + (item.proposed ?? "—") + " · " + L10n.journal("submission." + item.submission.rawValue), secondary: true)]
+            if selectedID == item.id {
+                let linked = snapshot.markedObservationIDs.contains(item.id)
+                if linked { views.append(label("alreadyMarked", secondary: true)) }
+                else {
+                    views.append(HairlineView())
+                    views.append(label("suggestedExpected", secondary: true))
+                    let field = input(item.action == .replace ? item.typed : (item.alternative ?? ""), placeholder: "expected", id: "journal.observation.expected")
+                    expectedField = field; field.isEnabled = runtime.enabled && !busy
+                    views.append(field)
+                    let mark = button("markDecision", id: "journal.observation.mark") { [weak self, weak field] in
+                        guard let self, let field else { return }
+                        let expected = field.stringValue
+                        guard !expected.isEmpty, expected.count <= 128, !expected.contains(where: { $0.isWhitespace || $0.isNewline }) else {
+                            self.showError(); return
+                        }
+                        self.window?.makeFirstResponder(nil)
+                        self.runtime.controller.mark(observation: item, expected: expected,
+                            kind: item.action == .replace ? .unwantedConversion : .missedConversion)
+                    }
+                    mark.isEnabled = runtime.enabled && !busy
+                    views.append(mark)
+                }
+                if !item.isCompleteWord { views.append(label("incomplete", secondary: true)) }
+                if item.action == .blocked { views.append(label("protected", secondary: true)) }
+            }
+            body.addArrangedSubview(card(views))
+        }
+        if observations.count > page * 30 { body.addArrangedSubview(button("more") { [weak self] in self?.page += 1; self?.render() }) }
+    }
+
     private func detail(_ item: LayoutCase) -> [NSView] {
         let locked = snapshot.rules.contains { $0.sourceCaseID == item.id && $0.status != .removed }
         let field = input(item.expected, placeholder: "expected", id: "journal.expected"); expectedField = field

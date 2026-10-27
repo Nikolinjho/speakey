@@ -17,24 +17,41 @@ final class Engine: EventTapHandler {
 
     private func recordDecision(word: String, proposed: String? = nil, path: LayoutPath,
                                 reason: LayoutReason, action: LayoutAction, completed: Bool) -> LayoutObservation? {
-        guard !pendingContextClear, !pendingSoftReset,
+        guard diagnostics.enabled, !Pause.active, !pendingContextClear, !pendingSoftReset,
               !diagnostics.bypassesJournal(bundleID: frontAppBID),
               let occurrence = completed ? buffer.lastOccurrenceID : buffer.currentOccurrenceID else { return nil }
+        let facts = observationFacts(word)
         return diagnostics.controller.record(occurrenceID: occurrence, bundleID: frontAppBID, typed: word,
-            proposed: proposed, path: path, reason: reason, action: action, complete: completed || path == .enter)
+            proposed: proposed, alternative: facts.alternative, dictionaryMatch: facts.dictionaryMatch,
+            path: path, reason: reason, action: action, complete: completed || path == .enter)
+    }
+
+    private func observationFacts(_ word: String) -> LayoutObservationFacts {
+        guard Warm.isReady else { return LayoutObservationFacts(alternative: nil, dictionaryMatch: .unavailable) }
+        let data = LayoutData.shared
+        return LayoutObservationFacts.evaluate(word, wordsRu: data.wordsRu, wordsEn: data.wordsEn) {
+            Keymap.convert($0, toCyrillic: $1)
+        }
+    }
+
+    private func recordEditingBeforeDeletion() {
+        guard !muted, !buffer.currentWord.isEmpty, let occurrence = buffer.currentOccurrenceID,
+              !diagnostics.recent.contains(where: { $0.occurrenceID == occurrence && $0.contextID == diagnostics.controller.contextID }) else { return }
+        _ = recordDecision(word: buffer.currentWord, path: .editing, reason: .editingObserved, action: .keep, completed: false)
     }
 
     private func clearForAntiResonance(word: String, proposed: String, path: LayoutPath, completed: Bool) {
         let occurrence = completed ? buffer.lastOccurrenceID : buffer.currentOccurrenceID
-        let canRecord = !pendingContextClear && !pendingSoftReset && !diagnostics.bypassesJournal(bundleID: frontAppBID)
+        let canRecord = diagnostics.enabled && !Pause.active && !pendingContextClear && !pendingSoftReset && !diagnostics.bypassesJournal(bundleID: frontAppBID)
         let incomplete = diagnostics.recent.contains {
             $0.occurrenceID == occurrence && !$0.isCompleteWord && $0.action == .replace
         }
         liveFixLast = ""
         buffer.clear()
         guard canRecord, let occurrence else { return }
+        let facts = observationFacts(word)
         _ = diagnostics.controller.record(occurrenceID: occurrence, bundleID: frontAppBID, typed: word,
-            proposed: proposed, path: path, reason: .antiResonance, action: .blocked,
+            proposed: nil, alternative: facts.alternative, dictionaryMatch: facts.dictionaryMatch, path: path, reason: .antiResonance, action: .blocked,
             complete: (completed || path == .enter) && !incomplete)
     }
 
@@ -607,6 +624,7 @@ final class Engine: EventTapHandler {
         case 51: // Backspace
             liveFixLast = ""                          // правка слова — якорь self-heal недействителен
             // ⌥⌫ / ⌘⌫ стирают слово или строку целиком — мы не знаем сколько, сбрасываем контекст.
+            recordEditingBeforeDeletion()
             if optOrCmd {
                 buffer.clear()
                 wordEdited = false                   // слово/строка стёрты целиком — следующее слово свежее
