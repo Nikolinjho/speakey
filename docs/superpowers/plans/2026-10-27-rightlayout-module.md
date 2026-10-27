@@ -141,7 +141,7 @@ try FileManager.default.copyItem(at: compiled, to: destination)
 - `scripts/test-neural-layout.sh`
 
 **Acceptance Criteria:**
-- [ ] Алфавит, порядок девяти классов, вход int32 [1,20] и выход classLogits согласованы с настоящей моделью.
+- [ ] Алфавит, порядок девяти классов, объявленный вход Float32 [1,20], фактический массив int32 [1,20] и выход classLogits согласованы с настоящей моделью.
 - [ ] Пустой ввод, длина более 20, неизвестный shape, нечисловые значения и отсутствующий ресурс возвращают типизированную ошибку.
 - [ ] Softmax стабилен при больших логитах. Сумма оценок близка к 1, ни один класс не теряется.
 - [ ] Никаких singleton, AppKit, defaults и event tap в backend. CPU используется явно.
@@ -185,7 +185,7 @@ protocol NeuralLayoutBackend {
 }
 ```
 - [ ] `RightLayoutTokenizer.encode(_:) throws -> [Int32]` переносит алфавит дословно из `CoreMLLayoutClassifier.swift` источника. Регистр не меняет. Неизвестные символы и padding используют 0. Ввод ограничивает 1...20 символами и одним токеном без whitespace/control. Неподдерживаемые эмодзи не могут сами по себе разрешать замену.
-- [ ] `RightLayoutModel.init(modelURL: URL)` создаёт `MLModelConfiguration` с `.cpuOnly`, загружает заранее скомпилированную модель и проверяет input_ids и classLogits через modelDescription. `predict` создаёт MLMultiArray int32 [1,20], вызывает prediction и передаёт ровно девять Double в NeuralLayoutScores. Никаких `try!` и принудительных unwrap для внешнего файла.
+- [ ] `RightLayoutModel.init(modelURL: URL)` создаёт `MLModelConfiguration` с `.cpuOnly`, загружает заранее скомпилированную модель и проверяет input_ids (объявленный Float32 [1,20]) и classLogits (MultiArray Float32) через modelDescription. У закреплённых весов output shape объявлен пустым, поэтому разрешён динамический output с обязательной runtime-проверкой [9] или [1,9]. Иной статический shape отклоняется. `predict` создаёт MLMultiArray int32 [1,20], вызывает prediction и после проверки фактического shape [9]/[1,9] передаёт ровно девять конечных Double в NeuralLayoutScores. Никаких `try!` и принудительных unwrap для внешнего файла.
 - [ ] Добавить тесты алфавита, нулей, регистра, двадцатого символа, 21-го символа, пустого массива и NaN. Настоящие веса проверять отдельно от unit-заглушек. GREEN: `bash scripts/test-neural-layout.sh model`. Commit: `feat: add RightLayout Core ML backend`.
 
 ```json:metadata
@@ -199,7 +199,7 @@ protocol NeuralLayoutBackend {
   ],
   "verifyCommand": "bash scripts/test-neural-layout.sh model",
   "acceptanceCriteria": [
-    "Алфавит, порядок девяти классов, вход int32 [1,20] и выход classLogits согласованы с настоящей моделью.",
+    "Алфавит, порядок девяти классов, объявленный вход Float32 [1,20], фактический массив int32 [1,20] и выход classLogits согласованы с настоящей моделью.",
     "Пустой ввод, длина более 20, неизвестный shape, нечисловые значения и отсутствующий ресурс возвращают типизированную ошибку.",
     "Softmax стабилен при больших логитах. Сумма оценок близка к 1, ни один класс не теряется.",
     "Никаких singleton, AppKit, defaults и event tap в backend. CPU используется явно.",
