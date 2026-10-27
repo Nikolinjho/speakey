@@ -1,0 +1,37 @@
+{
+  "installedMSK": "2026-10-27T19:13:34.653066+03:00",
+  "target": "/Applications/Keyboop_local.app",
+  "backup": "/Users/itsnikoko/Library/Application Support/KeyboopLocalBackups/speakey-icon-20261027-191334-MSK",
+  "source": "/private/tmp/Keyboop_speakey_icon.app",
+  "commit": "73dee29",
+  "oldExecutableSHA256": "e35eb81d1631ca5ec3d954643fa0bd640a24880b296c9845f17f03d3587272b0",
+  "newExecutableSHA256": "fc48ba2e6415bb3b03c548d4d84787826ffb8cfd3c585074c541316715b7ba7d",
+  "strictCodesign": true,
+  "sameSigningIdentity": true,
+  "iconVariant": "04-dialogue-keys",
+  "iconSHA256": "991290c3f6bbee99071ef88225c82406010214b7e817ed6dbee531091e1ad50f",
+  "preferencesPreservedBeforeLaunch": true,
+  "journalPreservedBeforeLaunch": true,
+  "countsBefore": {
+    "observations": 1695,
+    "cases": 4,
+    "rules": 1
+  },
+  "pidsBefore": [
+    63918,
+    63931
+  ],
+  "logOffsetBeforeLaunch": 450136,
+  "engineStartedConfirmed": true,
+  "accessibilityGranted": true,
+  "inputMonitoringGranted": true,
+  "executableCodeUnchanged": true,
+  "allJournalIDsPreserved": true,
+  "currentMode": "observe",
+  "collectionEnabled": true,
+  "profileEnabled": false,
+  "installedIconMatches": true,
+  "latestEngineStartedConfirmed": true,
+  "launchServicesIconVerified": true,
+  "preferencesAndJournalBackup": "/Users/itsnikoko/Library/Application Support/KeyboopLocalBackups/speakey-icon-20261027-191334-MSK"
+}
