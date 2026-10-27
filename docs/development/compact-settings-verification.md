@@ -48,4 +48,6 @@ git diff --check
 
 Bundle: `/private/tmp/Keyboop_compact_settings.app`. Подпись: постоянный сертификат Keyboop Local Dev. Executable SHA256: `e35eb81d1631ca5ec3d954643fa0bd640a24880b296c9845f17f03d3587272b0`.
 
-Установленная версия `/Applications/Keyboop_local.app` и DMG не заменялись. Системные разрешения подготовленной копии по новому пути отдельно не проверялись. Нативный preview работает без запуска AppDelegate и перехвата клавиатуры.
+27 октября в 18:52:11 MSK сборка установлена в `/Applications/Keyboop_local.app`. Подпись и bundle ID сохранены. Настройки и журнал перед запуском побайтно совпали с резервной копией. После запуска сохранены все прежние ID: 1567 наблюдений, четыре случая и одно правило. Появились два новых наблюдения. Режим observe, сбор включён, профиль помощи отключён.
+
+Новый процесс 63918 сразу подтвердил engine STARTED ok, AX=true и InputMon=true. Повторная выдача разрешений не потребовалась. [Протокол установки](artifacts/compact-settings/installation.json). Резервная копия: `~/Library/Application Support/KeyboopLocalBackups/compact-settings-20261027-185210-MSK`. DMG не обновлялся.

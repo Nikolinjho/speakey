@@ -1,0 +1,41 @@
+{
+  "installedMSK": "2026-10-27T18:52:11.273340+03:00",
+  "target": "/Applications/Keyboop_local.app",
+  "backup": "/Users/itsnikoko/Library/Application Support/KeyboopLocalBackups/compact-settings-20261027-185210-MSK",
+  "source": "/private/tmp/Keyboop_compact_settings.app",
+  "commit": "6c247e8",
+  "oldExecutableSHA256": "5561a4ed397759782019eb0c8dbebc5c9b3afbb43ecb64aea232b2df355b189d",
+  "newExecutableSHA256": "e35eb81d1631ca5ec3d954643fa0bd640a24880b296c9845f17f03d3587272b0",
+  "strictCodesign": true,
+  "sameSigningIdentity": true,
+  "preferencesPreservedBeforeLaunch": true,
+  "journalPreservedBeforeLaunch": true,
+  "countsBefore": {
+    "observations": 1567,
+    "cases": 4,
+    "rules": 1
+  },
+  "pidsBefore": [
+    56093,
+    56112
+  ],
+  "logOffsetBeforeLaunch": 428358,
+  "allJournalIDsPreserved": true,
+  "countsAfter": {
+    "observations": 1569,
+    "cases": 4,
+    "rules": 1
+  },
+  "currentMode": "observe",
+  "collectionEnabled": true,
+  "profileEnabled": false,
+  "engineStartedConfirmed": true,
+  "accessibilityGranted": true,
+  "inputMonitoringGranted": true,
+  "permissionsRetainedOnUpdate": true,
+  "startupMSK": "2026-10-27T18:52:11+03:00",
+  "installedPID": 63918,
+  "settingsWindowConfirmed": true,
+  "settingsWindowWidth": 760,
+  "settingsWindowHeight": 560
+}
