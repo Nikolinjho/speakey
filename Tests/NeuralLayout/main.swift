@@ -12,4 +12,7 @@ DiagnosticTestRegistry.add(PolicyTests.self)
 #if INTEGRATION_TESTS
 DiagnosticTestRegistry.add(ObservationIntegrationTests.self)
 #endif
+#if QUALITY_TESTS
+DiagnosticTestRegistry.add(QualityTests.self)
+#endif
 DiagnosticTestRegistry.run(CommandLine.arguments.dropFirst().first ?? "")

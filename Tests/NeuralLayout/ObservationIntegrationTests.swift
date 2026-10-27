@@ -52,6 +52,15 @@ enum ObservationIntegrationTests: DiagnosticSuite {
             return NeuralLayoutLoadedBackend(backend: backend, modelID: "test-model", sha256: String(repeating: "a", count: 64))
         }, work: { queues.work.append($0) }, deliver: { queues.delivery.append($0) },
         note: { noted.append($0) }, evidence: { results.append(($0, $1)) }, result: { rawResults.append($0) })
+        let profile = try! NeuralLayoutProfile(modelSHA256: String(repeating: "a", count: 64), enabled: false, minimumScore: 0.95, minimumMargin: 0.5)
+        let profileQueues = IntegrationQueues()
+        let profiled = NeuralLayoutRuntime(mode: .observe, factory: {
+            NeuralLayoutLoadedBackend(backend: backend, modelID: "test-model", sha256: profile.modelSHA256, profile: profile)
+        }, work: { profileQueues.work.append($0) }, deliver: { profileQueues.delivery.append($0) })
+        profileQueues.run(); profileQueues.deliver()
+        t.check("Runtime сохраняет проверенный профиль backend", profiled.profile?.minimumScore == 0.95 && profiled.profile?.enabled == false)
+        profiled.setMode(.off)
+        t.check("Off очищает загруженный профиль", profiled.profile == nil)
         let occurrence = UUID()
         runtime.observe(occurrenceID: occurrence, word: "ghbdtn", bundleID: "editor", layoutCode: "EN", collecting: true)
         t.check("Off не загружает модель", queues.work.isEmpty && loads == 0)

@@ -48,7 +48,7 @@ final class Engine: EventTapHandler {
 
     private func evaluateNeuralResult(_ result: NeuralLayoutResult) {
         let request = result.request
-        let admission = NeuralLayoutAdmission(mode: neural.mode, modelSHA256: neural.modelSHA256, profile: nil,
+        let admission = NeuralLayoutAdmission(mode: neural.mode, modelSHA256: neural.modelSHA256, profile: neural.profile,
             fresh: neural.session.matches(request, occurrenceID: buffer.currentOccurrenceID,
                 bundleID: frontAppBID, layoutCode: KeyboardLayoutCache.cachedSourceID ?? "", word: buffer.currentWord),
             block: neuralFocus.available ? nil : .unavailable, wordLength: request.word.count,

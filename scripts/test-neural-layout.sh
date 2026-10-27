@@ -3,7 +3,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 suite="${1:-model}"
 case "$suite" in
-    model|coordinator|policy|integration|all) ;;
+    model|coordinator|policy|integration|quality|all) ;;
     *) echo "Неизвестный набор: $suite" >&2; exit 2 ;;
 esac
 work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-neural-layout.XXXXXX")"
@@ -31,6 +31,10 @@ if [ "$suite" = integration ] || [ "$suite" = all ]; then
     done
     sources+=(Tests/NeuralLayout/ObservationIntegrationTests.swift)
     options+=(-D INTEGRATION_TESTS -framework Carbon)
+fi
+if [ "$suite" = quality ] || [ "$suite" = all ]; then
+    sources+=(Tools/NeuralLayoutEvaluation/Quality.swift Tests/NeuralLayout/QualityTests.swift)
+    options+=(-D QUALITY_TESTS)
 fi
 sources+=(Tests/NeuralLayout/main.swift)
 swiftc "${options[@]}" "${sources[@]}" -o "$work/tests"

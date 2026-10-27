@@ -51,7 +51,9 @@ enum RightLayoutRuntimeFactory {
         }
         do {
             let backend = CompiledRightLayoutBackend(model: try RightLayoutModel(modelURL: url), temporary: temporary)
-            return NeuralLayoutLoadedBackend(backend: backend, modelID: manifest.modelID, sha256: manifest.sha256)
+            let profileData = try? Data(contentsOf: root.appendingPathComponent("profile.json"))
+            let profile = profileData.flatMap { NeuralLayoutProfile.load($0, modelSHA256: manifest.sha256) }
+            return NeuralLayoutLoadedBackend(backend: backend, modelID: manifest.modelID, sha256: manifest.sha256, profile: profile)
         } catch {
             if let temporary { try? FileManager.default.removeItem(at: temporary) }
             throw error

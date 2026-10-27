@@ -1,0 +1,193 @@
+{
+  "calibration" : {
+    "assisted" : {
+      "abstentions" : 6264,
+      "additionalFalseConversions" : 0,
+      "adverseWrongConversions" : 0,
+      "correctTokens" : 5857,
+      "falsePositives" : 0,
+      "firstDecisionLetters" : {
+        "10" : 28,
+        "11" : 27,
+        "12" : 14,
+        "13" : 5,
+        "4" : 4223,
+        "5" : 518,
+        "6" : 319,
+        "7" : 163,
+        "8" : 88,
+        "9" : 56
+      },
+      "truePositives" : 5441,
+      "wrongTokens" : 5848
+    },
+    "baseline" : {
+      "abstentions" : 6264,
+      "additionalFalseConversions" : 0,
+      "adverseWrongConversions" : 0,
+      "correctTokens" : 5857,
+      "falsePositives" : 0,
+      "firstDecisionLetters" : {
+        "10" : 28,
+        "11" : 27,
+        "12" : 14,
+        "13" : 5,
+        "4" : 4223,
+        "5" : 518,
+        "6" : 319,
+        "7" : 163,
+        "8" : 88,
+        "9" : 56
+      },
+      "truePositives" : 5441,
+      "wrongTokens" : 5848
+    },
+    "boundaryDetector" : {
+      "abstentions" : 5858,
+      "additionalFalseConversions" : 0,
+      "adverseWrongConversions" : 0,
+      "correctTokens" : 5857,
+      "falsePositives" : 0,
+      "firstDecisionLetters" : {
+        "10" : 632,
+        "11" : 570,
+        "12" : 376,
+        "13" : 295,
+        "14" : 202,
+        "15" : 109,
+        "16" : 69,
+        "4" : 278,
+        "5" : 479,
+        "6" : 607,
+        "7" : 742,
+        "8" : 760,
+        "9" : 728
+      },
+      "truePositives" : 5847,
+      "wrongTokens" : 5848
+    },
+    "rawModel" : {
+      "abstentions" : 4370,
+      "additionalFalseConversions" : 1510,
+      "adverseWrongConversions" : 0,
+      "correctTokens" : 5857,
+      "falsePositives" : 1510,
+      "firstDecisionLetters" : {
+        "10" : 18,
+        "11" : 6,
+        "12" : 6,
+        "13" : 1,
+        "4" : 6398,
+        "5" : 580,
+        "6" : 159,
+        "7" : 102,
+        "8" : 40,
+        "9" : 25
+      },
+      "truePositives" : 5825,
+      "wrongTokens" : 5848
+    }
+  },
+  "detectorSHA256" : "530adab3fe018ab7423a191539a55eb11cc6290b9a6720e88c7421a2fc565666",
+  "enabled" : false,
+  "fixturesSHA256" : "e9ea7720fbbeb8ec53711c2fee86558ac7ae3d3c9189246fce38e6d4c21437c5",
+  "holdout" : {
+    "assisted" : {
+      "abstentions" : 2768,
+      "additionalFalseConversions" : 0,
+      "adverseWrongConversions" : 0,
+      "correctTokens" : 2559,
+      "falsePositives" : 0,
+      "firstDecisionLetters" : {
+        "10" : 18,
+        "11" : 8,
+        "12" : 2,
+        "13" : 1,
+        "14" : 2,
+        "4" : 1835,
+        "5" : 251,
+        "6" : 96,
+        "7" : 63,
+        "8" : 40,
+        "9" : 30
+      },
+      "truePositives" : 2346,
+      "wrongTokens" : 2555
+    },
+    "baseline" : {
+      "abstentions" : 2768,
+      "additionalFalseConversions" : 0,
+      "adverseWrongConversions" : 0,
+      "correctTokens" : 2559,
+      "falsePositives" : 0,
+      "firstDecisionLetters" : {
+        "10" : 18,
+        "11" : 8,
+        "12" : 2,
+        "13" : 1,
+        "14" : 2,
+        "4" : 1835,
+        "5" : 251,
+        "6" : 96,
+        "7" : 63,
+        "8" : 40,
+        "9" : 30
+      },
+      "truePositives" : 2346,
+      "wrongTokens" : 2555
+    },
+    "boundaryDetector" : {
+      "abstentions" : 2559,
+      "additionalFalseConversions" : 0,
+      "adverseWrongConversions" : 0,
+      "correctTokens" : 2559,
+      "falsePositives" : 0,
+      "firstDecisionLetters" : {
+        "10" : 275,
+        "11" : 218,
+        "12" : 173,
+        "13" : 125,
+        "14" : 73,
+        "15" : 55,
+        "16" : 35,
+        "4" : 120,
+        "5" : 217,
+        "6" : 287,
+        "7" : 333,
+        "8" : 323,
+        "9" : 321
+      },
+      "truePositives" : 2555,
+      "wrongTokens" : 2555
+    },
+    "rawModel" : {
+      "abstentions" : 1932,
+      "additionalFalseConversions" : 635,
+      "adverseWrongConversions" : 0,
+      "correctTokens" : 2559,
+      "falsePositives" : 635,
+      "firstDecisionLetters" : {
+        "10" : 3,
+        "11" : 2,
+        "12" : 4,
+        "13" : 1,
+        "14" : 1,
+        "4" : 2815,
+        "5" : 195,
+        "6" : 104,
+        "7" : 34,
+        "8" : 16,
+        "9" : 7
+      },
+      "truePositives" : 2547,
+      "wrongTokens" : 2555
+    }
+  },
+  "minimumMargin" : 0.5,
+  "minimumScore" : 0.95,
+  "modelID" : "rightlayout-ensemble-20-v1",
+  "modelSHA256" : "5fab7216bce448129fe89e3e5d3fa63896cee8612364a72c631e24034e59f704",
+  "policyVersion" : "rightlayout-live-policy-v1",
+  "reason" : "recall-gain-below-0.05",
+  "splitsSHA256" : "06b2af8d5e7b5a6ceef6aac6a049435801e449e3433a08c939a249e8fed3e7a4"
+}

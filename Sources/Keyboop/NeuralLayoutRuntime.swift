@@ -4,6 +4,7 @@ struct NeuralLayoutLoadedBackend {
     let backend: NeuralLayoutBackend
     let modelID: String
     let sha256: String
+    var profile: NeuralLayoutProfile? = nil
 }
 
 // Backend принадлежит одной worker-очереди, включая создание и освобождение.
@@ -34,6 +35,7 @@ final class NeuralLayoutRuntime {
     private var generation: UInt64 = 0
     private var modelID = ""
     private(set) var modelSHA256 = ""
+    private(set) var profile: NeuralLayoutProfile?
     private struct Entry {
         let mode: NeuralLayoutMode
         var result: NeuralLayoutResult?
@@ -78,9 +80,9 @@ final class NeuralLayoutRuntime {
         let deliver = deliver
         work { [weak self] in
             let loaded = Result { try factory() }
-            let metadata = loaded.map { value -> (String, String) in
+            let metadata = loaded.map { value -> (String, String, NeuralLayoutProfile?) in
                 slot.backend = value.backend
-                return (value.modelID, value.sha256)
+                return (value.modelID, value.sha256, value.profile)
             }
             deliver { [weak self] in
                 guard let self, self.generation == generation else { return }
@@ -92,6 +94,7 @@ final class NeuralLayoutRuntime {
                 case .success(let metadata):
                     self.modelID = metadata.0
                     self.modelSHA256 = metadata.1
+                    self.profile = metadata.2
                     self.status = .ready
                     self.coordinator = NeuralLayoutCoordinator(backend: slot, work: self.work, deliver: self.deliver) { [weak self] result in
                         self?.receive(result)
@@ -107,6 +110,7 @@ final class NeuralLayoutRuntime {
 
     func stop() {
         precondition(Thread.isMainThread)
+        profile = nil
         generation &+= 1
         invalidateContext()
         coordinator = nil

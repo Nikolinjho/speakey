@@ -171,6 +171,7 @@ swift scripts/compile-rightlayout-model.swift \
   "$RIGHTLAYOUT_STAGE/LayoutClassifier.mlmodelc"
 cp Resources/RightLayout/model.json "$RIGHTLAYOUT_STAGE/model.json"
 cp Resources/RightLayout/LICENSE "$RIGHTLAYOUT_STAGE/LICENSE"
+cp Resources/RightLayout/profile.json "$RIGHTLAYOUT_STAGE/profile.json"
 
 echo "▸ swiftc compile…"
 # Close the bounded-wait race: a GUI may have launched while the old helper was finishing. Perform
@@ -184,7 +185,7 @@ fi
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/RightLayout"
 cp -R "$RIGHTLAYOUT_STAGE/LayoutClassifier.mlmodelc" "$APP/Contents/Resources/RightLayout/"
-cp "$RIGHTLAYOUT_STAGE/model.json" "$RIGHTLAYOUT_STAGE/LICENSE" "$APP/Contents/Resources/RightLayout/"
+cp "$RIGHTLAYOUT_STAGE/model.json" "$RIGHTLAYOUT_STAGE/LICENSE" "$RIGHTLAYOUT_STAGE/profile.json" "$APP/Contents/Resources/RightLayout/"
 
 # ⚠️ КРИТИЧНО (24.07): arm64-сборка whisper.cpp ДОЛЖНА быть с CMAKE_OSX_DEPLOYMENT_TARGET=14.0.
 # Без него cmake берёт таргет текущей системы (собирали на macOS 26) → ggml-metal делает STRONG-ссылку
