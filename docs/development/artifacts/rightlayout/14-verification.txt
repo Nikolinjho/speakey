@@ -1,0 +1,39 @@
+Step 4 pilot verification
+
+RED:
+python3 Tests/NeuralLayout/OpportunityPilotTests.py
+Exit 1: test requires successful oracle CLI, script absent (14-pilot-red.txt).
+Additional RED for first-event verification: exit 1, semanticChecks absent (14-semantics-red.txt).
+
+GREEN:
+KEYBOOP_OPPORTUNITY_MODEL_REPORT=docs/development/artifacts/rightlayout/14-opportunity.json python3 Tests/NeuralLayout/OpportunityPilotTests.py
+Exit 0: 2 tests, OK (14-pilot-green.txt).
+The tests execute genuine production detector/rules/conversion and validate the frozen 40-family corpus.
+Oracle self-test: 9 negative validations + 5 baseline-first/earlier/additional first-event checks pass.
+Model-receipt test checks fixed thresholds, CPU prediction count and all category denominators.
+
+Actual oracle:
+bash scripts/analyze-neural-opportunities.sh --oracle-only --self-test --output docs/development/artifacts/rightlayout/14-oracle.json
+Exit 0: 40 families, 430 prefixes, baseline38/40, oracle40/40, timing10, additional recall2.
+
+Actual CPU counterfactual:
+bash scripts/analyze-neural-opportunities.sh --self-test --output docs/development/artifacts/rightlayout/14-opportunity.json
+Exit 0 with sandbox escalation for CoreML compiler temporary workdir.
+430 unique predictions, baseline/model38/40, 0 FP on40correct controls, 0 model earlier/additional actions.
+215 wrong prefixes: 212 target winners below fixed.95; 3 winners not target. Maximum target score.7787624865616577.
+Model receipts were generated before adding two additional negative fixture cases; inference/evaluation logic is unchanged, latest oracle validates all nine negative cases.
+
+Integrity:
+17 protected tracked files byte-identical to HEAD: production detector/policy/types/keymap/data/exceptions, trigram resources, both shipped profiles/manifests, frozen quality corpus/splits/report.
+Raw model SHA matches frozen manifest and profile. See14-integrity.json.
+Regenerating pilot through freeze-pilot.py is byte-identical for fixture+provenance.
+git diff --check: exit0.
+Russian report prose lint: exit0.
+
+Scope and limits:
+Only new analysis tooling/public pilot/tests/report/evidence files are changed.
+No production source, profile, frozen quality data, installed app, user defaults or personal journal was modified/read for this task.
+Temporary ExceptionStore suite and compiler files are cleaned up.
+Dictionary-derived labels, not independent human labels, no claim of unseen training families.
+Idealized open live context, not an end-to-end keyboard/focus/undo/resonance/writer/latency check.
+No profile readiness declaration, threshold tuning or training. No 86k rerun.

@@ -1,0 +1,464 @@
+{
+  "additionalRecallOpportunities" : 2,
+  "admissibleCorrectButTooLate" : 0,
+  "baselineFalsePositives" : 0,
+  "baselineTruePositives" : 38,
+  "controlModelConfidenceDetails" : {
+    "target-score-below-fixed-0.95" : 13,
+    "winner-not-target" : 148
+  },
+  "controlModelPolicyCategories" : {
+    "blocked.confidence" : 161,
+    "blocked.rule" : 54
+  },
+  "controlPrefixCategories" : {
+    "admissible-wrong-outcome" : 161,
+    "protected-rule-or-source" : 54
+  },
+  "controlPrefixes" : 215,
+  "controlsWithHardAdmissibleConversion" : 37,
+  "correctControls" : 40,
+  "earlierTimingOpportunities" : 10,
+  "families" : 40,
+  "familiesByLanguage" : {
+    "en" : 20,
+    "ru" : 20
+  },
+  "familyResults" : [
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 5,
+      "id" : "en-01",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 5,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-02",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-03",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-04",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 5,
+      "id" : "en-05",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 5,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-06",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-07",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-08",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-09",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-10",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-11",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-12",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 5,
+      "id" : "en-13",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 5,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-14",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 5,
+      "id" : "en-15",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 5,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-16",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : false,
+      "id" : "en-17",
+      "language" : "en",
+      "modelCorrect" : false,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-18",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "en-19",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 5,
+      "id" : "en-20",
+      "language" : "en",
+      "modelCorrect" : true,
+      "modelFirst" : 5,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-01",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 9,
+      "id" : "ru-02",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 9,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 6,
+      "id" : "ru-03",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 6,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-04",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-05",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 6,
+      "id" : "ru-06",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 6,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-07",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-08",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-09",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-10",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-11",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 10,
+      "id" : "ru-12",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 10,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-13",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 5,
+      "id" : "ru-14",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 5,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-15",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-16",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : false,
+      "id" : "ru-17",
+      "language" : "ru",
+      "modelCorrect" : false,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-18",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-19",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    },
+    {
+      "baselineCorrect" : true,
+      "baselineFirst" : 4,
+      "id" : "ru-20",
+      "language" : "ru",
+      "modelCorrect" : true,
+      "modelFirst" : 4,
+      "oracleCorrect" : true,
+      "oracleFirst" : 4
+    }
+  ],
+  "fixedMinimumMargin" : 0.5,
+  "fixedMinimumScore" : 0.95,
+  "mode" : "fixed-model-counterfactual",
+  "modelAdditionalFalseConversions" : 0,
+  "modelAdditionalRecall" : 0,
+  "modelEarlierTiming" : 0,
+  "modelFalsePositives" : 0,
+  "modelPolicyCategories" : {
+    "blocked.confidence" : 376,
+    "blocked.rule" : 54
+  },
+  "modelPredictions" : 430,
+  "modelSHA256" : "5fab7216bce448129fe89e3e5d3fa63896cee8612364a72c631e24034e59f704",
+  "modelTruePositives" : 38,
+  "negativeChecks" : 7,
+  "oracleTruePositives" : 40,
+  "pilotSHA256" : "9678a2311c8079becdaba83ba2f17af7ccf1b002a1102536fd6e713b479f7d99",
+  "prefixes" : 430,
+  "qualityOverlap" : 0,
+  "semanticChecks" : 5,
+  "wrongModelConfidenceDetails" : {
+    "target-score-below-fixed-0.95" : 212,
+    "winner-not-target" : 3
+  },
+  "wrongModelPolicyCategories" : {
+    "blocked.confidence" : 215
+  },
+  "wrongModelWinners" : {
+    "en" : 3,
+    "enFromRu" : 93,
+    "ruFromEn" : 119
+  },
+  "wrongPrefixCategories" : {
+    "admissible-correct-outcome" : 211,
+    "conversion-unavailable" : 4
+  },
+  "wrongPrefixes" : 215,
+  "wrongSamples" : 40,
+  "wrongTargetScoreMaximum" : 0.7787624865616577
+}

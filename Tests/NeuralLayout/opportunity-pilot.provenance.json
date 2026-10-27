@@ -1,0 +1,12 @@
+{
+  "attribution": "keyswitcher, MIT; see THIRD_PARTY.md. No personal journal data.",
+  "labels": "Dictionary-derived layout roundtrip labels; not independently human-labelled; not known unseen to the model",
+  "pilotSHA256": "9678a2311c8079becdaba83ba2f17af7ccf1b002a1102536fd6e713b479f7d99",
+  "qualitySHA256": "e9ea7720fbbeb8ec53711c2fee86558ac7ae3d3c9189246fce38e6d4c21437c5",
+  "selection": "SHA256(rightlayout-opportunity-pilot-v1:+family), ascending, first 20 eligible/language",
+  "sources": {
+    "Sources/Keyboop/Resources/words_en.json": "1d16ce0065f60c0126ec24bf62179780c4203bb485eb1dcaa81e7e6b7385ee98",
+    "Sources/Keyboop/Resources/words_ru.json": "704f45617f2b9aeea99e3abc21b0d2a3e795ab98a95d90292c8b04e7f962c4d2"
+  },
+  "version": 1
+}
