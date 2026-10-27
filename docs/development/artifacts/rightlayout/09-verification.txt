@@ -26,3 +26,13 @@ Native checks prepared but not executed without Task10 build.
 KEYBOOP_NEURAL_PREVIEW_CHECK=1 runs isolated native assertions. Reuse KEYBOOP_JOURNAL_PREVIEW_LIGHT=1 for light appearance.
 Optional screenshot paths: KEYBOOP_NEURAL_PREVIEW_SETTINGS_PNG and KEYBOOP_NEURAL_PREVIEW_JOURNAL_PNG.
 Original KEYBOOP_JOURNAL_PREVIEW_CHECK path remains available with original four-observation fixture.
+
+Task 9 review fix: proposal independent of refusal
+Root cause reproduced: the presenter inferred unsupported from policy refusal and selected a supported score even when raw winner was Hebrew.
+RED: bash scripts/test-layout-diagnostics.sh presenter, exit 1, 24 checks / 8 failures (09-proposal-red.txt).
+GREEN: same command, exit 0, 31 checks / 0 failures (09-proposal-green.txt).
+Regression: diagnostics all, exit 0, 295 checks / 0 failures; settings, exit 0, 13 checks / 0 failures.
+AppKit journal/localization parse and git diff --check: exit 0.
+Full classScores now chooses independent proposal + exact winner score for all nine class winners, preserving refusal separately.
+Legacy explicit conversion direction remains reliable; nil-direction with ambiguous unsupported sum shows unknown with no winner score, while provable RU/EN winner shows keep.
+Tests cover Hebrew winner 0.92 under unsupported/stale/modifiers/editing, all nine winners, ambiguous legacy aggregate and clear legacy keep.

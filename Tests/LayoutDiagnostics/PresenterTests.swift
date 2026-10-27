@@ -32,6 +32,44 @@ enum PresenterTests: DiagnosticSuite {
         let details = presenter.neuralDetails(for: observation)
         tests.check("Предложение модели не заменяет фактическое keep", details?.proposedCyrillic == true && details?.action == .keep && details?.submission == .notNeeded)
         tests.check("Причина отказа и оценка доступны отдельно", details?.block == .profile && details?.score == 0.97 && details?.reason == .detectorKeep)
+        let originalNeural = observation.neural!
+        for block in [NeuralLayoutBlock.unsupported, .stale, .modifiers, .editing] {
+            var unsupported = originalNeural
+            unsupported.classScores = Dictionary(uniqueKeysWithValues: NeuralLayoutEvidence.classNames.map { ($0, $0 == "he" ? 0.92 : 0.01) })
+            unsupported = NeuralLayoutEvidence(modelID: unsupported.modelID, modelSHA256: unsupported.modelSHA256, mode: unsupported.mode,
+                ru: 0.01, en: 0.01, ruFromEn: 0.01, enFromRu: 0.01, unsupported: 0.96, durationMs: 2,
+                proposedCyrillic: nil, block: block, disagreesWithDetector: true, classScores: unsupported.classScores)
+            observation.neural = unsupported
+            let value = presenter.neuralDetails(for: observation)
+            tests.check("Неподдерживаемый победитель независим от отказа \(block.rawValue)", value?.unsupported == true && value?.score == 0.92 && value?.block == block)
+        }
+        for winner in NeuralLayoutEvidence.classNames {
+            var full = originalNeural
+            full.classScores = Dictionary(uniqueKeysWithValues: NeuralLayoutEvidence.classNames.map { ($0, $0 == winner ? 0.92 : 0.01) })
+            observation.neural = full
+            let value = presenter.neuralDetails(for: observation)
+            let direction: Bool? = winner == "ruFromEn" ? true : winner == "enFromRu" ? false : nil
+            let proposal: LayoutJournalPresenter.NeuralProposal
+            switch winner {
+            case "ru", "en": proposal = .keep
+            case "ruFromEn": proposal = .ru
+            case "enFromRu": proposal = .en
+            default: proposal = .unsupported
+            }
+            tests.check("Все девять оценок определяют предложение \(winner)", value?.proposal == proposal && value?.proposedCyrillic == direction && value?.score == 0.92)
+        }
+        var legacy = originalNeural
+        legacy = NeuralLayoutEvidence(modelID: legacy.modelID, modelSHA256: legacy.modelSHA256, mode: legacy.mode,
+            ru: 0.3, en: 0.1, ruFromEn: 0.05, enFromRu: 0.05, unsupported: 0.5, durationMs: 1,
+            proposedCyrillic: nil, block: .stale, disagreesWithDetector: true)
+        observation.neural = legacy
+        tests.check("Старая сумма классов не выдаётся за keep или оценку победителя", presenter.neuralDetails(for: observation)?.proposal == .unknown && presenter.neuralDetails(for: observation)?.score == nil)
+        legacy = NeuralLayoutEvidence(modelID: legacy.modelID, modelSHA256: legacy.modelSHA256, mode: legacy.mode,
+            ru: 0.8, en: 0.01, ruFromEn: 0.02, enFromRu: 0.02, unsupported: 0.15, durationMs: 1,
+            proposedCyrillic: nil, block: .modifiers, disagreesWithDetector: true)
+        observation.neural = legacy
+        tests.check("Старый однозначный RU победитель сохраняет keep и оценку", presenter.neuralDetails(for: observation)?.proposal == .keep && presenter.neuralDetails(for: observation)?.score == 0.8)
+        observation.neural = originalNeural
         var older = observation; older.recordedAt = Date(timeIntervalSince1970: 1)
         var latest = observation; latest.id = UUID(); latest.recordedAt = Date(timeIntervalSince1970: 2); latest.bundleID = "other"; latest.dictionaryMatch = .neither
         tests.check("Решения по умолчанию показывают свежие первыми", presenter.observations([older, latest], filter: .init()).map(\.id) == [latest.id, older.id])

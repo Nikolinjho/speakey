@@ -227,7 +227,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
 
     private func neuralViews(_ observation: LayoutObservation) -> [NSView] {
         guard let details = presenter.neuralDetails(for: observation) else { return [] }
-        let proposal = details.unsupported ? "unsupported" : details.proposedCyrillic.map { $0 ? "ru" : "en" } ?? "keep"
+        let proposal = details.proposal.rawValue
         let proposed = text(L10n.neural("proposal") + ": " + L10n.neural(proposal))
         proposed.setAccessibilityIdentifier("journal.neural.proposal")
         let actual = text(L10n.neural("actual") + ": " + L10n.journal("action." + details.action.rawValue) + " · " + L10n.journal("submission." + details.submission.rawValue))
@@ -235,7 +235,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         let reason = text(L10n.neural("reason") + ": " + L10n.journal("reason." + details.reason.rawValue) + " · " + (details.block.map { L10n.neural("block." + $0.rawValue) } ?? L10n.neural(details.mode.rawValue)), secondary: true)
         reason.setAccessibilityIdentifier("journal.neural.reason")
         return [proposed, actual, reason,
-            text(L10n.neural("score") + ": " + String(format: "%.3f", details.score), secondary: true),
+            text(L10n.neural("score") + ": " + (details.score.map { String(format: "%.3f", $0) } ?? "—"), secondary: true),
             text(L10n.neural("scoreHelp"), secondary: true)]
     }
 

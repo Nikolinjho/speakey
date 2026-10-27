@@ -1510,6 +1510,7 @@ extension L10n {
             "ready": ("Модель загружена", "Model ready"),
             "unavailable": ("Ошибка модели: ", "Model error: "),
             "stopped": ("Модель выключена", "Model off"),
+            "unknown": ("Предложение неизвестно: в старой записи нет отдельных оценок классов", "Proposal unknown: the older record has no individual class scores"),
             "proposal": ("Предложение модели", "Model proposal"),
             "actual": ("Действие Keyboop", "Keyboop action"),
             "reason": ("Причина", "Reason"),

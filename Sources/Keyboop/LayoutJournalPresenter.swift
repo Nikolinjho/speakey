@@ -1,10 +1,13 @@
 import Foundation
 
 struct LayoutJournalPresenter {
+    enum NeuralProposal: String { case keep, ru, en, unsupported, unknown }
+
     struct NeuralDetails: Equatable {
-        let proposedCyrillic: Bool?
-        let score: Double
-        let unsupported: Bool
+        let proposal: NeuralProposal
+        let score: Double?
+        var unsupported: Bool { proposal == .unsupported }
+        var proposedCyrillic: Bool? { proposal == .ru ? true : proposal == .en ? false : nil }
         let action: LayoutAction
         let submission: LayoutSubmission
         let reason: LayoutReason
@@ -14,9 +17,29 @@ struct LayoutJournalPresenter {
 
     func neuralDetails(for observation: LayoutObservation) -> NeuralDetails? {
         guard let evidence = observation.neural else { return nil }
-        return NeuralDetails(proposedCyrillic: evidence.proposedCyrillic,
-            score: evidence.proposedCyrillic.map { $0 ? evidence.ruFromEn : evidence.enFromRu } ?? max(evidence.ru, evidence.en),
-            unsupported: evidence.block == .unsupported, action: observation.action, submission: observation.submission,
+        let proposal: NeuralProposal
+        let score: Double?
+        if let scores = evidence.classScores,
+           let winner = NeuralLayoutEvidence.classNames.max(by: { scores[$0, default: 0] < scores[$1, default: 0] }) {
+            switch winner {
+            case "ru", "en": proposal = .keep
+            case "ruFromEn": proposal = .ru
+            case "enFromRu": proposal = .en
+            default: proposal = .unsupported
+            }
+            score = scores[winner]
+        } else if let direction = evidence.proposedCyrillic {
+            proposal = direction ? .ru : .en
+            score = direction ? evidence.ruFromEn : evidence.enFromRu
+        } else if evidence.unsupported < max(evidence.ru, evidence.en) {
+            proposal = .keep
+            score = max(evidence.ru, evidence.en)
+        } else {
+            // Сумма пяти классов не раскрывает победителя или его отдельную оценку.
+            proposal = .unknown
+            score = nil
+        }
+        return NeuralDetails(proposal: proposal, score: score, action: observation.action, submission: observation.submission,
             reason: observation.reason, block: evidence.block, mode: evidence.mode)
     }
 
