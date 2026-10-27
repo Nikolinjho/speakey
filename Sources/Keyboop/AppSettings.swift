@@ -59,6 +59,11 @@ final class AppSettings {
     }
     private let d: UserDefaults
 
+    var neuralLayoutMode: NeuralLayoutMode {
+        get { NeuralLayoutModeSettings.read(d) }
+        set { NeuralLayoutModeSettings.write(newValue, to: d) }
+    }
+
     var layoutDiagnosticsEnabled: Bool {
         get { d.bool(forKey: "layoutDiagnosticsEnabled") }
         set { d.set(newValue, forKey: "layoutDiagnosticsEnabled") }
