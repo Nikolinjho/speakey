@@ -25,6 +25,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     private var addButton: NSButton?
     private let body = NSStackView()
     private let message = NSTextField(wrappingLabelWithString: "")
+    private let reviewNotice = NSTextField(wrappingLabelWithString: "")
     private let collection = NSSwitch()
     private let kind = NSPopUpButton()
     private let app = NSPopUpButton()
@@ -88,9 +89,13 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         sort.widthAnchor.constraint(equalToConstant: 180).isActive = true
         message.textColor = .secondaryLabelColor; message.font = .systemFont(ofSize: 12)
         addArrangedSubview(message)
+        reviewNotice.font = .systemFont(ofSize: 12, weight: .medium)
+        reviewNotice.setAccessibilityIdentifier("journal.reviewNotice")
+        reviewNotice.isHidden = true
+        addArrangedSubview(reviewNotice)
         body.orientation = .vertical; body.alignment = .leading; body.spacing = 8
         addArrangedSubview(body)
-        for view in [body, message] { view.widthAnchor.constraint(equalTo: widthAnchor).isActive = true }
+        for view in [body, message, reviewNotice] { view.widthAnchor.constraint(equalTo: widthAnchor).isActive = true }
     }
     required init?(coder: NSCoder) { fatalError() }
     override func viewDidMoveToWindow() {
@@ -153,9 +158,18 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
             let cases = presenter.rows(cases: snapshot.cases, filter: filter, sort: sort.indexOfSelectedItem == 0 ? .repeats : .recent)
             if cases.isEmpty { body.addArrangedSubview(label("empty", secondary: true)) }
             for item in cases.prefix(page * 30) {
-                let select = JournalButton("\(item.typed)  →  \(item.produced ?? "—")  →  \(item.expected)", id: "journal.case.\(item.id)") { [weak self] in self?.selectedID = item.id; self?.render() }
+                let select = JournalButton("\(item.typed)  →  \(item.produced ?? "—")  →  \(item.expected)", id: "journal.case.\(item.id)") { [weak self] in
+                    guard let self else { return }
+                    self.window?.makeFirstResponder(nil)
+                    self.selectedID = self.selectedID == item.id ? nil : item.id
+                    self.render()
+                }
                 select.contentTintColor = NSColor(srgbRed: 1, green: 122/255, blue: 89/255, alpha: 1)
-                var views: [NSView] = [label("columns", secondary: true), select, text("\(appName(item.bundleID)) · \(item.count) × · \(L10n.journal(item.kind.rawValue)) · \(L10n.journal(item.status.rawValue))", secondary: true)]
+                let reviewStatus = label(item.status.rawValue)
+                reviewStatus.setAccessibilityIdentifier("journal.case.status.\(item.id)")
+                if item.status == .confirmed { reviewStatus.textColor = .systemGreen }
+                else if item.status == .rejected { reviewStatus.textColor = .systemRed }
+                var views: [NSView] = [label("columns", secondary: true), select, text("\(appName(item.bundleID)) · \(item.count) × · \(L10n.journal(item.kind.rawValue))", secondary: true), reviewStatus]
                 if selectedID == item.id { views += detail(item) }
                 body.addArrangedSubview(card(views))
             }
@@ -187,7 +201,10 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         formatter.dateFormat = "dd.MM.yyyy HH:mm:ss 'MSK'"
         for item in observations.prefix(page * 30) {
             let select = JournalButton(item.typed + " · " + L10n.journal("action." + item.action.rawValue), id: "journal.observation.\(item.id)") { [weak self] in
-                self?.window?.makeFirstResponder(nil); self?.selectedID = item.id; self?.render()
+                guard let self else { return }
+                self.window?.makeFirstResponder(nil)
+                self.selectedID = self.selectedID == item.id ? nil : item.id
+                self.render()
             }
             var views: [NSView] = [select,
                 text(appName(item.bundleID) + " · " + formatter.string(from: item.recordedAt), secondary: true),
@@ -244,9 +261,18 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         let field = input(item.expected, placeholder: "expected", id: "journal.expected"); expectedField = field
         field.isEnabled = !locked && !busy
         let confirm = button("confirm", id: "journal.confirm") { [weak self, weak field] in self?.review(item, expected: field?.stringValue ?? item.expected, status: .confirmed) }
-        let reject = button("reject") { [weak self] in self?.review(item, expected: item.expected, status: .rejected) }
+        confirm.bezelColor = .systemGreen; confirm.contentTintColor = .white
+        confirm.image = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)
+        let reject = button("reject", id: "journal.reject") { [weak self] in self?.review(item, expected: item.expected, status: .rejected) }
+        reject.bezelColor = .systemRed; reject.contentTintColor = .white
+        reject.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
         confirm.isEnabled = !locked && !busy; reject.isEnabled = !locked && !busy
         var result: [NSView] = [HairlineView(), label("expected"), field, row([confirm, reject])]
+        if item.status == .confirmed || item.status == .rejected {
+            let saved = label(item.status == .confirmed ? "confirmSaved" : "rejectSaved")
+            saved.textColor = item.status == .confirmed ? .systemGreen : .systemRed
+            result.append(saved)
+        }
         if locked { result.append(label("locked", secondary: true)) }
         let formatter = DateFormatter(); formatter.timeZone = TimeZone(secondsFromGMT: 3 * 3600); formatter.dateFormat = "dd.MM.yyyy HH:mm:ss 'MSK'"
         for evidence in item.evidence.suffix(5) {
@@ -277,10 +303,22 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     }
     private func review(_ item: LayoutCase, expected: String, status: LayoutReviewStatus) {
         window?.makeFirstResponder(nil)
-        operate { done in runtime.store.review(caseID: item.id, expected: expected, status: status, completion: done) }
+        operate { done in
+            runtime.store.review(caseID: item.id, expected: expected, status: status) { [weak self] result in
+                if case .success = result, let self {
+                    self.reviewNotice.stringValue = L10n.journal(status == .confirmed ? "confirmSaved" : "rejectSaved")
+                    self.reviewNotice.textColor = status == .confirmed ? .systemGreen : .systemRed
+                    self.reviewNotice.isHidden = false
+                    NSAccessibility.post(element: self.reviewNotice, notification: .announcementRequested,
+                        userInfo: [.announcement: self.reviewNotice.stringValue, .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+                }
+                done(result)
+            }
+        }
     }
     private func operate(_ operation: (@escaping LayoutJournalStore.Completion) -> Void) {
         guard !busy else { return }; busy = true; operationFailed = false; render()
+        reviewNotice.isHidden = true
         operation { [weak self] result in
             guard let self else { return }; self.busy = false
             if case .failure = result { self.operationFailed = true; self.showError() }
