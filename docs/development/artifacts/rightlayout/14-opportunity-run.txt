@@ -1,5 +1,0 @@
-2026-10-27 16:32:20.658 oracle[48076:5829949] Keyboop: LayoutData loaded=true ru-tri=11458 en-tri=8110 ru-w=163283 en-w=59506
-Пилот: 40 семей, 430 префиксов; baseline 38/40; oracle 40/40; раньше 10; дополнительный recall 2; mode=oracle
-RightLayout: модель скомпилирована в /var/folders/4b/qzqh81dj1rx1smt02p45md080000gn/T//keyboop-opportunity.QUlp0u/LayoutClassifier.mlmodelc
-2026-10-27 16:32:30.438 model[48212:5830491] Keyboop: LayoutData loaded=true ru-tri=11458 en-tri=8110 ru-w=163283 en-w=59506
-Пилот: 40 семей, 430 префиксов; baseline 38/40; oracle 40/40; раньше 10; дополнительный recall 2; mode=fixed-model-counterfactual

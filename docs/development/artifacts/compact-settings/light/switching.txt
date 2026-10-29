@@ -1,6 +1,0 @@
-windowW=760 windowH=560 screenVisibleH=1017
-pane=760 docView=571 clip=-1 column=528 colX=20 safeArea(l/r/t/b)=172/0/32/0
-paneH=560 viewportH=-1 docH=-1 columnH=795 СКРОЛЛ=нет
-column.w=528 colX=20 pane=760
-  WL frame.w=532 frameH=14 pMLW=532 'Выключено — клавиши ра'
-  WL frame.w=532 frameH=14 pMLW=532 'Выключено — лампочка р'

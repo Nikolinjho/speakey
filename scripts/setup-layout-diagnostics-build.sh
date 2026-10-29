@@ -48,14 +48,3 @@ libtool -static -o "$fa/libFluidAudio.a" "$products/FluidAudio.o" \
 cp -R "$products/FluidAudio.swiftmodule" "$fa/Modules/"
 cp -R vendor/FluidAudio/Sources/FastClusterWrapper/include/ "$fa/include/FastClusterWrapper/"
 cp -R vendor/FluidAudio/Sources/MachTaskSelfWrapper/include/ "$fa/include/MachTaskSelfWrapper/"
-work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-vendor.XXXXXX")"
-trap 'rm -rf "$work"' EXIT
-curl -fL https://github.com/sparkle-project/Sparkle/releases/download/2.9.3/Sparkle-2.9.3.tar.xz -o "$work/Sparkle.tar.xz"
-printf '%s  %s\n' 74a07da821f92b79310009954c0e15f350173374a3abe39095b4fc5096916be6 "$work/Sparkle.tar.xz" | shasum -a 256 -c -
-if [ -d vendor/sparkle ]; then
-    version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' vendor/sparkle/Sparkle.framework/Resources/Info.plist)"
-    [ "$version" = 2.9.3 ] || { echo "Ожидался Sparkle 2.9.3, получен $version" >&2; exit 1; }
-else
-    mkdir -p vendor/sparkle
-    tar -xf "$work/Sparkle.tar.xz" -C vendor/sparkle
-fi

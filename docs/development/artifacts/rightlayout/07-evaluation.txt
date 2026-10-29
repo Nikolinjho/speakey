@@ -1,3 +1,0 @@
-RightLayout: модель скомпилирована в /var/folders/4b/qzqh81dj1rx1smt02p45md080000gn/T//keyboop-quality.ojoPpd/LayoutClassifier.mlmodelc
-CPU прогнозов уникальных префиксов: 86601, calibration: 11705, holdout: 5114
-Профиль enabled=false, recall-gain-below-0.05; FP 0 → 0, early recall 0.9181996086105675 → 0.9181996086105675; verify=false

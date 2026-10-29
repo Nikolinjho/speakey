@@ -2,12 +2,12 @@
 import PackageDescription
 
 let package = Package(
-    name: "Keyboop",
+    name: "Speakey",
     platforms: [.macOS(.v13)],
     targets: [
         .executableTarget(
-            name: "Keyboop",
-            path: "Sources/Keyboop",
+            name: "Speakey",
+            path: "Sources/Speakey",
             resources: [.process("Resources/RightLayout")],
             swiftSettings: [.unsafeFlags(["-swift-version", "5"])],
             linkerSettings: [.linkedFramework("IOKit")]

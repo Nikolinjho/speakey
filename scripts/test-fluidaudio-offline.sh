@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-offline.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/speakey-offline.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 fa=vendor/fluidaudio-prebuilt
 swiftc -parse-as-library -swift-version 5 -target arm64-apple-macos14.0 \

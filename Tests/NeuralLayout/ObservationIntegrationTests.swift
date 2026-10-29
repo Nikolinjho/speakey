@@ -29,7 +29,7 @@ enum ObservationIntegrationTests: DiagnosticSuite {
     static let name = "integration"
     static func run(_ t: DiagnosticTests) {
         t.check("Незаполненный layout cache не читает системную раскладку", KeyboardLayoutCache.cachedSourceID == nil)
-        let domain = "keyboop-integration-\(UUID())"
+        let domain = "speakey-integration-\(UUID())"
         let defaults = UserDefaults(suiteName: domain)!
         defer { defaults.removePersistentDomain(forName: domain) }
         t.check("Отсутствующий режим означает observe", NeuralLayoutModeSettings.read(defaults) == .observe)
@@ -148,7 +148,7 @@ enum ObservationIntegrationTests: DiagnosticSuite {
     }
 
     private static func checkJournal(_ t: DiagnosticTests) {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("keyboop-integration-\(UUID())")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("speakey-integration-\(UUID())")
         defer { try? FileManager.default.removeItem(at: directory) }
         let store = LayoutJournalStore(directory: directory)
         var attached = false

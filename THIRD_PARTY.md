@@ -1,26 +1,11 @@
 # Third-party notices
 
-Keyboop сам распространяется под MIT. Ниже — всё чужое, что входит в приложение или
+Speakey сам распространяется под MIT. Ниже — всё чужое, что входит в приложение или
 скачивается им по явному действию человека, с лицензией и тем, где оно лежит.
 
 Порядок: сначала то, что лежит в бандле, потом то, что приложение скачивает.
 
 ---
-
-## 1. Sparkle — автообновление
-
-Фреймворк <https://sparkle-project.org>, лицензия MIT. Лежит в бандле:
-`Keyboop.app/Contents/Frameworks/Sparkle.framework`, исходники — `vendor/sparkle`.
-
-```
-Copyright (c) 2006-2013 Andy Matuschak
-Copyright (c) 2009-2013 Elgato Systems GmbH
-Copyright (c) 2011-2014 Kornel Lesiński
-… (полный текст: vendor/sparkle/LICENSE)
-```
-
-Sparkle включает компоненты сторонних авторов со своими лицензиями — их тексты
-идут вместе с фреймворком.
 
 ## 2. whisper.cpp — распознавание речи (движок Whisper)
 
@@ -51,8 +36,8 @@ Apache License, Version 2.0
 ## 4. Модель Parakeet (NVIDIA) — скачивается по действию человека
 
 Модель распознавания речи **NVIDIA Parakeet TDT** в CoreML-порте FluidInference.
-В приложение не входит: скачивается из настроек по кнопке, с нашего зеркала
-`keyboop.com/models` (файл `parakeet/parakeet-v3.tar.gz`).
+В приложение не входит: скачивается из настроек через штатный загрузчик FluidAudio
+с официального HuggingFace-репозитория модели.
 
 - Базовая модель: **NVIDIA**, лицензия **CC-BY-4.0**.
 - CoreML-порт: **FluidInference**, та же лицензия.
@@ -65,7 +50,7 @@ Apache License, Version 2.0
 
 ## 5. Языковые данные (триграммы и словари RU/EN)
 
-Файлы `Sources/Keyboop/Resources/trigrams_ru.json`, `trigrams_en.json`,
+Файлы `Sources/Speakey/Resources/trigrams_ru.json`, `trigrams_en.json`,
 `words_ru.json`, `words_en.json` взяты из проекта **keyswitcher**
 (<https://github.com/graninilya/keyswitcher>), лицензия MIT.
 
@@ -111,6 +96,6 @@ SHA256: `5fab7216bce448129fe89e3e5d3fa63896cee8612364a72c631e24034e59f704`,
 В приложение входят скомпилированная модель
 `Contents/Resources/RightLayout/LayoutClassifier.mlmodelc`, манифест и лицензия.
 Полный текст лицензии из той же ревизии сохранён в `Resources/RightLayout/LICENSE`
-и `Sources/Keyboop/Resources/RightLayout/LICENSE` для SwiftPM.
+и `Sources/Speakey/Resources/RightLayout/LICENSE` для SwiftPM.
 В дереве исходного проекта на указанной ревизии файла NOTICE нет. Дополнительные уведомления
 от имени авторов не создавались. При сборке меняется только формат модели: веса не обучались заново.

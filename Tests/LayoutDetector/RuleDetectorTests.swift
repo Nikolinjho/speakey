@@ -34,7 +34,7 @@ enum RuleDetectorTests {
             }
         }
         for fixture in cases {
-            let suite = "keyboop-reviewed-\(UUID().uuidString)"
+            let suite = "speakey-reviewed-\(UUID().uuidString)"
             let defaults = UserDefaults(suiteName: suite)!
             defer { defaults.removePersistentDomain(forName: suite) }
             for key in ["didSeedExcExamples", "didSeedExcVkLatin", "didUnseedExcSpotlight"] { defaults.set(true, forKey: key) }
@@ -54,7 +54,7 @@ enum RuleDetectorTests {
         }
     }
     static func run(_ t: DiagnosticTests) {
-        let suite = "keyboop-rule-tests-\(UUID().uuidString)"
+        let suite = "speakey-rule-tests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.setVolatileDomain([:], forName: UserDefaults.argumentDomain)
         defer { defaults.removePersistentDomain(forName: suite) }

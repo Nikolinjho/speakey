@@ -122,12 +122,12 @@ do {
         try require(!row.source.isEmpty && ["MIT", "project"].contains(row.license), "Нет лицензии")
         try require(row.family == row.text.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "!.")), "Ненормализованное семейство")
     }
-    let modelData = try read("Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel")
+    let modelData = try read("Sources/Speakey/Resources/RightLayout/LayoutClassifier.mlmodel")
     let sha = digest(modelData)
     let manifest = try JSONSerialization.jsonObject(with: read("Resources/RightLayout/model.json")) as! [String: Any]
     try require(sha == manifest["sha256"] as? String, "SHA модели не совпадает")
     let model = try RightLayoutModel(modelURL: URL(fileURLWithPath: CommandLine.arguments[1]))
-    let domain = "keyboop-quality-\(UUID().uuidString)"
+    let domain = "speakey-quality-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: domain)!
     defer { defaults.removePersistentDomain(forName: domain) }
     let exceptions = ExceptionStore(defaults: defaults)
@@ -217,8 +217,8 @@ do {
     let reason = ready ? "holdout-criteria-met" : (best == nil ? "no-safe-calibration-profile" : (heldResult.assisted.additionalFalseConversions > 0 ? "additional-false-conversions" : "recall-gain-below-0.05"))
     let detectorPaths = ["LayoutDetector", "NeuralLayoutPolicy", "NeuralLayoutTypes", "Keymap", "DynamicKeymap", "ExtraWords", "LayoutData", "ExceptionStore"]
     var detectorData = Data()
-    for name in detectorPaths { detectorData.append(try read("Sources/Keyboop/\(name).swift")) }
-    for path in ["Sources/Keyboop/Resources/trigrams_ru.json", "Sources/Keyboop/Resources/trigrams_en.json"] { detectorData.append(try read(path)) }
+    for name in detectorPaths { detectorData.append(try read("Sources/Speakey/\(name).swift")) }
+    for path in ["Sources/Speakey/Resources/trigrams_ru.json", "Sources/Speakey/Resources/trigrams_en.json"] { detectorData.append(try read(path)) }
     let report = ProfileReport(policyVersion: policyVersion, modelSHA256: sha, modelID: manifest["modelID"] as! String,
         fixturesSHA256: digest(fixtureData), splitsSHA256: digest(splitData), detectorSHA256: digest(detectorData),
         enabled: ready, reason: reason, minimumScore: threshold.score, minimumMargin: threshold.margin, calibration: calResult, holdout: heldResult)
@@ -227,11 +227,11 @@ do {
     if verify {
         let previous = try JSONDecoder().decode(ProfileReport.self, from: read(path))
         try require(previous == report, "Профиль не соответствует воспроизведённой оценке")
-        try require(try read(path) == read("Sources/Keyboop/Resources/RightLayout/profile.json"), "Копия профиля отличается")
+        try require(try read(path) == read("Sources/Speakey/Resources/RightLayout/profile.json"), "Копия профиля отличается")
     } else {
         let data = try encoder.encode(report) + Data([10])
         try data.write(to: URL(fileURLWithPath: path), options: .atomic)
-        try data.write(to: URL(fileURLWithPath: "Sources/Keyboop/Resources/RightLayout/profile.json"), options: .atomic)
+        try data.write(to: URL(fileURLWithPath: "Sources/Speakey/Resources/RightLayout/profile.json"), options: .atomic)
         func line(_ name: String, _ m: Metrics) -> String {
             "| \(name) | \(m.falsePositives) | \(m.truePositives)/\(m.wrongTokens) (\(String(format: "%.4f", m.recall))) | \(m.abstentions) | \(m.adverseWrongConversions) |"
         }

@@ -1,4 +1,0 @@
-RightLayout: модель скомпилирована в /var/folders/4b/qzqh81dj1rx1smt02p45md080000gn/T//keyboop-quality.LOkhrV/LayoutClassifier.mlmodelc
-Ошибка оценки: Недостаточный объём holdout
-
-PASS: --verify отклоняет малый holdout и не перезаписывает профиль; exit 1

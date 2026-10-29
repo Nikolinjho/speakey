@@ -9,7 +9,7 @@ private final class SettingsBackend: NeuralLayoutBackend {
 enum SettingsTests: DiagnosticSuite {
     static let name = "settings"
     static func run(_ t: DiagnosticTests) {
-        let suite = "keyboop-settings-\(UUID())"
+        let suite = "speakey-settings-\(UUID())"
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         t.check("Без настройки выбран режим наблюдения", NeuralLayoutModeSettings.read(defaults) == .observe)

@@ -12,15 +12,15 @@ while [ "$#" -gt 0 ]; do
         *) echo "Неизвестный аргумент: $1" >&2; exit 2 ;;
     esac
 done
-work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-opportunity.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/speakey-opportunity.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 sources=()
 for name in NeuralLayoutTypes NeuralLayoutPolicy Keymap DynamicKeymap LayoutData ExtraWords ExceptionStore LayoutDetector; do
-    sources+=("Sources/Keyboop/$name.swift")
+    sources+=("Sources/Speakey/$name.swift")
 done
 printf 'func kbLog(_ message: String) {}\n' > "$work/log.swift"
 swiftc -O -swift-version 5 -framework Carbon "${sources[@]}" "$work/log.swift" Tools/NeuralLayoutOpportunity/main.swift -o "$work/oracle"
-KEYBOOP_DATA_DIR="$PWD/Sources/Keyboop/Resources" "$work/oracle" "${self_test[@]}" --output "$output"
+SPEAKEY_DATA_DIR="$PWD/Sources/Speakey/Resources" "$work/oracle" "${self_test[@]}" --output "$output"
 if [ "$oracle_only" = 1 ]; then exit 0; fi
 if ! python3 - "$output" <<'PY'
 import json, sys
@@ -31,6 +31,6 @@ then
     echo "CoreML пропущен: оракул не обнаружил возможностей раньше baseline или дополнительного recall."
     exit 0
 fi
-swiftc -O -swift-version 5 -D MODEL_ENABLED -framework Carbon -framework CoreML "${sources[@]}" Sources/Keyboop/RightLayoutModel.swift "$work/log.swift" Tools/NeuralLayoutOpportunity/main.swift -o "$work/model"
-swift scripts/compile-rightlayout-model.swift Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel "$work/LayoutClassifier.mlmodelc"
-KEYBOOP_DATA_DIR="$PWD/Sources/Keyboop/Resources" "$work/model" "${self_test[@]}" --model "$work/LayoutClassifier.mlmodelc" --output "$output"
+swiftc -O -swift-version 5 -D MODEL_ENABLED -framework Carbon -framework CoreML "${sources[@]}" Sources/Speakey/RightLayoutModel.swift "$work/log.swift" Tools/NeuralLayoutOpportunity/main.swift -o "$work/model"
+swift scripts/compile-rightlayout-model.swift Sources/Speakey/Resources/RightLayout/LayoutClassifier.mlmodel "$work/LayoutClassifier.mlmodelc"
+SPEAKEY_DATA_DIR="$PWD/Sources/Speakey/Resources" "$work/model" "${self_test[@]}" --model "$work/LayoutClassifier.mlmodelc" --output "$output"

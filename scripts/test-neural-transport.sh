@@ -3,25 +3,25 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 case "${1:-gate}" in
   gate)
-    work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-transport.XXXXXX")"
+    work="$(mktemp -d "${TMPDIR:-/tmp}/speakey-transport.XXXXXX")"
     trap 'rm -rf "$work"' EXIT
-    swiftc -parse-as-library Sources/Keyboop/NeuralTransportEventGate.swift \
+    swiftc -parse-as-library Sources/Speakey/NeuralTransportEventGate.swift \
       Tests/NeuralLayout/TransportGateTests.swift -o "$work/gate"
     "$work/gate"
     ;;
   --os)
     # Разрешён только отдельный временный bundle. Настройки установленного приложения не читаются.
-    app=/private/tmp/Keyboop_transport.app
+    app=/private/tmp/Speakey_transport.app
     bundle_id="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")"
-    [ "$bundle_id" = ru.keyboop.app.transport ] || { echo 'FAIL: isolated bundle ID required' >&2; exit 2; }
+    [ "$bundle_id" = dev.speakey.app.transport ] || { echo 'FAIL: isolated bundle ID required' >&2; exit 2; }
     codesign --verify --deep --strict "$app"
-    rg -a -q -F KEYBOOP_NEURAL_TRANSPORT_CHECK "$app/Contents/MacOS/Keyboop" || { echo 'FAIL: transport entry point required' >&2; exit 2; }
-    python3 - "$app/Contents/MacOS/Keyboop" <<'PY'
+    rg -a -q -F SPEAKEY_NEURAL_TRANSPORT_CHECK "$app/Contents/MacOS/Speakey" || { echo 'FAIL: transport entry point required' >&2; exit 2; }
+    python3 - "$app/Contents/MacOS/Speakey" <<'PY'
 import os
 import subprocess
 import sys
 
-environment = dict(os.environ, KEYBOOP_NEURAL_TRANSPORT_CHECK="1")
+environment = dict(os.environ, SPEAKEY_NEURAL_TRANSPORT_CHECK="1")
 try:
     result = subprocess.run([sys.argv[1]], env=environment, timeout=12)
 except subprocess.TimeoutExpired:

@@ -1,9 +1,0 @@
-2026-10-27 16:02:57 MSK: initial temporary fixture launch exited with SIGTRAP before event posting.
-Crash diagnostic: More than one NSApplication instance was created. When subclassing NSApplication, make sure to call sharedApplication on your own subclass as early as possible to instantiate the correct singleton, or specify the class in your Info.plist.
-Relevant stack: NSApplication.init; NeuralTransportApplication.init; NSApplication.sharedApplication; NSApplication._accessibilityInitialize; NSApplication.finishLaunching; NeuralLayoutTransportCheck.run.
-Minimal fixture hypothesis: calling the subclass shared singleton initializes AppKit correctly without activation.
-Command: swiftc /private/tmp/keyboop-application-singleton.swift -o /private/tmp/keyboop-application-singleton
-Command: /private/tmp/keyboop-application-singleton
-Exit: 0
-Output: PASS: custom NSApplication singleton without activation
-Change: NeuralTransportApplication.shared instead of direct initializer.

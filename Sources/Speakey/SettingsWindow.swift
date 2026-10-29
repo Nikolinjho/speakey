@@ -1,0 +1,5104 @@
+import AppKit
+import QuartzCore
+import AVFoundation
+import UniformTypeIdentifiers
+
+/// Размеры компактного окна и общие цвета настроек.
+enum DS {
+    static let sidebarWidth: CGFloat = 172
+    static let rowHeight: CGFloat = 30
+    static let rowGap: CGFloat = 2
+    static let pillInsetH: CGFloat = 8
+    static let rowLeadingInset: CGFloat = 10
+    static let iconTextGap: CGFloat = 7
+    static let iconPointSize: CGFloat = 13
+    static let pillRadius: CGFloat = 6
+    static let contentMaxWidth: CGFloat = 528
+    static let contentWidth: CGFloat = 528
+    static let contentMargin: CGFloat = 20
+    static let brandTopPad: CGFloat = 10
+    static let brandIconSize: CGFloat = 32
+    static let sidebarListGap: CGFloat = 12
+    static let titlebarHeight: CGFloat = 32
+    static let brandBottomPad: CGFloat = 8
+    static let simpleBottomPad: CGFloat = 22
+    // Правое поле включает место постоянной полосы прокрутки.
+    static let minWindowWidth: CGFloat = 760
+    static let defaultWindowHeight: CGFloat = 560
+    static let simpleContentWidth: CGFloat = 560
+    static let simpleWindowWidth: CGFloat = simpleContentWidth + contentMargin * 2
+    static let sectionGap: CGFloat = 12
+    static let itemGap: CGFloat = 6
+    static let fieldMaxWidth: CGFloat = 300
+    static let coral = NSColor(srgbRed: 1.0, green: 122.0/255.0, blue: 89.0/255.0, alpha: 1)
+    static let graphite = NSColor(srgbRed: 0x1C/255.0, green: 0x1B/255.0, blue: 0x1A/255.0, alpha: 1)
+}
+
+enum SettingsSection: Int, CaseIterable {
+    /// ⚠️ ПОРЯДОК ЭТОГО СПИСКА И ЕСТЬ ПОРЯДОК ЛЕВОГО МЕНЮ (задача 61, план 0.4).
+    /// Сверху вниз читается как история: сначала оба двигателя со своими исключениями, потом мелкие
+    /// функции, потом система, потом «про нас». Голосовой набор стоит третьим, а не пятым: это
+    /// второй двигатель приложения и первая тема по числу отзывов (21 из 73 содержательных).
+    /// `rawValue` нигде не сохраняется, поэтому переставлять здесь безопасно.
+    case switching, exceptions, layoutJournal, ambiguous, voice, snippets, translate, general, privacy, about
+
+    /// Спорные слова открываются из раздела исключений.
+    static var sidebarCases: [SettingsSection] { allCases.filter { $0 != .ambiguous } }
+    var l10nKey: String {
+        switch self {
+        case .switching: return "sec.switching"
+        case .layoutJournal: return "sec.layoutJournal"
+        case .exceptions: return "sec.exceptions"
+        case .ambiguous:  return "sec.ambiguous"
+        case .snippets:   return "sec.snippets"
+        case .translate:  return "sec.translate"
+        case .voice:      return "sec.voice"
+        case .general:    return "sec.general"
+        case .privacy:    return "sec.privacy"
+        case .about:      return "sec.about"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .switching: return "keyboard"
+        case .layoutJournal: return "list.bullet.rectangle"
+        case .exceptions: return "tag"
+        case .ambiguous:  return "arrow.left.arrow.right"
+        case .snippets:   return "wand.and.stars"
+        case .translate:  return "character.bubble"
+        case .voice:      return "mic"
+        case .general:    return "gearshape"
+        case .privacy:    return "lock.shield"
+        case .about:      return "info.circle"
+        }
+    }
+}
+
+/// ПРОСТОЙ РЕЖИМ ОКНА НАСТРОЕК.
+///
+/// У окна два режима: «Основное» показывает только то, что нужно обычному человеку, «Все» —
+/// всё как раньше. Простой режим ПРЯЧЕТ строки и никогда не трогает сами настройки: спрятанная
+/// функция продолжает работать ровно так, как её оставили.
+
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    private let split = NSSplitViewController()
+    private let sidebar = SidebarVC()
+    private let detail = DetailVC()
+    /// Отдельный контроллер под корневой экран простого режима. Тот же класс, другая ширина колонки:
+    /// `contentW` задаётся при создании, а держать два состояния в одном экземпляре значило бы
+    /// пересобирать констрейнты на каждом переходе.
+    private lazy var rootVC = DetailVC(width: DS.simpleContentWidth, scroller: false)
+    /// Размеры окна Pro, чтобы вернуть их при возврате из простого экрана.
+    private var proContentSize = NSSize(width: DS.minWindowWidth, height: DS.defaultWindowHeight)
+    /// ⚠️ ПОКАЗАТЬ ПОДРОБНЫЕ НА ОДИН РАЗ, НЕ ТРОГАЯ НАСТРОЙКУ (16.08). Ссылка вида «открыть настройки
+    /// на разделе голоса» обязана показать раздел, но не имеет права переучивать человека: он выбрал
+    /// простой режим, и завтра окно должно открыться простым. Раньше здесь стояло прямое
+    /// `simpleMode = false`, и режим у автора «сам» менялся после каждого такого перехода.
+    private var proVisit = false
+    /// Что сейчас показано на экране, а не что записано в настройке: гостевой заход в подробные
+    /// (`proVisit`) и снимочный хук (`simpleHook`) настройку не трогают.
+    private var showingSimple: Bool { (AppSettings.shared.simpleMode || simpleHook) && !proVisit }
+    /// `SPEAKEY_SIMPLE=1` открывает простой экран, не трогая настройку человека, — зеркало
+    /// `SPEAKEY_PRO=1`. Действует ТОЛЬКО на стартовый режим и гаснет от первого же щелчка по
+    /// переключателю: хук, который перебивает живую кнопку, это ровно та ловушка, на которой мы
+    /// уже стояли 15.08 с `SPEAKEY_PRO`.
+    private var simpleHook = ProcessInfo.processInfo.environment["SPEAKEY_SIMPLE"] == "1"
+    /// ПЕРЕКЛЮЧАТЕЛЬ РЕЖИМОВ ЖИВЁТ В СТРОКЕ ЗАГОЛОВКА (автор 15.08: «хотелось бы, чтобы при
+    /// переключении этих режимов переключатель оставался на том же месте»).
+    ///
+    /// Это единственное место окна, которое в обоих режимах одно и то же: содержимое меняется
+    /// целиком (в простом нет бокового меню, в Pro нет шапки), а заголовок остаётся. Раньше роль
+    /// делили кнопка в шапке простого экрана и ссылка в сайдбаре Pro, то есть переключатель прыгал
+    /// через всё окно. Так же это решено в системных настройках macOS.
+    /// ⚠️ ШАПКА ОДНА НА ОБА РЕЖИМА И ЛЕЖИТ В ОКНЕ, А НЕ В СОДЕРЖИМОМ (автор 15.08, второй заход).
+    /// Пока их было две (своя в простом экране, своя в сайдбаре), совпасть попиксельно они не могли
+    /// в принципе: у сайдбара свои отступы и своя подложка, и шапка при смене режима дёргалась.
+    /// Теперь знак, имя и версия рисуются поверх содержимого в одних и тех же координатах, а оба
+    /// режима просто оставляют под них место.
+    private let brandBlock = NSStackView()
+    private var modePicker: ModePicker?
+    /// Версия в шапке: видна только на простом экране (автор 17.08). В подробных она уже есть внизу
+    /// бокового меню, и вторая сверху смотрелась плохо.
+    private var brandVer: NSTextField?
+    /// Показана ли сейчас версия в шапке. Держим НАМЕРЕНИЕ отдельно от `isHidden`: пока идёт
+    /// затухание, вид ещё видим, и без этого флага следующая сверка состояния оборвала бы анимацию.
+    private var versionShown = true
+
+    /// Плавно показать или убрать версию рядом с именем.
+    ///
+    /// ⚠️ ЗОВЁТСЯ ИЗ `chooseMode`, ТО ЕСТЬ В МОМЕНТ ЩЕЛЧКА (автор 17.08: «пропадает поздно, хочу
+    /// плавно и сразу»). Раньше видимость выставляла `refreshModeLink` в самом конце `applyMode` —
+    /// уже после подмены тела окна и смены размера, поэтому надпись пропадала рывком и заметно
+    /// позже нажатия. Схлопывание (`isHidden`) оставляем на конец анимации: шапка привязана по
+    /// левому краю, и изменение ширины блока знак не двигает.
+    private func setVersionVisible(_ visible: Bool, animated: Bool) {
+        guard let ver = brandVer, versionShown != visible else { return }
+        versionShown = visible
+        if visible {
+            ver.isHidden = false
+            ver.alphaValue = animated ? 0 : 1
+            guard animated else { return }
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.16
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                ver.animator().alphaValue = 1
+            }
+        } else if animated {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.13
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                ver.animator().alphaValue = 0
+            }, completionHandler: { [weak self] in
+                // За время затухания режим мог смениться обратно — прячем, только если это всё ещё нужно.
+                guard let self, !self.versionShown else { return }
+                ver.isHidden = true
+                ver.alphaValue = 1        // вернуть непрозрачность к следующему показу
+            })
+        } else {
+            ver.isHidden = true
+            ver.alphaValue = 1
+        }
+    }
+    /// Отступ переключателя от правого края, замеренный при установке: нужен при смене языка,
+    /// когда подписи меняют ширину и хост аксессуара пересобирается под новую.
+    private var modeInset: CGFloat = 9
+    /// ⚠️ ПОСТОЯННЫЙ КОНТЕЙНЕР ОКНА. Раньше при смене режима подменялся весь `contentViewController`,
+    /// а вместе с ним и `contentView`, поэтому шапку и переключатель приходилось каждый раз снимать
+    /// и вешать заново: они моргали (автор 15.08: «переключение происходит с каким-то исчезновением
+    /// логотипа и версии»). Теперь contentViewController один и навсегда, внутри него неподвижная
+    /// шапка и «тело», в котором меняется только начинка.
+    private let hostVC = NSViewController()
+    private let bodyBox = NSView()
+    private var bodyChild: NSViewController?
+
+    convenience init() {
+        self.init(neuralPresentation: .shared)
+    }
+
+    convenience init(neuralPresentation: NeuralLayoutPresentationStore) {
+        let de = ProcessInfo.processInfo.environment
+        let w0: CGFloat = (de["SPEAKEY_DUMP"] == "1" || de["SPEAKEY_LIVEDIAG"] == "1") ? 1040 : DS.minWindowWidth
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: w0, height: DS.defaultWindowHeight),  // плейсхолдер; реальная высота — по контенту (ниже)
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false
+        )
+        // КРИТИЧНО: не восстанавливать прошлый (мелкий ~500pt) размер из Saved Application State —
+        // именно он перебивал наш дефолт и давал скролл. Открываем всегда на h0, сжать можно.
+        window.isRestorable = false
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.title = "Speakey"
+        window.minSize = NSSize(width: DS.minWindowWidth, height: 504)
+        self.init(window: window)
+        configureNeuralPresentation(neuralPresentation)
+        window.delegate = self
+
+        let sidebarItem = NSSplitViewItem(sidebarWithViewController: sidebar)
+        sidebarItem.minimumThickness = DS.sidebarWidth
+        sidebarItem.maximumThickness = DS.sidebarWidth
+        sidebarItem.canCollapse = false
+        let detailItem = NSSplitViewItem(viewController: detail)
+        if #available(macOS 26.0, *) { detailItem.automaticallyAdjustsSafeAreaInsets = true }
+        split.addSplitViewItem(sidebarItem)
+        split.addSplitViewItem(detailItem)
+
+        hostVC.view = NSView()
+        hostVC.view.addSubview(bodyBox)
+        bodyBox.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            bodyBox.leadingAnchor.constraint(equalTo: hostVC.view.leadingAnchor),
+            bodyBox.trailingAnchor.constraint(equalTo: hostVC.view.trailingAnchor),
+            bodyBox.topAnchor.constraint(equalTo: hostVC.view.topAnchor),
+            bodyBox.bottomAnchor.constraint(equalTo: hostVC.view.bottomAnchor)
+        ])
+        window.contentViewController = hostVC
+        setBody(split)
+        // Старый размер не переносим: он рассчитывался под длинную страницу.
+        let saved = CGFloat(AppSettings.shared.compactWindowHeight)
+        let screenMaxH = (NSScreen.main?.visibleFrame.height ?? 1000) - 40
+        let height = saved > 200 ? saved : DS.defaultWindowHeight
+        window.setContentSize(NSSize(width: w0, height: min(height, screenMaxH)))
+        window.center()
+        // Окно тянется ТОЛЬКО по высоте: ширина контента фиксирована (поля прижаты влево, тянуть
+        // вширь незачем и некрасиво). minSize.width == maxSize.width → горизонтальный ресайз запрещён.
+        let fixedW = window.frame.width
+        window.minSize = NSSize(width: fixedW, height: 504)   // высота — по боковому меню, см. выше
+        window.maxSize = NSSize(width: fixedW, height: 100_000)
+        // ПОЛНОЭКРАННЫЙ РЕЖИМ ЗАПРЕЩЁН (просьба автора 30.07). Настройки на весь экран — это полоса
+        // контента посередине и километры пустоты по бокам: ширина у окна фиксированная (строка выше),
+        // растягиваться ему некуда. `.fullScreenNone` убирает не только сам режим, но и превращает
+        // зелёную кнопку обратно в ZOOM — а он здесь как раз осмысленный: ширину зум не трогает
+        // (minSize.width == maxSize.width), высоту дотягивает до видимой части экрана. Ровно то, что
+        // нужно длинному списку настроек. Двойной клик по заголовку тоже зовёт зум, если у человека
+        // так настроено в системе, и это уже не наша забота — поведение стандартное.
+        window.collectionBehavior.insert(.fullScreenNone)
+        installModeSwitch()
+        placeModeSwitch()
+
+        proContentSize = window.contentView?.frame.size ?? window.frame.size   // кадр, см. applyMode
+        // ⚠️ ОКНО СОБИРАЕТСЯ ВСЕГДА В ВИДЕ PRO, И ТОЛЬКО ПОТОМ, ЕСЛИ НАДО, СХЛОПЫВАЕТСЯ В ПРОСТОЕ.
+        // Так высота Pro успевает посчитаться (по ПЕРВОМУ разделу, см. выше; длинные прокручиваются),
+        // и возврат из простого экрана не пересчитывает её заново на живом окне.
+        // Стартовый режим берём из настройки. Снимку Pro можно попросить обратное переменной
+        // окружения, и это НЕ пишет ничего в настройки человека: просто пропускаем схлопывание.
+        if AppSettings.shared.simpleMode || simpleHook,
+           ProcessInfo.processInfo.environment["SPEAKEY_PRO"] != "1" {
+            applyMode(animate: false)
+        } else {
+            // ⚠️ ПЕРЕКЛЮЧАТЕЛЬ ОБЯЗАН ПОКАЗЫВАТЬ ТО, ЧТО НА ЭКРАНЕ. Эта ветка показывает подробные
+            // настройки, не трогая настройку человека, то есть ровно «гостевой заход»: без
+            // `proVisit` окно открывалось в Pro, а переключатель подсвечивал «Основное».
+            proVisit = true
+            sidebar.refreshBackLink(hidden: false)
+            refreshModeLink()
+        }
+
+        // ⚠️ ОФОРМЛЕНИЕ БЕРЁМ ИЗ НАСТРОЙКИ, А НЕ ПРИБИВАЕМ (02.08.2026).
+        //
+        // История этой строки за один день стоит того, чтобы её записать. Пользователи сообщили:
+        // в светлой системе окно разъезжается пополам, боковое меню светлеет, правая часть остаётся
+        // тёмной. Я решил, что палитра у приложения одна и тёмная, и жёстко прибил окно к .darkAqua.
+        //
+        // Это было лечение симптома. Аудит показал обратное: в боевом коде жёстко заданных цветов
+        // НЕТ вообще (все восемь сидят в ветках для снимков), тексты идут на системных цветах и
+        // адаптируются сами, а под фон ещё 29.07 написан ThemedBackgroundView, который честно
+        // переключается по effectiveAppearance. То есть светлый путь существовал, а моя затычка его
+        // выключила целиком.
+        //
+        // Правильный ответ - не выбирать за человека. `nil` означает «как в системе»: appearance не
+        // трогаем, и окно ведёт себя как у любого обычного приложения.
+        window.appearance = AppSettings.shared.appAppearance
+
+        sidebar.onSelect = { [weak self] s in self?.detail.show(s) }
+        detail.observeCapsRemap()
+        if ReleaseFeatures.slap { detail.observeSlapAvailability() }
+        detail.onLanguageChanged = { [weak self] in
+            // Тоже откладываем: приходит из action popup'а языка, а reshow сносит сам popup.
+            DispatchQueue.main.async {
+                self?.sidebar.refreshTitles()
+                self?.detail.reshow()
+                // Переключатель в заголовке живёт вне тела окна, до него reshow не дотягивается.
+                // Вместе с подписями меняется ширина, поэтому пересобираем и хост: аксессуар следит
+                // за кадром своего вью и подхватит новую ширину сам (заголовок SDK).
+                if let self, let p = self.modePicker, let host = p.superview {
+                    p.setTitles([L10n.t("mode.simple"), L10n.t("mode.pro")])
+                    host.setFrameSize(NSSize(width: p.frame.width + self.modeInset,
+                                             height: DS.titlebarHeight))
+                }
+            }
+        }
+        sidebar.select(0, animated: false)
+    }
+
+    /// Переключить окно между простым корневым экраном и полным Pro.
+    ///
+    /// ⚠️ ОДНА ТОЧКА НА ОБА НАПРАВЛЕНИЯ. Простой экран и Pro отличаются не только содержимым, но и
+    /// шириной окна и его пределами: у Pro ширина зафиксирована (`minSize.width == maxSize.width`),
+    /// и если поменять только контроллер, окно останется шириной в 896 пунктов вокруг колонки в 392.
+    func applyMode(animate: Bool = true) {
+        guard let window else { return }
+        // ⚠️ ХУК РЕШАЕТ ТОЛЬКО СТАРТОВЫЙ РЕЖИМ, А НЕ КАЖДЫЙ ПЕРЕХОД (поймано в тестировании: «нажимаю
+        // „Основное“, и ничего не происходит»). Пока условие стояло здесь, `SPEAKEY_PRO=1` перебивал
+        // ЛЮБОЙ вызов: кнопка честно писала настройку, а окно оставалось в Pro. Снимочный хук,
+        // меняющий поведение живых кнопок, это ровно та ловушка, про которую уже написано в
+        // CLAUDE.md про `SPEAKEY_OPEN_SETTINGS`.
+        let simple = showingSimple
+        if simple {
+            // ⚠️ КАДР, А НЕ contentLayoutRect (ревью 17.08): восстановление идёт через setContent,
+            // а он при `.fullSizeContentView` ставит ровно это число кадром. contentLayoutRect на
+            // высоту заголовка ниже кадра, и каждый цикл «Основное → Всё» съедал у Pro-окна 32 pt,
+            // а закрытие записывало усушку в proWindowHeight насовсем. Та же болезнь, что чинили
+            // утром для пары «закрыл/открыл», но на втором пути. Мерим тем же, чем восстанавливаем.
+            proContentSize = window.contentView?.frame.size ?? window.frame.size
+            brandBlock.layoutSubtreeIfNeeded()
+            rootVC.headerRoom = max(4, DS.brandTopPad + brandBlock.fittingSize.height
+                                       + DS.brandBottomPad - DS.contentMargin)
+            rootVC.showRoot()
+            setBody(rootVC)
+            let w = DS.simpleWindowWidth
+            // Высоту простого экрана считает сам стек: строк мало и они известны, гадать незачем.
+            // ⚠️ ДВА ПРОХОДА, И ЭТО НЕ ПЕРЕСТРАХОВКА. Подписи на корневом экране ПЕРЕНОСЯТСЯ, значит
+            // их высота зависит от ширины окна: измерять до того, как окно стало узким, бессмысленно.
+            // Сначала ставим ширину, даём раскладке пройти, и только потом спрашиваем высоту. Иначе
+            // окно выходит короче содержимого и вылезает полоса прокрутки, которой тут быть не должно
+            // (просьба автора 15.08: «чтобы сразу всё умещалось»).
+            // Высоту на время замеров отпускаем: окно должно суметь принять пробный размер.
+            window.minSize = NSSize(width: w, height: 260)
+            window.maxSize = NSSize(width: w, height: 100_000)
+            setContent(NSSize(width: w, height: 400), animate: false)
+            rootVC.view.layoutSubtreeIfNeeded()
+            let h = min(rootVC.fittingHeight() + DS.contentMargin + DS.simpleBottomPad + rootVC.chromeInset,
+                        (NSScreen.main?.visibleFrame.height ?? 900) - 80)
+            setContent(NSSize(width: w, height: h), animate: animate)
+            lockHeight()
+            // ⚠️ ТРЕТИЙ ПРОХОД, СЛЕДУЮЩИМ ОБОРОТОМ ЦИКЛА. Перенос подписи считается не сразу: пока
+            // AppKit не прогнал раскладку в УЖЕ УЗКОМ окне, высота строки известна приблизительно, и
+            // окно выходило на десяток пунктов короче содержимого. Видно это было только по полосе
+            // прокрутки и обрезанному подвалу, то есть ровно по тому, чего быть не должно.
+            DispatchQueue.main.async { [weak self] in
+                // ⚠️ УСЛОВИЕ ТО ЖЕ, ЧТО У ВЕТКИ ВЫШЕ. Здесь стояло голое `simpleMode`, и под хуком
+                // снимка простой экран собирался БЕЗ третьего прохода: высота оставалась
+                // приблизительной, ровно та ошибка, ради которой проход и заводили.
+                // ⚠️ ПО СОСТОЯНИЮ, А НЕ ПО НАСТРОЙКЕ (ревью 17.08, подтверждено трассировкой).
+                // `openSettings(section:)` создаёт контроллер и В ТОМ ЖЕ обороте цикла уводит окно
+                // в Pro гостевым заходом; настройка при этом остаётся «простой». Отложенный проход
+                // с условием по настройке срабатывал НА PRO-ОКНЕ: мерил снятый с окна rootVC,
+                // втискивал подробные настройки в ширину простого экрана и запирал высоту. Условие
+                // по showingSimple плюс проверка, что в окне действительно простой экран.
+                guard let self, let window = self.window,
+                      self.showingSimple, self.bodyChild === self.rootVC else { return }
+                self.rootVC.view.layoutSubtreeIfNeeded()
+                let exact = min(self.rootVC.fittingHeight() + DS.contentMargin + DS.simpleBottomPad
+                                    + self.rootVC.chromeInset,
+                                (NSScreen.main?.visibleFrame.height ?? 900) - 80)
+                if abs(exact - window.contentLayoutRect.height) > 1 {
+                    window.maxSize = NSSize(width: w, height: 100_000)   // иначе замок не даст вырасти
+                    window.minSize = NSSize(width: w, height: 260)
+                    self.setContent(NSSize(width: w, height: exact), animate: false)
+                }
+                self.lockHeight()
+                // ⚠️ ПРОВЕРЯЕМ, ЧТО ВЫСОТА ПОДОБРАНА ТОЧНО. Полосы прокрутки на простом экране нет,
+                // значит промах по высоте больше не выдаёт себя полосой: он просто срезает нижние
+                // строки. Считаем недобор явно, а не надеемся заметить его глазами на снимке.
+                if ProcessInfo.processInfo.environment["SPEAKEY_MODEDEBUG"] == "1" {
+                    self.rootVC.view.layoutSubtreeIfNeeded()
+                    self.rootVC.dumpRowGeometry()
+                    FileHandle.standardError.write("""
+                    простое окно: шапка \(self.brandBlock.frame) замок \(window.minSize.height)/\(window.maxSize.height) \
+                    содержимое \(self.rootVC.fittingHeight()) окно \
+                    \(window.contentLayoutRect.height) НЕ ВЛЕЗЛО \(self.rootVC.overflow)\n
+                    """.data(using: .utf8)!)
+                }
+            }
+        } else {
+            setBody(split)
+            let w = proContentSize.width
+            // Подробные настройки тянутся по высоте, и это правильно: список разделов длинный.
+            window.minSize = NSSize(width: w, height: 504)
+            window.maxSize = NSSize(width: w, height: 100_000)
+            setContent(proContentSize, animate: animate)
+            detail.reshow()
+        }
+        sidebar.refreshBackLink(hidden: true)      // ссылка в сайдбаре больше не нужна: переключатель в заголовке
+        refreshModeLink()
+    }
+
+    /// Положить знак с именем и версией поверх содержимого, под строкой заголовка.
+    ///
+    /// ⚠️ ЗДЕСЬ БОЛЬШЕ НЕТ ПЕРЕКЛЮЧАТЕЛЯ, он уехал в `installModeSwitch()`. И заодно снят прежний
+    /// вывод «аксессуар заголовка без тулбара не показывается»: он был неверен. Аксессуар не
+    /// показывался по другой причине, у trailing-аксессуара ШИРИНУ задаёт фрейм вида, а высоту
+    /// система дотягивает сама; вид без явной ширины выходит нулевым. Проверено на живом окне
+    /// 17.08 и подтверждено заголовками SDK.
+    ///
+    /// Зовётся после КАЖДОЙ смены `contentViewController`: подмена контроллера меняет `contentView`,
+    /// и вместе с ним исчезли бы все ручные подвиды.
+    /// Шапка: знак, имя с версией в одну строку и ссылка перехода под ней.
+    ///
+    /// ⚠️ ДВЕ СТРОКИ, А НЕ ЧЕТЫРЕ (автор 16.08: «очень большая шапка»). Сначала знак, имя, версия и
+    /// ссылка стояли столбиком, и шапка съедала под сотню пунктов высоты в окне, где всего четыре
+    /// настройки. Это служебная строка, а не титульный экран: знак нужен, чтобы окно опознавалось,
+    /// версия для отчётов о проблемах, ссылка чтобы уйти в подробные. Всё это укладывается в две
+    /// строки и половину прежней высоты, а ширину диктует колонка сайдбара в 220 пунктов, поэтому
+    /// имя и версия идут рядом, а не одно под другим.
+    private func makeBrandBlock() {
+        guard brandBlock.arrangedSubviews.isEmpty else { return }
+        let icon = NSImageView(image: DockPresence.bundleIcon)
+        icon.imageScaling = .scaleProportionallyUpOrDown
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([icon.widthAnchor.constraint(equalToConstant: DS.brandIconSize),
+                                     icon.heightAnchor.constraint(equalToConstant: DS.brandIconSize)])
+        let name = NSTextField(labelWithString: "Speakey")
+        name.font = .systemFont(ofSize: 15, weight: .semibold)
+        let v = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.1"
+        let ver = NSTextField(labelWithString: v)
+        ver.font = .systemFont(ofSize: 11)
+        ver.textColor = .tertiaryLabelColor
+        brandVer = ver
+
+        let line = NSStackView(views: [icon, name, ver])
+        line.orientation = .horizontal; line.alignment = .centerY; line.spacing = 7
+
+        brandBlock.orientation = .vertical
+        brandBlock.alignment = .leading
+        brandBlock.spacing = 7
+        // ⚠️ ПЕРЕКЛЮЧАТЕЛЬ ЖИВЁТ В ЗАГОЛОВКЕ ОКНА, А НЕ ЗДЕСЬ (автор 16.08: «может быть, встроить в
+        // системный заголовок, где кнопки закрыть и свернуть»). Он прав: это единственное место,
+        // которое принадлежит ОКНУ, а не содержимому, поэтому при смене режима оно не двигается и
+        // ни с чем не спорит. Здесь остаётся только знак с именем и версией.
+        brandBlock.setViews([line], in: .leading)
+
+        refreshModeLink()
+    }
+
+    /// Тумблер отражает СОСТОЯНИЕ: выключен это простые настройки, включён подробные.
+    /// ⚠️ ПО ТОМУ, ЧТО ПОКАЗАНО, А НЕ ПО НАСТРОЙКЕ. При заходе по ссылке из меню окно открыто в Pro,
+    /// а настройка всё ещё «простой режим» (`proVisit`), и вкладка подсвечивала «Основное» рядом с
+    /// подробными настройками. Переключатель обязан показывать состояние окна, иначе он врёт.
+    private func refreshModeLink() {
+        let simple = showingSimple
+        modePicker?.selected = simple ? 0 : 1
+        // Версию в шапке показывает только простой экран: в подробных она внизу бокового меню.
+        // Здесь это СВЕРКА состояния: если анимацию уже запустил щелчок, вызов ничего не делает.
+        setVersionVisible(simple, animated: false)
+    }
+
+    /// Поставить в «тело» окна нужный контроллер. Шапка при этом не трогается вовсе.
+    private func setBody(_ vc: NSViewController) {
+        if bodyChild === vc { return }
+        bodyChild?.view.removeFromSuperview()
+        bodyChild?.removeFromParent()
+        hostVC.addChild(vc)
+        vc.view.translatesAutoresizingMaskIntoConstraints = false
+        bodyBox.addSubview(vc.view)
+        NSLayoutConstraint.activate([
+            vc.view.leadingAnchor.constraint(equalTo: bodyBox.leadingAnchor),
+            vc.view.trailingAnchor.constraint(equalTo: bodyBox.trailingAnchor),
+            vc.view.topAnchor.constraint(equalTo: bodyBox.topAnchor),
+            vc.view.bottomAnchor.constraint(equalTo: bodyBox.bottomAnchor)
+        ])
+        bodyChild = vc
+        placeModeSwitch()      // шапка обязана остаться поверх начинки
+    }
+
+    /// Положить шапку поверх начинки. Контейнер окна постоянный, поэтому зовётся это редко:
+    /// один раз при сборке и после каждой подмены «тела».
+    private func placeModeSwitch() {
+        guard let content = window?.contentView else { return }
+        if brandBlock.superview === content { return }
+        makeBrandBlock()
+        brandBlock.removeFromSuperview()
+        brandBlock.translatesAutoresizingMaskIntoConstraints = false
+        content.addSubview(brandBlock)
+        NSLayoutConstraint.activate([
+            // ⚠️ ПО ЦЕНТРУ КОЛОНКИ САЙДБАРА, А НЕ ОКНА (автор 15.08). Центр окна в Pro это середина
+            // широкой страницы настроек, шапка уезжала туда и висела над содержимым. Правильная
+            // привязка одна: середина левой колонки, отсчитанная от ЛЕВОГО края окна. Левый край при
+            // смене режима не двигается, значит шапка остаётся ровно на месте в обоих режимах.
+            // ⚠️ ПО ЛЕВОМУ КРАЮ, А НЕ ПО ЦЕНТРУ (автор 17.08: «логотип перескакивает при смене
+            // режима»). Центрирование держит на месте СЕРЕДИНУ блока, а его ширина зависит от
+            // содержимого: спрятали версию в подробных — блок стал уже, и знак уехал вправо. Левый
+            // край не зависит от содержимого вовсе. Отсчёт тот же, что у строк бокового меню
+            // (`pillInsetH` + `rowLeadingInset`), поэтому знак встаёт в одну колонку с их значками.
+            brandBlock.leadingAnchor.constraint(equalTo: content.leadingAnchor,
+                                                constant: DS.pillInsetH + DS.rowLeadingInset),
+            // ⚠️ ОТ БЕЗОПАСНОЙ ЗОНЫ, А НЕ ОТ КРАЯ ОКНА. Край окна у нас под строкой заголовка
+            // (`fullSizeContentView`), и как только в заголовке появилась панель, отступ 40 стал
+            // отсчитываться из-под неё. Безопасная зона знает высоту заголовка сама.
+            brandBlock.topAnchor.constraint(equalTo: content.safeAreaLayoutGuide.topAnchor,
+                                            constant: DS.brandTopPad)
+        ])
+
+    }
+
+    // MARK: - Переключатель режима в строке заголовка
+
+    /// Поставить переключатель в строку заголовка, справа, симметрично кнопкам окна слева.
+    ///
+    /// ⚠️ АКСЕССУАР ЗАГОЛОВКА, А НЕ `NSToolbar` (переделано 17.08 по замечаниям автора). Панель
+    /// инструментов ставила контрол сама и по-своему: правый отступ 5 pt против 20.5 pt у светофора,
+    /// центр на 4 pt выше, и стеклянная капсула вокруг чужого view, которую нельзя ни притушить, ни
+    /// подсветить. Аксессуар не диктует ничего: и отступ, и высота, и краска наши. Заодно строка
+    /// заголовка возвращается к обычной высоте, панель делала её выше.
+    private func installModeSwitch() {
+        guard let window else { return }
+        // ⚠️ РОВНО ОДИН РАЗ НА ОКНО. Аксессуары складываются стопкой: второй вызов дал бы два
+        // переключателя друг на друге, и щелчок доставался бы верхнему, а состояние показывал бы
+        // нижний. Дубли тут не видны глазом, поэтому и запрет явный.
+        guard modePicker == nil else { return }
+        let picker = ModePicker(titles: [L10n.t("mode.simple"), L10n.t("mode.pro")])
+        picker.onSelect = { [weak self] i in self?.chooseMode(simple: i == 0) }
+        modePicker = picker
+
+        // ⚠️ ОТСТУП СПРАВА СЧИТАЕМ ОТ РЕАЛЬНОЙ КНОПКИ ОКНА, А НЕ ОТ ЧИСЛА. автор 17.08: «примерно
+        // такой же, как у кнопки закрыть слева от края, всё должно быть симметрично». Число тут
+        // держится ровно до следующей macOS: у окна с панелью инструментов светофор стоит в 20 pt
+        // от края, у обычного вдвое ближе. Спрашиваем систему, и симметрия переживает это сама.
+        // Координаты кнопки переводим В ОКНО: её собственный `frame` отсчитан от служебного
+        // контейнера заголовка, и там это другое число.
+        let close = window.standardWindowButton(.closeButton)
+        let inset = close.map { $0.convert($0.bounds, to: nil).minX } ?? 9
+        modeInset = inset
+        let size = picker.intrinsicContentSize
+
+        // ⚠️ ШИРИНУ ЗАДАЁТ ФРЕЙМ, А НЕ КОНСТРЕЙНТЫ. Для trailing-аксессуара AppKit сам дотягивает
+        // только высоту, а ширину берёт из вида: с `translatesAutoresizingMaskIntoConstraints = false`
+        // она выходит нулевой и переключатель не рисуется вовсе. Пустое поле справа делаем шириной
+        // хоста, потому что своего отступа у аксессуара нет ни в каком виде.
+        let host = NSView(frame: NSRect(x: 0, y: 0, width: size.width + inset, height: DS.titlebarHeight))
+        // ⚠️ ПРИЖИМАЕМ К ВЕРХУ НА ТОТ ЖЕ ОТСТУП, ЧТО И СПРАВА, А НЕ ЦЕНТРИРУЕМ (автор 17.08: «какой
+        // отступ у системных кнопок сверху, такой же нужно и у нас»). Центрирование давало 6.5 pt
+        // при 9.5 справа, и угол выглядел скошенным. Совпасть И полями, И центрами с кнопками окна
+        // невозможно: кнопка 14 pt, наш переключатель 19, при равных полях центры разойдутся. Глаз
+        // меряет от КРАЯ ОКНА, а низ строки заголовка не граница вовсе (содержимое уходит под неё),
+        // поэтому равными делаем верх и право.
+        picker.frame = NSRect(x: 0, y: DS.titlebarHeight - inset - size.height,
+                              width: size.width, height: size.height)
+        picker.autoresizingMask = [.maxXMargin, .minYMargin]
+        host.addSubview(picker)
+
+        let acc = NSTitlebarAccessoryViewController()
+        acc.layoutAttribute = .trailing
+        acc.view = host
+        window.addTitlebarAccessoryViewController(acc)
+        if ProcessInfo.processInfo.environment["SPEAKEY_MODEDEBUG"] == "1" {
+            FileHandle.standardError.write(
+                "переключателей в заголовке: \(window.titlebarAccessoryViewControllers.count)\n"
+                    .data(using: .utf8)!)
+        }
+        selfTestModeClick()
+        // `SPEAKEY_MODESET=0|1` зовёт ровно тот же путь, что и кнопка, но без синтетического
+        // события: анимацию надо проверять на анимации, а не на надёжности доставки щелчка.
+        if let raw = ProcessInfo.processInfo.environment["SPEAKEY_MODESET"], let want = Int(raw) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.chooseMode(simple: want == 0)
+            }
+        }
+        if ProcessInfo.processInfo.environment["SPEAKEY_MODEDEBUG"] == "1" {
+            FileHandle.standardError.write("""
+            переключатель: светофор minX=\(close?.frame.minX ?? -1) в окне=\(inset)             контрол=\(size) хост=\(host.frame)\n
+            """.data(using: .utf8)!)
+        }
+    }
+
+    /// `SPEAKEY_MODECLICK=0|1` щёлкает по половине переключателя синтетическим событием и печатает,
+    /// что вышло. Проверка нужна ровно одна: доходит ли нажатие до контрола или его съедает
+    /// перетаскивание окна, а руками в снимке этого не увидеть.
+    private func selfTestModeClick() {
+        // Принимает и одиночный «0|1», и последовательность «1,0,1»: щелчки идут с шагом 1.5 с,
+        // чтобы можно было прогнать целый цикл «Всё → Основное → Всё» и замерить окно между ними.
+        guard let raw = ProcessInfo.processInfo.environment["SPEAKEY_MODECLICK"], let window,
+              modePicker != nil else { return }
+        for (i, part) in raw.split(separator: ",").enumerated() {
+            guard let half = Int(part) else { continue }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5 * Double(i + 1)) { [weak self] in
+                self?.syntheticClick(half: half, in: window)
+            }
+        }
+    }
+
+    private func syntheticClick(half: Int, in window: NSWindow) {
+        guard let picker = modePicker else { return }
+        do {
+            let w = picker.bounds.width
+            let p = picker.convert(NSPoint(x: half == 0 ? w * 0.25 : w * 0.75,
+                                           y: picker.bounds.midY), to: nil)
+            let before = AppSettings.shared.simpleMode
+            guard let down = NSEvent.mouseEvent(with: .leftMouseDown, location: p,
+                                                modifierFlags: [], timestamp: 0,
+                                                windowNumber: window.windowNumber, context: nil,
+                                                eventNumber: 0, clickCount: 1, pressure: 1) else { return }
+            let hit = window.contentView?.superview?.hitTest(p) ?? window.contentView?.hitTest(p)
+            window.sendEvent(down)
+            FileHandle.standardError.write("""
+            самопроверка щелчка: точка \(p) попала в \(type(of: hit as Any)) \
+            простой режим \(before) → \(AppSettings.shared.simpleMode) \
+            окно \(window.frame.width)x\(window.frame.height)\n
+            """.data(using: .utf8)!)
+        }
+    }
+
+    /// Выбор режима человеком: гасим гостевой заход и пишем настройку.
+    private func chooseMode(simple: Bool) {
+        simpleHook = false
+        let t0 = ProcessInfo.processInfo.systemUptime
+        setVersionVisible(simple, animated: true)   // сразу по щелчку, не дожидаясь перестроения окна
+        if ProcessInfo.processInfo.environment["SPEAKEY_MODEDEBUG"] == "1" {
+            let dt = { (ProcessInfo.processInfo.systemUptime - t0) * 1000 }
+            FileHandle.standardError.write("версия: затухание начато на +\(Int(dt())) мс\n".data(using: .utf8)!)
+            DispatchQueue.main.async {
+                FileHandle.standardError.write(
+                    "версия: окно перестроено на +\(Int(dt())) мс\n".data(using: .utf8)!)
+            }
+        }
+        if ProcessInfo.processInfo.environment["SPEAKEY_MODEDEBUG"] == "1" {
+            FileHandle.standardError.write("выбран режим: простой=\(simple)\n".data(using: .utf8)!)
+        }
+        proVisit = false
+        AppSettings.shared.simpleMode = simple
+        applyMode(animate: true)
+    }
+
+    /// ⚠️ ПРОСТОЕ ОКНО НЕ ТЯНЕТСЯ ПО ВЫСОТЕ (просьба автора 17.08). Оно подогнано ровно по
+    /// содержимому, полосы прокрутки в нём нет, и любая растяжка даёт либо пустоту снизу, либо
+    /// срезанные строки. Запрет делаем равенством min и max, а не снятием `.resizable`: смена
+    /// `styleMask` на живом окне пересобирает контейнер заголовка вместе с нашим переключателем.
+    /// ⚠️ ИМЕННО `windowDidEndLiveResize`, А НЕ `windowDidResize`. Второй прилетает и на НАШИ
+    /// программные смены размера (их за одну смену режима три штуки), и мы записали бы в «выбор
+    /// человека» собственную подгонку. Этот срабатывает только после того, как отпустили край окна.
+    func windowDidEndLiveResize(_ n: Notification) {
+        guard let window, !showingSimple else { return }
+        AppSettings.shared.compactWindowHeight = Double(window.contentView?.frame.height ?? 0)
+    }
+
+    private func lockHeight() {
+        guard let window else { return }
+        let size = window.frame.size
+        window.minSize = size
+        window.maxSize = size
+    }
+
+    /// Сменить размер окна, сохранив ЛЕВЫЙ ВЕРХНИЙ угол на месте. `setContentSize` тянет окно вниз
+    /// от нижнего края (координаты macOS растут вверх), и при схлопывании из Pro в простой экран
+    /// окно уезжало бы вверх на разницу высот.
+    private func setContent(_ size: NSSize, animate: Bool) {
+        guard let window else { return }
+        var f = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
+        f.origin.x = window.frame.origin.x
+        f.origin.y = window.frame.maxY - f.height
+        window.setFrame(f, display: true, animate: animate)
+    }
+
+    func show(section: SettingsSection? = nil) {
+        // Явный раздел означает Pro: в простом экране разделов нет вовсе, и открыть их можно только
+        // выйдя из него. Иначе диплинк вида «--settings=voice» открывал бы пустое окно.
+        // ⚠️ ПО СОСТОЯНИЮ, А НЕ ПО НАСТРОЙКЕ — четвёртый пойманный экземпляр одной болезни
+        // (ревью+тест 17.08). Под снимочным хуком настройка «подробный», окно простое, и диплинк
+        // с условием по настройке пропускал гостевой заход целиком: раздел «открывался» в окне,
+        // где нет ни сайдбара, ни деталей.
+        if section != nil, showingSimple {
+            proVisit = true                     // на один показ, настройка остаётся прежней
+            applyMode(animate: false)
+        }
+        if section == nil, showingSimple {
+            // Ремень к возврату в windowWillClose: если тело всё ещё Pro (например, окно не
+            // закрывали, а просто позвали настройки повторно), возвращаем простой экран здесь.
+            if bodyChild !== rootVC { proVisit = false; applyMode(animate: false) }
+            rootVC.showRoot()
+            DockPresence.acquire(.settings)
+            NSApp.activate(ignoringOtherApps: true)
+            window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        detail.reload()
+        if section == .ambiguous {
+            detail.show(.ambiguous)                     // подстраница: в меню строки нет, подсветка остаётся на «Исключениях»
+        } else if let section {
+            // ⚠️ Выбирать по ИНДЕКСУ строки, а не по rawValue: скрытые разделы (ambiguous) сдвигают
+            // нумерацию, и rawValue открыл бы соседний раздел (поймано 25.07 — вместо «Голосового
+            // набора» показывались «Общие»).
+            if let idx = SettingsSection.sidebarCases.firstIndex(of: section) {
+                sidebar.select(idx, animated: false)
+            }
+        }
+        else { detail.revalidateVoiceIfShown() }   // без явного раздела — пере-проверить файлы моделей на диске
+        // Пока открыты настройки — показываем иконку в Доке. У LSUIElement-агента её нет, а меню-бар у
+        // многих переполнен (наш пункт не умещается и его не видно). Док — надёжный способ вернуться в
+        // приложение. На закрытии снова прячем (windowWillClose) — в простое остаёмся чистым агентом.
+        // С 04.09.2026 причин две (ещё окно истории), поэтому политика собрана в DockPresence.
+        DockPresence.acquire(.settings)
+        NSApp.activate(ignoringOtherApps: true)
+        window?.makeKeyAndOrderFront(nil)
+    }
+
+    /// Dev: отрендерить раздел в PNG (отладка дизайна без Screen Recording).
+    func dump(section i: Int, to path: String) {
+        // ⚠️ .aqua, а не .darkAqua (28.07). Рендер идёт в СВЕТЛУЮ подложку, поэтому под тёмной темой
+        // получался светлый текст на светлом фоне — снимок формально есть, а прочитать нельзя.
+        // Канон снимков интерфейса в этом проекте: appearance = .aqua.
+        window?.appearance = NSAppearance(named: .aqua)
+        sidebar.select(i, animated: false)
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let base = (path as NSString).deletingPathExtension
+        // Числа геометрии (без рендера — надёжно): видно, шире ли docView, чем viewport, и где колонка.
+        try? detail.layoutDiag().write(toFile: base + "_diag.txt", atomically: true, encoding: .utf8)
+        if let png = detail.renderColumnPNG() { try? png.write(to: URL(fileURLWithPath: base + ".png")) }
+        if let png = detail.renderColumnPNG(extraRight: 180, forceWidth: 392) {
+            try? png.write(to: URL(fileURLWithPath: base + "_narrow.png"))
+        }
+    }
+    func windowWillClose(_ notification: Notification) {
+        detail.saveAll()
+        // Высоту подробных сохраняем и здесь: `windowDidEndLiveResize` не приходит, если размер
+        // меняли не мышью (зум, Системные события, менеджер окон), а привычка человека к своей
+        // высоте от способа не зависит.
+        // ⚠️ МЕРИМ ТЕМ ЖЕ, ЧЕМ ВОССТАНАВЛИВАЕМ. Сначала сохранял `contentLayoutRect` (без строки
+        // заголовка), а ставил через `setContentSize` (с ней): окно худело на 32 pt за каждый цикл
+        // «закрыл — открыл». Поймано замером, а не рассуждением.
+        if !showingSimple, let window {
+            AppSettings.shared.compactWindowHeight = Double(window.contentView?.frame.height ?? 0)
+        }
+        let wasGuest = proVisit
+        proVisit = false            // гостевой показ подробных живёт ровно до закрытия окна
+        // ⚠️ И ТЕЛО ОКНА ТОЖЕ ВОЗВРАЩАЕМ (ревью 17.08). Контроллер живёт один на всё приложение, и
+        // после гостевого захода в окне оставался split: следующее обычное открытие показывало
+        // ПОДРОБНЫЕ при настройке «простой», переключатель подсвечивал «Всё», а сохранение высоты
+        // молча отбрасывалось guard-ом. Возвращаем простой экран сразу при закрытии, пока окно
+        // не видно, чтобы следующее открытие не перестраивало его на глазах.
+        if wasGuest, showingSimple { applyMode(animate: false) }
+        DockPresence.release(.settings)   // настройки закрыты → значок из Dock уходит, если его не держит история
+    }
+    /// Фокус вернулся к окну (напр. удалили файл модели в Finder и переключились обратно) — освежаем
+    /// статус моделей, если открыт раздел «Голос», чтобы «Установлена/Скачать» отражали реальность на диске.
+    func windowDidBecomeKey(_ notification: Notification) {
+        detail.revalidateVoiceIfShown()
+        detail.revalidatePrivacyIfShown()
+    }
+    /// Обновить поля (напр. список «Выученные» после обучения на отмене), если окно открыто.
+    func reload() { if window?.isVisible == true { detail.reload() } }
+
+
+    /// Dev: живая диагностика ТЕКУЩЕГО раздела (без re-select/forced-layout) — после settle окна.
+    func liveDiag(to path: String) {
+        let wh = window?.frame.height ?? -1
+        let screenH = NSScreen.main?.visibleFrame.height ?? -1
+        let ww = window?.frame.width ?? -1
+        let s = "windowW=\(Int(ww)) windowH=\(Int(wh)) screenVisibleH=\(Int(screenH))\n"
+              + detail.layoutDiag() + "\n" + detail.liveDiag()
+        try? s.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// Dev: снимок ВСЕГО окна (sidebar+detail) как видит пользователь — тёмная тема, реальные
+    /// пропорции. Требует SPEAKEY_WINSHOT (непрозрачные фоны sidebar/detail → cacheDisplay ок).
+    /// Снимок ЧАСТИ окна через cacheDisplay. Вынесено, чтобы собирать кадр из кусков (см. ниже).
+    private func renderPart(_ v: NSView) -> NSImage? {
+        v.layoutSubtreeIfNeeded()
+        let b = v.bounds
+        guard b.width > 1, b.height > 1, let rep = v.bitmapImageRepForCachingDisplay(in: b) else { return nil }
+        v.cacheDisplay(in: b, to: rep)
+        let img = NSImage(size: b.size)
+        img.addRepresentation(rep)
+        return img
+    }
+
+    private func configureNeuralPresentation(_ store: NeuralLayoutPresentationStore) {
+        detail.neuralPresentation = store
+        rootVC.neuralPresentation = store
+    }
+
+    func whenLayoutJournalReady(_ completion: @escaping () -> Void) {
+        detail.whenLayoutJournalReady(completion)
+    }
+
+    func dumpFullWindow(section i: Int, to path: String, appearance: NSAppearance.Name = .darkAqua, selectSection: Bool = true) {
+        window?.appearance = NSAppearance(named: appearance)
+        if selectSection { sidebar.select(i, animated: false) }
+        if ProcessInfo.processInfo.environment["SPEAKEY_WINSHOT"] == "1" {
+            sidebar.view.layer?.backgroundColor = NSColor(white: appearance == .aqua ? 0.96 : 0.17, alpha: 1).cgColor
+        }
+        // ⚠️ СОБИРАЕМ ИЗ ДВУХ КУСКОВ, А НЕ СНИМАЕМ КОРЕНЬ ЦЕЛИКОМ (задача 0d, починено 05.08.2026).
+        //
+        // Раньше здесь был cacheDisplay по `window.contentView`, и на macOS 26 он стал отдавать
+        // пустой кадр. Дело не в cacheDisplay: тем же способом до сих пор исправно рисуется раздел
+        // (`renderColumnPNG`). Дело в СОСТАВЕ: на macOS 26 боковое меню стало плавающей панелью на
+        // системном материале, а NSVisualEffectView в cacheDisplay не попадает — его композитит
+        // оконный сервер. Снимая корень, мы гарантированно захватывали эту дыру.
+        //
+        // Правильный ответ не «сменить технику», а не тащить в кадр то, что ею не снимается: рисуем
+        // боковое меню и содержимое ПОРОЗНЬ (обе части обычные view) и склеиваем рядом.
+        //
+        // Почему это важнее, чем кажется: на этом снимке держится правило проекта «смотреть на
+        // пиксели до релиза», и пока он не работал, каждую проверку приходилось делать вручную через
+        // screencapture по windowID, а это требует Screen Recording и невозможно у пользователя.
+        // Правую часть берём НЕ из detail.view, а через renderColumnPNG: содержимое живёт в колонке
+        // внутри прокрутки, а сам detail.view через cacheDisplay отдаёт пустоту по той же причине,
+        // что и корень. Проверено 05.08: первая попытка нарисовала боковое меню и пустоту справа.
+        guard let left = renderPart(sidebar.view),
+              let rightData = detail.renderColumnPNG(),
+              let right = NSImage(data: rightData) else { return }
+        let size = NSSize(width: left.size.width + right.size.width,
+                          height: max(left.size.height, right.size.height))
+        let out = NSImage(size: size)
+        out.lockFocus()
+        NSColor.windowBackgroundColor.setFill()
+        NSRect(origin: .zero, size: size).fill()
+        left.draw(at: NSPoint(x: 0, y: size.height - left.size.height),
+                  from: .zero, operation: .sourceOver, fraction: 1)
+        right.draw(at: NSPoint(x: left.size.width, y: size.height - right.size.height),
+                   from: .zero, operation: .sourceOver, fraction: 1)
+        out.unlockFocus()
+        guard let tiff = out.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else { return }
+        try? png.write(to: URL(fileURLWithPath: path))
+    }
+}
+
+// MARK: - Sidebar: перетекающее выделение (Liquid-Glass morph) с правильными отступами
+
+/// Строка sidebar: иконка + подпись с явными внутренними отступами (а не «прилипшие»).
+final class SidebarRow: NSView {
+    let icon = NSImageView()
+    let label = NSTextField(labelWithString: "")
+    var onClick: (() -> Void)?
+
+    init(symbol: String, title: String) {
+        super.init(frame: .zero)
+        icon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: DS.iconPointSize, weight: .medium)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(icon)
+
+        label.stringValue = title
+        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .labelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: leadingAnchor, constant: DS.rowLeadingInset),
+            icon.centerYAnchor.constraint(equalTo: centerYAnchor),
+            icon.widthAnchor.constraint(equalToConstant: 16),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: DS.iconTextGap),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -8)
+        ])
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+
+    override func mouseDown(with event: NSEvent) { onClick?() }
+
+    func setSelected(_ on: Bool) {
+        icon.contentTintColor = on ? DS.coral : .secondaryLabelColor
+        label.textColor = on ? DS.coral : .labelColor
+    }
+}
+
+final class SidebarVC: NSViewController {
+    var onSelect: ((SettingsSection) -> Void)?
+    private var rows: [SidebarRow] = []
+    private let pill = NSView()
+    private let brandIcon = NSImageView()
+    private let brand = NSTextField(labelWithString: "Speakey")
+    private let tag = NSTextField(labelWithString: L10n.t("tagline"))
+    private let backLink = NSButton()
+    private let verLabel = NSButton()   // версия внизу сайдбара; клик — пасхалка
+    private var selectedIndex = 0
+
+    override func loadView() {
+        let root = FlippedView()
+
+        pill.wantsLayer = true
+        pill.layer?.cornerRadius = DS.pillRadius
+        pill.layer?.cornerCurve = .continuous
+        pill.layer?.backgroundColor = DS.coral.withAlphaComponent(0.16).cgColor
+        root.addSubview(pill)
+
+        // ⚠️ ШАПКА ОДИНАКОВАЯ В ОБОИХ РЕЖИМАХ (автор 15.08: «логотип и подпись сохранять прежними…
+        // в подробном у нас вверху нет логотипа, и всё по-другому написано»). Раньше слева стояло
+        // крупное «Speakey» и слоган «wrong layout? speakey.», а в простом экране знак, имя и
+        // версия. Смена режима выглядела как переход в другое приложение. Теперь верхний левый угол
+        // не меняется вовсе, меняется только то, что под ним.
+        // Шапку сайдбар больше не рисует: она общая и лежит в окне (см. SettingsWindowController).
+
+        backLink.isBordered = false
+        backLink.bezelStyle = .inline
+        backLink.contentTintColor = .secondaryLabelColor
+        backLink.font = .systemFont(ofSize: 12)
+        backLink.attributedTitle = NSAttributedString(
+            string: L10n.t("root.back"),
+            attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor])
+        backLink.target = self
+        backLink.action = #selector(backToRoot)
+        root.addSubview(backLink)
+
+        addRows(into: root)
+        let ver = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "—"
+        verLabel.isBordered = false
+        verLabel.bezelStyle = .inline
+        verLabel.attributedTitle = NSAttributedString(string: "v" + ver, attributes: [
+            .foregroundColor: NSColor.tertiaryLabelColor,
+            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)])
+        verLabel.target = self
+        verLabel.action = #selector(versionClicked)
+        verLabel.toolTip = "🐾"
+        root.addSubview(verLabel)
+
+        if ProcessInfo.processInfo.environment["SPEAKEY_WINSHOT"] == "1" {
+            root.wantsLayer = true                       // непрозрачный sidebar → cacheDisplay всего окна
+            root.layer?.backgroundColor = NSColor(white: 0.17, alpha: 1).cgColor
+        }
+        view = root
+    }
+
+    /// Строки разделов текущего режима. Отдельным методом, потому что при смене режима их
+    /// приходится создавать заново (см. `rebuildRows`).
+    private func addRows(into root: NSView) {
+        for (i, sec) in SettingsSection.sidebarCases.enumerated() {
+            let row = SidebarRow(symbol: sec.symbol, title: L10n.t(sec.l10nKey))
+            row.onClick = { [weak self] in self?.select(i) }
+            rows.append(row)
+            root.addSubview(row)
+        }
+    }
+
+    /// Сменили режим — меню и правая панель перестраиваются сразу.
+    @objc private func backToRoot() {
+        AppSettings.shared.simpleMode = true
+        (view.window?.windowController as? SettingsWindowController)?.applyMode()
+    }
+
+    /// Показывать ли возврат: он нужен только в Pro. В простом режиме сайдбара нет вовсе, но метод
+    /// зовётся из `applyMode` для обоих направлений, поэтому проверка живёт здесь.
+    /// ⚠️ ВИДИМОСТЬ ПО СОСТОЯНИЮ ОКНА, А НЕ ПО СОХРАНЁННОЙ НАСТРОЙКЕ. Окно может стоять в Pro, пока
+    /// настройка ещё говорит «простой» (снимок по `SPEAKEY_PRO`), и ссылка обязана быть там, где
+    /// человек её видит, а не там, где записано в UserDefaults.
+    func refreshBackLink(hidden: Bool) { backLink.isHidden = hidden }
+
+    /// Пересобрать список разделов под текущий режим.
+    ///
+    /// Именно ПЕРЕСОБРАТЬ, а не переименовать: `select(i)` адресует строки по индексу, а в простом
+    /// режиме раздел может из меню исчезнуть — со старыми строками индексы разъехались бы и клик
+    /// открывал бы соседа.
+    private func rebuildRows(keeping section: SettingsSection?) {
+        rows.forEach { $0.removeFromSuperview() }
+        rows.removeAll()
+        addRows(into: view)
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()   // кадры строк нужны уже сейчас: по ним встаёт капсула
+        // Раздел мог уйти вместе с режимом — тогда переводим человека на первый видимый, а не
+        // оставляем выделение (и правую панель) на том, чего в меню больше нет.
+        select(section.flatMap { SettingsSection.sidebarCases.firstIndex(of: $0) } ?? 0, animated: false)
+    }
+
+    @objc private func versionClicked() { CueSynth.versionTap() }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        let w = view.bounds.width
+        let top = view.safeAreaInsets.top
+        // Числа те же, что у шапки простого экрана: она лежит в колонке с отступом DS.contentMargin
+        // от верхней кромки области, знак 34 пункта, имя и версия справа от него. Совпадать они
+        // обязаны попиксельно, иначе при смене режима шапка «дёргается».
+
+        // Ссылка возврата стоит НАД списком разделов: верх колонки это первое, куда падает взгляд,
+        // и симметрия с «Все настройки» в шапке простого экрана читается сразу. Сайдбар не
+        // прокручивается, значит возврат виден из любого раздела.
+        backLink.isHidden = true          // роль ушла переключателю режимов в шапке окна
+        // ⚠️ СЧИТАЕТСЯ ОТ ШАПКИ, А НЕ ЧИСЛОМ. Здесь стояло 112, отмеренное под старую шапку, в
+        // которой под именем жила ещё и ссылка перехода. Ссылка уехала в строку заголовка, шапка
+        // стала ниже, а число осталось, и меню повисло с провалом под логотипом (автор 17.08).
+        let rowsTop = top + DS.brandTopPad + DS.brandIconSize + DS.sidebarListGap
+        for (i, row) in rows.enumerated() {
+            row.frame = NSRect(x: DS.pillInsetH, y: rowsTop + CGFloat(i) * (DS.rowHeight + DS.rowGap),
+                               width: w - DS.pillInsetH * 2, height: DS.rowHeight)
+        }
+        verLabel.frame = NSRect(x: 18, y: view.bounds.height - 26, width: w - 30, height: 15)
+        // Ссылка — строкой выше версии, по той же левой границе.
+        positionPill(animated: false)
+    }
+
+    func select(_ i: Int, animated: Bool = true) {
+        selectedIndex = i
+        for (j, row) in rows.enumerated() { row.setSelected(j == i) }
+        positionPill(animated: animated)
+        onSelect?(SettingsSection.sidebarCases[i])
+    }
+
+    func refreshTitles() {
+        backLink.attributedTitle = NSAttributedString(
+            string: L10n.t("root.back"),
+            attributes: [.font: NSFont.systemFont(ofSize: 12), .foregroundColor: NSColor.secondaryLabelColor])
+        for (i, sec) in SettingsSection.sidebarCases.enumerated() {
+            rows[i].label.stringValue = L10n.t(sec.l10nKey)
+        }
+    }
+
+    private func positionPill(animated: Bool) {
+        guard selectedIndex < rows.count else { return }
+        let target = rows[selectedIndex].frame
+        if animated {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.28
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+                ctx.allowsImplicitAnimation = true
+                pill.animator().frame = target
+            }
+        } else {
+            pill.frame = target
+        }
+    }
+}
+
+// MARK: - Detail
+
+final class DetailVC: NSViewController {
+    var neuralPresentation = NeuralLayoutPresentationStore()
+    var onLanguageChanged: (() -> Void)?
+    private let settings = AppSettings.shared
+    private let exceptions = ExceptionStore.shared
+    private lazy var snippets = SnippetStore.shared
+
+    private var ignoredChips: ChipFlowView?
+    private var learnedChips: ChipFlowView?
+    private var wordInput: NSTextField?
+    /// Строка исхода под полем: добавлено / уже было / уже бережём / не сработает (P3.5).
+    private weak var wordOutcome: NSTextField?
+    private var voiceModelStatus: [String: NSTextField] = [:]
+    /// Кнопки «Скачать» по id модели. Как и метки выше, ПЕРЕрегистрируются при каждой сборке
+    /// раздела — иначе обработчик прогресса держал бы ссылку на кнопку, которой уже нет.
+    private var voiceModelButton: [String: NSButton] = [:]
+    private var historyWC: VoiceHistoryWindowController?
+    private let docView = FlippedView()
+    private let column = FlippedView()           // колонка контента с ограниченной шириной
+    private var contentStack: NSStackView?
+    private var currentSection: SettingsSection = .switching
+    /// Несколько runtime-сигналов жеста могут прийти внутри одного action тумблера. Схлопываем их
+    /// в одну безопасную пересборку на следующем проходе main loop.
+    private var slapReshowPending = false
+    /// Ширина колонки. Один и тот же класс обслуживает и разделы Pro, и корневой простой экран,
+    /// потому что все кирпичи строк (`card`, `switchRow`, `controlRow`, `settingRow`) приватные:
+    /// отдельный контроллер потребовал бы вынести их наружу, то есть переписать работающий Pro
+    /// ради красоты. Разная нужна только ширина.
+    private let contentW: CGFloat
+    /// Показан корневой экран, а не раздел. Нужно `reshow()`: пересборка после тумблера обязана
+    /// вернуть то же, что было, иначе щелчок по «Исправление раскладки» выбрасывал бы в Pro-раздел.
+    private var showingRoot = false
+
+    init(width: CGFloat = DS.contentWidth, scroller: Bool = true) {
+        contentW = width
+        showsScroller = scroller
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    /// Показывать ли полосу прокрутки. В подробных настройках она видна ВСЕГДА (там есть что
+    /// прокручивать и об этом надо сообщить), на простом экране её нет вовсе: окно там ровно по
+    /// высоте содержимого, и полоса означала бы, что мы промахнулись с высотой.
+    private let showsScroller: Bool
+    /// Полоса прокрутки простого экрана убрана, но КОЛЁСИКО работает: на маленьком мониторе окно
+    /// упирается в высоту экрана, и без прокрутки нижние строки стали бы недостижимы.
+    private weak var scrollBox: NSScrollView?
+    required init?(coder: NSCoder) { fatalError("init(coder:) не используется") }
+
+    override func loadView() {
+        let env = ProcessInfo.processInfo.environment
+        let bg: NSView
+        if env["SPEAKEY_DUMP"] == "1" || env["SPEAKEY_WINSHOT"] == "1" {
+            // Дампы рендерятся под .aqua (см. dump()), поэтому подложка ДОЛЖНА быть светлой.
+            // Раньше здесь стоял жёсткий тёмный 0.14 «для .darkAqua» — из-за него снимки выходили
+            // с чёрным фоном и читались хуже живого окна.
+            let solid = NSView(); solid.wantsLayer = true
+            solid.layer?.backgroundColor = NSColor.white.cgColor
+            bg = solid
+        } else {
+            // ⚠️ Страница СВЕТЛАЯ в светлой теме (правка 29.07). `.underPageBackground` под .aqua
+            // даёт серый, и вместе с белыми карточками это была инверсия системной схемы: у macOS
+            // белая страница и серые группы. Материал оставляем только для тёмной темы, где он
+            // выглядит правильно и даёт живое размытие за окном.
+            let eff = NSVisualEffectView()
+            eff.material = .underPageBackground
+            eff.blendingMode = .behindWindow
+            let solid = NSView(); solid.wantsLayer = true
+            let holder = ThemedBackgroundView(dark: eff, light: solid)
+            bg = holder
+        }
+
+        let scroll = NSScrollView()
+        scrollBox = scroll
+        scroll.setAccessibilityIdentifier("settings.scroll")
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = showsScroller
+        scroll.hasHorizontalScroller = false   // только вертикальный скролл — контент не уезжает вбок
+        // ⚠️ ОДНОГО hasHorizontalScroller=false НЕ ХВАТАЕТ (отзыв пользователей, 02.08.2026).
+        // Флаг убирает ПОЛОСУ, но не сам горизонтальный скролл: упругость по умолчанию разрешена,
+        // и случайный боковой свайп двумя пальцами уводил всю панель вбок — справа открывалась
+        // пустота, а текст уезжал под боковое меню. На трекпаде это ловится постоянно, потому что
+        // вертикальный жест почти всегда идёт с горизонтальной составляющей.
+        // Документ и так приколот по ширине к вьюпорту (констрейнт ниже), то есть ехать ему
+        // некуда — ехала именно упругость.
+        scroll.horizontalScrollElasticity = .none
+        // ⚠️ ПОЛОСА ПРОКРУТКИ ВИДНА ВСЕГДА (автор 16.08). По умолчанию macOS показывает её только во
+        // время прокрутки, и в окне настроек это стоит дорого: человек переключает раздел, видит
+        // экран без единого намёка на продолжение и не догадывается, что ниже есть ещё половина.
+        // `.legacy` это тот самый режим «полоса занимает место и не прячется», который система
+        // включает, когда к маку подключена мышь; мы просим его явно, а не полагаемся на железо.
+        //
+        // Ширину колонки это не ломает: полоса рисуется в своём жёлобе, и наши 600 пунктов
+        // содержимого остаются нетронутыми (в этом и разница `.legacy` от `.overlay`, где полоса
+        // ложится ПОВЕРХ текста).
+        // ⚠️ ПОЛОСА ПРЯЧЕТСЯ ТАМ, ГДЕ ПРОКРУЧИВАТЬ НЕЧЕГО (отзыв #147 @whpstr, решение автора 20.08).
+        // Держать её всегда — исходное требование автора от 16.08, и оно остаётся: без неё человек не
+        // догадывается, что ниже есть продолжение. Но в разделах, которые помещаются целиком, ниже
+        // ничего нет, и полоса там была чистым шумом: «везде появились бесячие скроллбары, которые
+        // не исчезают». `autohidesScrollers` в AppKit значит ровно «скрыть, когда содержимое влезло»,
+        // а НЕ «прятать во время прокрутки», так что стиль `.legacy` (полоса занимает своё место и не
+        // тает) продолжает работать там, где прокрутка есть.
+        scroll.autohidesScrollers = true
+        if showsScroller { scroll.scrollerStyle = .legacy }
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        docView.translatesAutoresizingMaskIntoConstraints = false
+        column.translatesAutoresizingMaskIntoConstraints = false
+        scroll.documentView = docView
+        docView.addSubview(column)
+        if env["SPEAKEY_DUMP"] == "1" || env["SPEAKEY_WINSHOT"] == "1" {
+            // непрозрачный тёмный фон колонки → cacheDisplay-снимок не «белеет» в прозрачных зонах
+            column.wantsLayer = true
+            column.layer?.backgroundColor = NSColor(white: 0.14, alpha: 1).cgColor
+        }
+
+        bg.addSubview(scroll)
+        NSLayoutConstraint.activate([
+            // ⚠️ БОКА — К SAFE AREA, ВЕРХ — К СЫРОМУ КРАЮ. Это не стилистика, а разбор бага
+            // (отзывы пользователей 02.08.2026): окно настроек можно было утащить вбок, и текст
+            // уезжал под боковое меню, а справа открывалась пустота.
+            //
+            // На macOS 26 боковое меню стало ПЛАВАЮЩЕЙ панелью поверх контента: наша панель деталей
+            // занимает всю ширину окна (замер: pane=1040 при окне 1040), а система сообщает отступ
+            // под меню через safe area (замер: safeArea.left = 228). Мы прибивались к СЫРОМУ краю и
+            // этот отступ игнорировали, поэтому его подхватывал `automaticallyAdjustsContentInsets`
+            // и превращал в `contentInsets.left`. А диапазон прокрутки NSScrollView по устройству
+            // ВКЛЮЧАЕТ contentInsets — вот и появлялся законный горизонтальный ход ровно на 228
+            // точек. Именно законный: `horizontalScrollElasticity = .none` его не убирает, упругость
+            // отвечает только за пружину ЗА пределами диапазона. Проверено отдельной пробой.
+            //
+            // Верх намеренно оставлен на `bg.topAnchor`: окно создано с `.fullSizeContentView` и
+            // прозрачным титлбаром, и верхняя вставка (32) — это то, подо что контент красиво
+            // уезжает при прокрутке. Переведёшь верх на safe area — вставка станет нулевой, вместо
+            // размытия под титлбаром будет жёсткий срез, а вертикальный скроллер укоротится.
+            //
+            // ⚠️ И НЕЛЬЗЯ «просто выключить» `automaticallyAdjustsContentInsets`, не тронув пины:
+            // ход тоже станет нулевым, но колонка встанет на x=24, то есть целиком под меню, и окно
+            // сломается наглухо. Лечится именно край, от которого мы считаем.
+            scroll.leadingAnchor.constraint(equalTo: bg.safeAreaLayoutGuide.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: bg.safeAreaLayoutGuide.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: bg.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: bg.bottomAnchor),
+            // КРИТИЧНО: к contentView (clip-view = истинный viewport), НЕ к scroll.widthAnchor
+            // (та включает вертикальный скроллер) — иначе docView шире viewport и контент обрезается.
+            docView.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor)
+        ])
+
+        // Колонка (research-канон): centerX + (≤max required) + (leading/trailing ≥ margin required)
+        // + жертвенный (== max @ high). При узком окне жертвенный ломается → колонка сжимается до
+        // viewport−2·margin; при широком — ровно max, центрирована. Без конфликта приоритетов.
+        NSLayoutConstraint.activate([
+            column.topAnchor.constraint(equalTo: docView.topAnchor, constant: DS.contentMargin),
+            column.bottomAnchor.constraint(equalTo: docView.bottomAnchor, constant: -DS.contentMargin),
+            // ЛЕВЫЙ КРАЙ + ФИКС ширина (по просьбе автора): блок прижат влево, ширина DS.contentWidth, справа —
+            // свободное место. Окно не сужается ниже minWindowWidth → блок гарантированно влезает,
+            // обрезки нет. Никакого центрирования и «docView шире вьюпорта».
+            column.leadingAnchor.constraint(equalTo: docView.leadingAnchor, constant: DS.contentMargin),
+            column.widthAnchor.constraint(equalToConstant: contentW)
+        ])
+        view = bg
+    }
+
+    override func viewDidLayout() { super.viewDidLayout() }
+
+    /// Dev: PDF самой контентной колонки (для отладки дизайна на видимом окне).
+    func renderColumnPDF() -> Data {
+        column.layoutSubtreeIfNeeded()
+        return column.dataWithPDF(inside: column.bounds)
+    }
+
+    /// Dev: снимок ВСЕГО detail-pane (bg solid в DUMP) — видно центрирование колонки внутри
+    /// широкой панели и реальную обрезку справа (то, что снимок изолированной колонки скрывает).
+    func renderPanePNG() -> Data? {
+        view.layoutSubtreeIfNeeded()
+        let b = view.bounds
+        guard b.width > 1, b.height > 1,
+              let rep = view.bitmapImageRepForCachingDisplay(in: b) else { return nil }
+        view.cacheDisplay(in: b, to: rep)
+        return rep.representation(using: .png, properties: [:])
+    }
+    /// docView/clipview/column ширины — для диагностики (печатаем в лог).
+    func layoutDiag() -> String {
+        view.layoutSubtreeIfNeeded()
+        let clip = (view.subviews.first as? NSScrollView)?.contentView.bounds.width ?? -1
+        // safeArea печатаем с 02.08.2026: на macOS 26 боковое меню стало ПЛАВАЮЩЕЙ панелью поверх
+        // контента, и вся геометрия зависит от того, сообщает ли система отступ под ним. Без этого
+        // числа «pane=1040 colX=24» выглядят здоровыми, хотя контент лежит под панелью.
+        let sa = view.safeAreaInsets
+        return "pane=\(Int(view.bounds.width)) docView=\(Int(docView.bounds.width)) clip=\(Int(clip)) column=\(Int(column.bounds.width)) colX=\(Int(column.frame.minX)) safeArea(l/r/t/b)=\(Int(sa.left))/\(Int(sa.right))/\(Int(sa.top))/\(Int(sa.bottom))"
+    }
+    /// Живая диагностика БЕЗ forced-layout — читаем кадры переносимых подписей как в реальном окне.
+    func liveDiag() -> String {
+        let scroll = view.subviews.first as? NSScrollView
+        let vpH = scroll?.contentView.bounds.height ?? -1
+        let docH = (scroll?.documentView)?.bounds.height ?? -1
+        let scrolls = docH > vpH + 1
+        var out = "paneH=\(Int(view.bounds.height)) viewportH=\(Int(vpH)) docH=\(Int(docH)) columnH=\(Int(column.frame.height)) СКРОЛЛ=\(scrolls ? "ДА (docH>viewport)" : "нет")\n"
+        out += "column.w=\(Int(column.frame.width)) colX=\(Int(column.frame.minX)) pane=\(Int(view.bounds.width))\n"
+        func walk(_ v: NSView) {
+            for sub in v.subviews {
+                if let wl = sub as? WrappingLabel {
+                    out += "  WL frame.w=\(Int(wl.frame.width)) frameH=\(Int(wl.frame.height)) pMLW=\(Int(wl.preferredMaxLayoutWidth)) '\(wl.stringValue.prefix(22))'\n"
+                }
+                walk(sub)
+            }
+        }
+        walk(column)
+        return out
+    }
+
+    /// Dev: PNG колонки через cacheDisplay — В ОТЛИЧИЕ от PDF рендерит NSControl
+    /// (чекбоксы, segmented, popup) с реальным accent-цветом (coral). Композитим на
+    /// белый фон, т.к. cacheDisplay оставляет прозрачные зоны там, где view не рисует фон.
+    func whenLayoutJournalReady(_ completion: @escaping () -> Void) {
+        (contentStack as? LayoutJournalView)?.whenReady(completion)
+    }
+
+    func renderColumnPNG(extraRight: CGFloat = 0, forceWidth: CGFloat? = nil) -> Data? {
+        var temp: NSLayoutConstraint?
+        if let fw = forceWidth {                      // надёжно сузить колонку (ресайз окна в дампе асинхронен)
+            temp = column.widthAnchor.constraint(equalToConstant: fw)
+            temp!.priority = .required
+            temp!.isActive = true
+        }
+        let dark = column.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let background = NSColor(white: dark ? 0.14 : 1, alpha: 1)
+        if ProcessInfo.processInfo.environment["SPEAKEY_WINSHOT"] == "1" { column.layer?.backgroundColor = background.cgColor }
+        column.superview?.layoutSubtreeIfNeeded()
+        column.layoutSubtreeIfNeeded()
+        defer { temp?.isActive = false }
+        let cb = column.bounds
+        guard cb.width > 1, cb.height > 1 else { return nil }
+        // Кадр шире колонки: всё, что субвью рисуют за правым краем column (не clipped),
+        // попадёт в снимок. Красная линия = правый край колонки (где должно всё кончаться).
+        let frame = NSRect(x: cb.minX, y: cb.minY, width: cb.width + extraRight, height: cb.height)
+        guard let rep = column.bitmapImageRepForCachingDisplay(in: frame) else { return nil }
+        column.cacheDisplay(in: frame, to: rep)
+        let out = NSImage(size: frame.size)
+        out.lockFocus()
+        background.setFill()
+        NSRect(origin: .zero, size: frame.size).fill()
+        rep.draw(in: NSRect(origin: .zero, size: frame.size))
+        if extraRight > 0 {                     // маркер правого края колонки
+            NSColor.systemRed.withAlphaComponent(0.6).setStroke()
+            let line = NSBezierPath(); line.lineWidth = 1.5
+            line.move(to: NSPoint(x: cb.width, y: 0)); line.line(to: NSPoint(x: cb.width, y: frame.height))
+            line.stroke()
+        }
+        out.unlockFocus()
+        guard let tiff = out.tiffRepresentation,
+              let outRep = NSBitmapImageRep(data: tiff) else { return nil }
+        return outRep.representation(using: .png, properties: [:])
+    }
+
+    private func buildSection(_ section: SettingsSection) -> NSView {
+        let built: NSView
+        switch section {
+        case .switching:  built = buildSwitching()
+        case .exceptions: built = buildExceptions()
+        case .layoutJournal: built = LayoutJournalView(runtime: .shared)
+        case .ambiguous:  built = buildAmbiguous()
+        case .snippets:   built = buildSnippets()
+        case .translate:  built = buildTranslate()
+        case .voice:      built = buildVoice()
+        case .general:    built = buildGeneral()
+        case .privacy:    built = buildPrivacy()
+        case .about:      built = buildAbout()
+        }
+        return built
+    }
+
+    // ⚠️ ЗДЕСЬ ЖИЛ ФИЛЬТР ПРОСТОГО РЕЖИМА, УДАЛЁН 15.08.2026 (~180 строк).
+    // Он прятал строки по ключам уже в СОБРАННОМ разделе: `applySimpleMode`, `hideBlocks`,
+    // `filterCard`, `filterRows`, `hideOrphanLabels`, `hasContent`, `sectionsWithContentInSimpleMode`
+    // и кэш к ним. Приём был честный для своей задачи (одно место вместо условий в девяти
+    // builder-ах), но задача исчезла: простой режим больше не отбор строк, а отдельный корневой
+    // экран `buildSimpleRoot`, где нужные строки перечислены явно.
+    // Если фильтр когда-нибудь понадобится снова, он лежит в снимке `перед-простым-экраном`.
+
+    /// Авто-высота: max высота контента среди разделов при ширине колонки. Окно строим по самому
+    /// длинному разделу (Голосовой набор) — чтобы не зашивать число руками и не «прыгать» по вкладкам.
+    /// Высота, которую займут указанные разделы, посчитанная на пробной вью нужной ширины.
+    func sectionHeight(_ sections: [SettingsSection]) -> CGFloat {
+        var maxH: CGFloat = 0
+        for s in sections {
+            guard let stack = buildSection(s) as? NSStackView else { continue }
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            let probe = FlippedView(frame: NSRect(x: 0, y: 0, width: DS.contentWidth, height: 6000))
+            probe.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: probe.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: probe.trailingAnchor),
+                stack.topAnchor.constraint(equalTo: probe.topAnchor),
+                stack.widthAnchor.constraint(equalToConstant: DS.contentWidth)
+            ])
+            probe.layoutSubtreeIfNeeded()
+            maxH = max(maxH, stack.fittingSize.height)
+        }
+        return maxH
+    }
+
+    func show(_ section: SettingsSection) {
+        showingRoot = false
+        currentSection = section
+        contentStack?.removeFromSuperview()
+        guard let stack = buildSection(section) as? NSStackView else { return }
+        contentStack = stack
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        column.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            stack.topAnchor.constraint(equalTo: column.topAnchor),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: column.bottomAnchor),
+            stack.widthAnchor.constraint(equalTo: column.widthAnchor)   // явная ширина (stack.w был 0)
+        ])
+        view.needsLayout = true
+    }
+
+    func reshow() { showingRoot ? showRoot() : show(currentSection) }
+
+    private func scheduleSlapReshow() {
+        guard !slapReshowPending else { return }
+        slapReshowPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.slapReshowPending = false
+            self.reshow()
+        }
+    }
+
+    /// Высота собранного корневого экрана. Считает сам стек: строк мало, все известны, и гадать
+    /// «на бумаге» тут незачем, в отличие от Pro, где высота берётся по самому длинному разделу.
+    /// Сколько высоты съедает прозрачный заголовок окна. Окно у нас `.fullSizeContentView`, то есть
+    /// содержимое лежит ПОД строкой заголовка, и её высота приходит как `safeAreaInsets.top`. Без
+    /// этого слагаемого окно выходило ровно на высоту заголовка короче, и вылезала полоса прокрутки.
+    var chromeInset: CGFloat { view.safeAreaInsets.top + view.safeAreaInsets.bottom }
+
+    /// Пустая строка над первой карточкой: столько, сколько шапка занимает СВЕРХ безопасной зоны.
+    /// Ставит контроллер, потому что шапка принадлежит окну, а не этому экрану.
+    var headerRoom: CGFloat = 0
+
+    /// Диагностика раскладки простого экрана: печатает кадры строк, текстовых колонок и подписей.
+    /// Нужна ровно затем, чтобы не рассуждать о причине по снимку, а видеть числа.
+    /// На сколько содержимое не влезло в окно. Ноль значит «высота подобрана точно»; всё, что
+    /// больше нуля, на простом экране означает обрезанные снизу строки, потому что полосы там нет.
+    var overflow: CGFloat {
+        guard let scroll = scrollBox, let doc = scroll.documentView else { return 0 }
+        return max(0, doc.frame.height - scroll.contentView.bounds.height)
+    }
+
+    func fittingHeight() -> CGFloat {
+        if contentStack == nil { showRoot() }
+        view.layoutSubtreeIfNeeded()
+        // ⚠️ ФАКТИЧЕСКАЯ ВЫСОТА ПОСЛЕ РАСКЛАДКИ, А НЕ `fittingSize`. У стека с переносимыми
+        // подписями `fittingSize` считает по «идеальной» ширине и отдаёт меньше, чем строка занимает
+        // на самом деле: окно выходило короче содержимого, и вылезала полоса прокрутки.
+        let byFrame = contentStack?.frame.height ?? 0
+        let byFitting = contentStack?.fittingSize.height ?? 0
+        return max(byFrame, byFitting)
+    }
+
+    func dumpRowGeometry() {
+        view.layoutSubtreeIfNeeded()
+        func out(_ t: String) { FileHandle.standardError.write((t + "\n").data(using: .utf8)!) }
+        func walk(_ v: NSView) {
+            for sub in v.subviews {
+                if let card = sub as? CardView, let stack = card.subviews.first as? NSStackView {
+                    out("КАРТОЧКА кадр \(card.frame) fitting \(card.fittingSize) стек \(stack.frame)")
+                    for (i, row) in stack.arrangedSubviews.enumerated() {
+                        guard let st = row as? NSStackView else { continue }
+                        out("  строка \(i): кадр \(st.frame) fitting \(st.fittingSize) "
+                            + "поля \(st.edgeInsets.top)/\(st.edgeInsets.bottom) "
+                            + "сопрот \(st.clippingResistancePriority(for: .vertical).rawValue)")
+                        for c in st.arrangedSubviews {
+                            out("      \(type(of: c)) кадр \(c.frame) fitting \(c.fittingSize) "
+                                + "сопрот \(c.contentCompressionResistancePriority(for: .vertical).rawValue)")
+                        }
+                    }
+                }
+                walk(sub)
+            }
+        }
+        if let cs = contentStack { out("СТЕК кадр \(cs.frame) fitting \(cs.fittingSize)") }
+        walk(view)
+    }
+
+    /// Корневой экран простого режима: шесть управляемых мест и ничего больше.
+    ///
+    /// Собран из тех же кирпичей, что разделы Pro, поэтому строка тут ведёт себя ровно так же:
+    /// та же высота, тот же слот кнопки «i», те же подсказки. Разница только в отборе и в том, что
+    /// бокового меню нет.
+    func showRoot() {
+        showingRoot = true
+        contentStack?.removeFromSuperview()
+        guard let stack = buildSimpleRoot() as? NSStackView else { return }
+        contentStack = stack
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        column.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: column.leadingAnchor),
+            stack.topAnchor.constraint(equalTo: column.topAnchor),
+            stack.bottomAnchor.constraint(lessThanOrEqualTo: column.bottomAnchor),
+            stack.widthAnchor.constraint(equalTo: column.widthAnchor)
+        ])
+        view.needsLayout = true
+    }
+
+    /// Пересобрать раздел «Переключение», когда Caps-режим доложил, что не смог включиться.
+    /// Ремап идёт в фоне и заканчивается уже ПОСЛЕ щелчка тумблером, поэтому без этого сигнала
+    /// человек так и остался бы смотреть на бодрое «Работает» рядом с клавишей, которая молчит.
+    func observeCapsRemap() {
+        NotificationCenter.default.addObserver(forName: .capsRemapStatusChanged,
+                                              object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.currentSection == .switching else { return }
+            self.reshow()
+        }
+    }
+
+    /// Первый живой HID-report приходит уже после того, как человек включил жест. Обновляем только
+    /// открытый раздел «Общие», не дёргая остальные формы и недонабранные поля.
+    func observeSlapAvailability() {
+        NotificationCenter.default.addObserver(forName: .speakeySlapAvailabilityChanged,
+                                              object: nil, queue: .main) { [weak self] _ in
+            guard let self, self.currentSection == .general else { return }
+            // `.checking` приходит синхронно из action тумблера. Не сносим сам NSSwitch, пока
+            // AppKit ещё выполняет его action; соседние slap-handler-ы по той же причине откладывают
+            // перестройку на следующий проход main loop.
+            self.scheduleSlapReshow()
+        }
+    }
+    /// Дешёвая сигнатура файлов моделей на диске (имя+размер+mtime). Меняется ровно тогда, когда
+    /// модель скачали/удалили/подменили — включая удаление ИЗВНЕ через Finder.
+    private func modelsSignature() -> String {
+        let dir = (VoiceController.modelPath("") as NSString).deletingLastPathComponent
+        let fm = FileManager.default
+        guard let names = try? fm.contentsOfDirectory(atPath: dir) else { return "" }
+        return names.sorted().map { n -> String in
+            let a = try? fm.attributesOfItem(atPath: (dir as NSString).appendingPathComponent(n))
+            let size = (a?[.size] as? NSNumber)?.int64Value ?? -1
+            let mtime = (a?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? -1
+            return "\(n):\(size):\(Int(mtime))"
+        }.joined(separator: "|")
+    }
+    private var lastModelsSignature: String?
+
+    /// Пере-проверить статус моделей (файлы на диске), если сейчас показан раздел «Голос».
+    /// Нужно, когда модель удалили ИЗВНЕ (Finder/rm) — строка статуса строится один раз по живой
+    /// проверке, а `reload()` её не трогает, поэтому «Установлена/Скачать» устаревали (репорт 16.07).
+    /// Только раздел «Голос»: у других (Исключения) есть поля ввода — пересборка сбросила бы недонабранное.
+    ///
+    /// ВАЖНО (20.07): пересобираем ТОЛЬКО если сигнатура файлов изменилась. Безусловный reshow на
+    /// каждую активацию окна прогонял SwiftUI-графы всех контролов раздела по 2–3 раза за открытие
+    /// и умножал частоту PAC-краша на macOS 26 в разы (см. RowMetrics). Фикс 16.07 при этом цел:
+    /// удалили модель в Finder → сигнатура другая → пересборка происходит.
+    /// Скрытый ввод мог наладиться (или начаться), пока окно было в фоне. Раздел «Приватность»
+    /// показывает объяснение по состоянию, значит состояние надо пере-спрашивать: иначе человек
+    /// видит инструкцию про уже снятую блокировку или, наоборот, не видит про текущую.
+    private var lastSecureShown: Bool?
+    func revalidatePrivacyIfShown() {
+        guard currentSection == .privacy else { return }
+        let now = AppHealth.iconState == .secureInput
+        guard now != lastSecureShown else { return }
+        lastSecureShown = now
+        reshow()
+    }
+
+    func revalidateVoiceIfShown() {
+        guard currentSection == .voice else { return }
+        let sig = modelsSignature()
+        guard sig != lastModelsSignature else { return }   // на диске ничего не менялось — не трогаем UI
+        lastModelsSignature = sig
+        reshow()
+    }
+    func reload() {
+        ignoredChips?.set(exceptions.ignoredSorted)
+        learnedChips?.set(exceptions.learnedSorted)
+    }
+    func saveAll() {
+        // Чипы пишут в модель сразу при добавлении/удалении; добиваем недобавленное из поля ввода.
+        addIgnoredFromInput()
+    }
+    @objc private func toggleLearnOnUndo(_ s: NSSwitch) { settings.learnOnUndoEnabled = (s.state == .on) }
+    @objc private func clearLearned() {
+        exceptions.clearLearned()
+        learnedChips?.set(exceptions.learnedSorted)
+    }
+    /// Добавить слово(а) из поля ввода в исключения (по Enter или кнопке «Добавить»).
+    @objc private func addIgnoredWord() { addIgnoredFromInput() }
+    private func addIgnoredFromInput() {
+        guard let f = wordInput else { return }
+        let raw = f.stringValue.trimmingCharacters(in: .whitespaces)
+        guard !raw.isEmpty else { clearAddOutcome(); return }
+        // ⚠️ РЕЖЕМ ПО ЛЮБОМУ ПРОБЕЛЬНОМУ, А НЕ ТОЛЬКО ПО ПРОБЕЛУ (ревью 07.08). Было `$0 == " "`, и
+        // список, вставленный из буфера СТРОКАМИ, приезжал одним куском с переносами внутри: он
+        // молча становился одной мёртвой записью и бодро отчитывался как добавленный. Теперь
+        // переносы и табуляции такие же разделители, как пробел, и вставка списка работает.
+        var byOutcome: [ExceptionStore.AddOutcome: [String]] = [:]
+        for w in raw.split(whereSeparator: { $0 == "," || $0.isWhitespace }) {
+            byOutcome[exceptions.addIgnored(String(w)), default: []].append(String(w))
+        }
+        // Отклонённое ОСТАЁТСЯ в поле: человеку есть что поправить, а стирать чужой ввод без спроса
+        // мы не вправе. Всё принятое из поля уходит.
+        let rejected = byOutcome[.rejected] ?? []
+        f.stringValue = rejected.joined(separator: " ")
+        ignoredChips?.set(exceptions.ignoredSorted)
+        showAddOutcome(byOutcome)
+    }
+
+    /// Погасить строку исхода: прежнее сообщение относилось к прежнему действию и, провисев до
+    /// следующего, начинает врать (ревью 07.08 — оно переживало и пустой Enter, и удаление того
+    /// самого слова крестиком).
+    private func clearAddOutcome() {
+        wordOutcome?.stringValue = ""
+        wordOutcome?.isHidden = true
+    }
+
+    /// Одна строка под полем про то, что получилось. Приоритет сверху вниз: сначала то, что НЕ
+    /// сработало, потом то, что человек и так уже сделал. Показываем один исход, а не список из
+    /// четырёх: строка под полем это подсказка, а не отчёт.
+    private func showAddOutcome(_ byOutcome: [ExceptionStore.AddOutcome: [String]]) {
+        guard let label = wordOutcome else { return }
+        func names(_ o: ExceptionStore.AddOutcome) -> String? {
+            guard let list = byOutcome[o], !list.isEmpty else { return nil }
+            return list.joined(separator: ", ")
+        }
+        let text: String?
+        if let n = names(.rejected)       { text = String(format: L10n.t("exc.res.rejected"), n) }
+        else if let n = names(.alreadyBuiltin) { text = String(format: L10n.t("exc.res.builtin"), n) }
+        else if let n = names(.alreadyThere)   { text = String(format: L10n.t("exc.res.already"), n) }
+        else { text = nil }
+        label.stringValue = text ?? ""
+        label.isHidden = (text == nil)
+    }
+
+    // MARK: builders
+
+    /// КОРНЕВОЙ ЭКРАН ПРОСТОГО РЕЖИМА (решение автора 15.08.2026).
+    ///
+    /// Шесть управляемых мест, сгруппированных по трём двигателям. Отбор шёл по одному правилу:
+    /// остаётся то, у чего НЕТ верного умолчания за человека. Хоткей угадать нельзя, место плашки
+    /// зависит от машины, голос и перевод это «включить или нет». Всё остальное мы решаем сами.
+    ///
+    /// ⚠️ ЧЕГО ЗДЕСЬ НАМЕРЕННО НЕТ. «Запускать при входе»: он включается сам на первом запуске
+    /// (`AppDelegate`), и строка в интерфейсе предлагала бы потрогать то, что уже верно.
+    /// «Сообщить о проблеме»: живёт в меню значка, а окно настроек не место для поддержки.
+    /// Живой черновик диктовки: он только для Parakeet, и объяснять это здесь дороже, чем он стоит.
+    /// Бокового меню нет вовсе: список разделов это обещание, что дальше есть ещё, а в простом
+    /// режиме дальше ничего быть не должно.
+    private func buildSimpleRoot() -> NSView {
+        let translateAvailable: Bool
+        if #available(macOS 15.0, *) { translateAvailable = true } else { translateAvailable = false }
+
+        // ⚠️ ОДНА ПАНЕЛЬ, А НЕ ЧЕТЫРЕ ПОДЛОЖКИ (автор 15.08: «не делать отдельную подложку для каждой
+        // опции, чтобы всё смотрелось как одна красивая панель»). В Pro карточки группируют настройки
+        // по смыслу, и их там много. Здесь строк четыре, и группировать нечего: рамка вокруг каждой
+        // делила экран на куски там, где делить не надо.
+        // ⚠️ ТРИ ПОЛЯ ВЫБОРА ХОТКЕЯ ОДНОЙ ШИРИНЫ (автор 21.08.2026: «почему-то начать диктовку
+        // больше»). Каждый из этих контролов задаёт себе ТОЛЬКО минимум в 230 и дальше растёт под
+        // самый длинный пункт своего списка — а списки у них разные, поэтому и ширины выходили
+        // разные. Связываем их равенством: ширину выберет самый широкий, остальные подтянутся.
+        // Ставить общее ЧИСЛО нельзя: длина пунктов зависит от языка интерфейса, и число, верное
+        // для русского, обрежет английский (или наоборот).
+        let manualKey = HotkeyControl()
+        let voiceKey = VoiceHotkeyControl()
+        let translateKey = TranslateHotkeyControl()
+        var rows: [NSView] = [
+            controlRow(L10n.t("root.manual"), manualKey, subtitle: L10n.t("root.manualSub"),
+                       help: L10n.t("switch.manualHelp"), key: "switch.manual", wraps: true),
+            controlRow(L10n.t("root.voiceKey"), voiceKey,
+                       subtitle: L10n.t(settings.voiceHoldMode == "toggle" ? "root.voiceKeySub"
+                                                                          : "root.voiceKeySubHold"),
+                       help: L10n.t("root.voiceKeyHelp"), key: "voice.hotkey", wraps: true)
+        ]
+        rows.append(controlRow(L10n.t("root.tr"), translateKey, enabled: translateAvailable,
+                               subtitle: L10n.t("root.trSub"), help: L10n.t("root.trHelp"),
+                               key: "tr.hotkey", wraps: true))
+
+        // ⚠️ МЕСТО ПОД ШАПКУ СЧИТАЕТСЯ, А НЕ ЗАДАЁТСЯ ЧИСЛОМ. Здесь стояла константа 58, замеренная
+        // по живому окну. Появилась панель инструментов, `safeAreaInsets.top` вырос на её высоту, и
+        // те же 58 превратились в дыру на пол-экрана: содержимое и так уже сдвинуто вниз. Число,
+        // замеренное по окну, живёт ровно до следующей правки окна, поэтому его тут больше нет.
+        var items: [NSView] = [group(headerRoom), card(rows, vPad: 8)]
+        if !translateAvailable { items += [group(6), hint(L10n.t("wel.trNeedOS"))] }
+        items += [group(6), rootFooter()]
+        let root = vstack(items)
+
+        // ⚠️ СВЯЗЫВАЕМ ШИРИНЫ ТОЛЬКО ПОСЛЕ СБОРКИ ДЕРЕВА. Связь между двумя видами требует общего
+        // предка НА МОМЕНТ ВКЛЮЧЕНИЯ: включённая раньше, она роняет приложение исключением
+        // Auto Layout прямо на открытии настроек (поймано сборкой 21.08, приложение не поднималось).
+        for c in [voiceKey as NSView, translateKey as NSView] {
+            c.widthAnchor.constraint(equalTo: manualKey.widthAnchor).isActive = true
+        }
+        return root
+    }
+
+    /// Подвал: единственное место, где приложение говорит, что оно для тебя сделало.
+    private func rootFooter() -> NSView {
+        let t = String(format: L10n.t("root.counters"), rescuedDisplay(), dictatedDisplay())
+        let l = NSTextField(labelWithString: t)
+        l.font = .systemFont(ofSize: 11.5)
+        l.textColor = .tertiaryLabelColor
+        l.lineBreakMode = .byTruncatingTail
+        l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        return l
+    }
+
+    private func buildSwitching() -> NSView {
+        let tSpace = check("key.space", settings.triggerSpace, #selector(toggleTSpace))
+        let tEnter = check("key.enter", settings.triggerEnter, #selector(toggleTEnter))
+        let tTab = check("key.tab", settings.triggerTab, #selector(toggleTTab))
+        let trigKeys = NSStackView(views: [tSpace, tEnter, tTab])
+        trigKeys.orientation = .horizontal; trigKeys.spacing = 12
+
+        var items: [NSView] = [
+            blockTitle("switch.title"),
+            card([
+                switchRow(L10n.t("switch.auto"), L10n.t("switch.autoSub"), settings.autoEnabled, #selector(toggleAuto),
+                          help: L10n.t("switch.autoHelp"), key: "switch.auto"),
+                // «Чинить на лету» — надстройка над авто-переключением: движок и так гейтит его по
+                // autoEnabled (Engine ~278). Показываем это честно: авто выкл → тумблер серый и
+                // выключенный. САМА настройка при этом не трогается — включат авто обратно, и
+                // live-fix вернётся таким, каким был (регресс замечено в тестировании).
+                switchRow(L10n.t("switch.live"), L10n.t("switch.liveSub"),
+                          settings.autoEnabled && settings.liveFixEnabled, #selector(toggleLive),
+                          enabled: settings.autoEnabled, help: L10n.t("switch.liveHelp"), key: "switch.live"),
+                switchRow(L10n.t("switch.dev"), L10n.t("switch.devSub"), settings.developerMode, #selector(toggleDev),
+                          help: L10n.t("switch.devHelp"), key: "switch.dev"),
+                controlRow(L10n.t("switch.manual"), HotkeyControl(),
+                           subtitle: manualCapsFailure() ?? L10n.t("switch.manualSub"),
+                           help: L10n.t("switch.manualHelp"),
+                           key: "switch.manual", keepSubtitle: manualCapsFailure() != nil),
+                groupConvertRow()            // «переключать несколько слов» — сразу после ручного хоткея
+            ]),
+            NeuralLayoutSettingsView(settings: settings, presentation: neuralPresentation),
+            group(2),
+            sectionTitle(L10n.t("is.title")),
+            card([
+                switchRow(L10n.t("is.enable"), L10n.t("is.enableSub"),
+                          settings.instantSwitchEnabled, #selector(toggleInstantSwitch),
+                          help: L10n.t("is.enableHelp"), key: "is.enable"),
+                controlRow(L10n.t("is.combo"), instantSwitchControl(),
+                           enabled: settings.instantSwitchEnabled, key: "is.combo")
+            ]),
+            group(2),
+            instantSwitchStatusView(),       // что затеняем этой комбинацией — честно и заранее
+            globeOrphanView(),               // «🌐 ничего не делает» + кнопка вернуть (задача 96)
+        ]
+        // Режим «Caps Lock меняет язык» отнимает у клавиши её замок — сразу говорим, куда делись
+        // заглавные (Shift+Caps Lock). В других режимах строки нет, чтобы не мусорить.
+        if settings.instantSwitchEnabled, settings.instantSwitchMode == "modkey",
+           settings.instantSwitchKeyCode == 57 {
+            items.append(contentsOf: [group(2), hint(L10n.t("is.capsShift"))])
+        }
+        items.append(contentsOf: [
+            // ⚠️ БЕТА-МЕТКА СНЯТА (автор 17.08): функция живёт с 0.3.x, «новая» про неё уже неправда,
+            // а про перехват системных комбинаций и так сказано строкой выше (`is.onHint`).
+            // Лампочка-индикатор языка. Своей карточкой, а не строкой в карточке выше: она НЕ
+            // зависит от мгновенного переключения — следует за языком, как бы его ни меняли.
+            group(6),
+            card([
+                switchRow(L10n.t("led.enable"), L10n.t("led.enableSub"),
+                          settings.capsLEDIndicator, #selector(toggleCapsLED))
+            ]),
+            group(2),
+            capsLEDStatusView(),             // доступ/лампочки — честный статус, а не молчание
+            group(6),
+            sectionTitle(L10n.t("switch.trig")),
+            card([
+                controlRow(L10n.t("switch.trigAfter"), trigKeys, key: "switch.trigAfter"),
+                switchRow(L10n.t("switch.arrows"), L10n.t("switch.arrowsSub"), settings.arrowsCancel, #selector(toggleArrows),
+                          help: L10n.t("switch.arrowsHelp"), key: "switch.arrows"),
+                switchRow(L10n.t("switch.chatter"), L10n.t("switch.chatterSub"), settings.dedupeChatter,
+                          #selector(toggleChatter), help: L10n.t("switch.chatterHelp"), key: "switch.chatter")
+            ]),
+            group(6),
+            card([
+                switchRow(L10n.t("switch.soundOn"), nil, settings.soundEnabled, #selector(toggleSound),
+                          key: "switch.soundOn"),
+                controlRow(L10n.t("switch.sound"), SoundPicker(), key: "switch.sound"),
+                controlRow(L10n.t("switch.soundVol"), soundVolumeSlider(), key: "switch.soundVol")
+            ])
+        ])
+        return vstack(items)
+    }
+    // Авто-переключение вкл/выкл влияет на доступность «несколько слов» → перерисовываем раздел.
+    @objc private func toggleGroupConvert(_ s: NSSwitch) { settings.groupConvert = (s.state == .on) }
+
+    private weak var trPackLabel: NSTextField?
+    private weak var trDownloadBtn: NSButton?
+
+    private func buildTranslate() -> NSView {
+        // ⚠️ ЧЕСТНО ГОВОРИМ, ЕСЛИ ПЕРЕВОДА НЕТ (05.08.2026). Apple Translation это macOS 15+, наш пол
+        // macOS 13. Раньше на 13 и 14 раздел выглядел полностью рабочим: тумблер включён, хоткей
+        // назначен, а нажатие отвечало бипом. Хоткей мы там больше не перехватываем (EventTap), но
+        // показывать живую строку, которая ничего не делает, всё равно нельзя. Текст уже написан и
+        // до сегодня жил только в окне знакомства.
+        let translateAvailable: Bool
+        if #available(macOS 15.0, *) { translateAvailable = true } else { translateAvailable = false }
+        var items: [NSView] = [
+            blockTitle("tr.title"),
+            sub(L10n.t("tr.sub")),
+            group(8),
+        ]
+        if !translateAvailable { items.append(contentsOf: [hint(L10n.t("wel.trNeedOS")), group(6)]) }
+        items += [
+            card([
+                switchRow(L10n.t("tr.enabled"), L10n.t("tr.enabledSub"),
+                          translateAvailable && settings.translateEnabled, #selector(toggleTranslate),
+                          enabled: translateAvailable, key: "tr.enabled"),
+                controlRow(L10n.t("tr.hotkey"), TranslateHotkeyControl(), enabled: translateAvailable,
+                           key: "tr.hotkey")
+            ]),
+            group(6),
+            card([
+                switchRow(L10n.t("tr.sound"), nil, settings.translateSoundEnabled, #selector(toggleTranslateSound),
+                          key: "tr.sound"),
+                controlRow(L10n.t("switch.sound"), TranslateSoundPicker(), key: "switch.sound"),
+                controlRow(L10n.t("tr.soundVol"), translateVolumeSlider(), key: "tr.soundVol")
+            ])
+        ]
+        if #available(macOS 15.0, *) {
+            items.append(group(6))
+            items.append(sectionTitle(L10n.t("tr.packTitle")))
+            items.append(trPackCard())
+        }
+        items.append(group(6))
+        items.append(sub(L10n.t("tr.how")))
+        return vstack(items)
+    }
+
+    /// Карточка языкового пакета RU↔EN: статус + переход в системный менеджер языков (там
+    /// реальная загрузка с прогрессом). Своего окна докачки НЕ показываем — оно виснет.
+    @available(macOS 15.0, *)
+    private func trPackCard() -> NSView {
+        let name = NSTextField(labelWithString: L10n.t("tr.packName"))
+        name.font = .systemFont(ofSize: 13); name.textColor = .labelColor
+        name.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let meta = NSTextField(labelWithString: L10n.t("tr.checking"))
+        meta.font = .systemFont(ofSize: 11); meta.textColor = .secondaryLabelColor
+        trPackLabel = meta
+        let nameCol = NSStackView(views: [name, meta]); nameCol.orientation = .vertical
+        nameCol.alignment = .leading; nameCol.spacing = 1
+
+        // Главная кнопка — докачка ПРЯМО из приложения (акцентная). Появляется, только когда пакета нет.
+        let dl = NSButton(title: L10n.t("tr.download"), target: self, action: #selector(downloadTrPack))
+        dl.bezelStyle = .rounded; dl.controlSize = .regular
+        dl.bezelColor = DS.coral; dl.contentTintColor = .white
+        dl.setContentHuggingPriority(.required, for: .horizontal)
+        trDownloadBtn = dl
+
+        // Вторично — системный менеджер языков (фолбэк, если по кнопке что-то пошло не так).
+        let sys = NSButton(title: L10n.t("tr.openSys"), target: self, action: #selector(openLangSettings))
+        sys.bezelStyle = .rounded; sys.controlSize = .regular
+        sys.setContentHuggingPriority(.required, for: .horizontal)
+
+        let spacer = NSView(); spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let row = NSStackView(views: [nameCol, spacer, dl, sys])
+        row.orientation = .horizontal; row.spacing = 8; row.alignment = .centerY
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
+        refreshTrPackStatus()
+        return card([row])
+    }
+
+    /// `afterFailedDownload` — человек только что нажал «Скачать», а пакет так и не появился.
+    /// Отличать это состояние обязательно: молча вернуть прежнее «не установлен» значит сделать
+    /// вид, что ничего не произошло, и человек будет жать кнопку по кругу (ровно отзывы #102/#108).
+    private func refreshTrPackStatus(afterFailedDownload: Bool = false) {
+        guard #available(macOS 15.0, *) else { return }
+        Task { [weak self] in
+            let st = await TranslationEngine.shared.packStatus(from: "ru", to: "en")
+            await MainActor.run {
+                guard let self else { return }
+                switch st {
+                case .installed:
+                    self.trPackLabel?.stringValue = L10n.t("tr.installed")
+                    self.trPackLabel?.textColor = DS.coral
+                    self.trDownloadBtn?.isHidden = true       // установлен → кнопка «Скачать» не нужна
+                case .unsupported:
+                    // Кнопка тут врала бы: скачивать нечего, система эту пару не умеет.
+                    self.trPackLabel?.stringValue = L10n.t("tr.unsupported")
+                    self.trPackLabel?.textColor = .secondaryLabelColor
+                    self.trDownloadBtn?.isHidden = true
+                case .notDownloaded:
+                    self.trPackLabel?.stringValue = L10n.t(afterFailedDownload ? "tr.dlFailed" : "tr.notInstalled")
+                    self.trPackLabel?.textColor = .secondaryLabelColor
+                    self.trDownloadBtn?.isHidden = false
+                }
+            }
+        }
+    }
+
+    /// Скачать языковой пакет RU↔EN прямо из приложения (без ухода в Системные настройки).
+    /// Готовим оба направления сразу. Системный лист скачивания Apple покажется поверх нашего окна.
+    @objc private func downloadTrPack() {
+        guard #available(macOS 15.0, *) else { return }
+        TranslationEngine.shared.presentDownload(pairs: [("ru", "en"), ("en", "ru")]) { [weak self] ok in
+            self?.refreshTrPackStatus(afterFailedDownload: !ok)
+        }
+    }
+
+    /// Открыть Системные настройки → «Язык и регион» (там менеджер языков перевода с реальным прогрессом).
+    @objc private func openLangSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Localization-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    /// Маленькая «клавишная» плашка с моноширинным текстом — для показа хоткея.
+    private func keycapLabel(_ text: String) -> NSView {
+        let label = NSTextField(labelWithString: text)
+        label.font = .monospacedSystemFont(ofSize: 12.5, weight: .semibold)
+        label.textColor = .labelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+        let chip = NSView(); chip.wantsLayer = true
+        // Цвет разрешаем в НАШЕМ оформлении: `.cgColor` иначе снимет его под текущее и в светлой
+        // теме чип получится из тёмной (см. разбор в ThemedBackgroundView.apply).
+        chip.effectiveAppearance.performAsCurrentDrawingAppearance {
+            chip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+        }
+        chip.layer?.cornerRadius = 6
+        chip.translatesAutoresizingMaskIntoConstraints = false
+        chip.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: chip.leadingAnchor, constant: 9),
+            label.trailingAnchor.constraint(equalTo: chip.trailingAnchor, constant: -9),
+            label.centerYAnchor.constraint(equalTo: chip.centerYAnchor),
+            chip.heightAnchor.constraint(equalToConstant: 24)
+        ])
+        chip.setContentHuggingPriority(.required, for: .horizontal)
+        return chip
+    }
+
+    private var runningAppsList: [String] = []
+
+    private func buildExceptions() -> NSView {
+        var views: [NSView] = [blockTitle("exc.appsTitle"), sub(L10n.t("exc.appsSub")), group(8)]
+        let apps = ExceptionStore.shared.appModes.keys.sorted { appName($0) < appName($1) }
+        if apps.isEmpty {
+            let empty = NSTextField(labelWithString: L10n.t("exc.appsEmpty"))
+            empty.font = .systemFont(ofSize: 12); empty.textColor = .tertiaryLabelColor
+            let row = NSStackView(views: [empty]); row.edgeInsets = NSEdgeInsets(top: 10, left: 14, bottom: 10, right: 14)
+            views.append(card([row]))
+        } else {
+            views.append(card(apps.map { appExceptionRow($0, ExceptionStore.shared.appMode($0)) }))
+        }
+        let addBtn = NSButton(title: L10n.t("exc.addApp"), target: self, action: #selector(addExceptionApp))
+        addBtn.bezelStyle = .rounded; addBtn.controlSize = .regular
+        views.append(contentsOf: [group(4), buttonRow([addBtn, runningAppsPopup()]), group(2), hint(L10n.t("exc.appsHint"))])
+        // Вход на подстраницу спорных пар: отдельным пунктом левого меню это был бы одиннадцатый
+        // раздел ради списка, который открывают один раз (решение автора 25.07).
+        let ambBtn = NSButton(title: L10n.t("amb.open"), target: self, action: #selector(openAmbiguous))
+        ambBtn.bezelStyle = .rounded; ambBtn.controlSize = .regular
+        views.append(contentsOf: [group(12), blockTitle("amb.title"), sub(L10n.t("amb.openSub")),
+                                  group(6), buttonRow([ambBtn])])
+
+        // Слова-исключения: чипы с крестиком + поле ввода («вк»/«тг» предзаполнены как образец).
+        let ignoredView = ChipFlowView()
+        ignoredView.emptyText = L10n.t("exc.empty")
+        ignoredView.onDelete = { [weak self] w in
+            self?.clearAddOutcome()   // сообщение относилось к прежнему действию
+            self?.exceptions.removeIgnored(w)
+            self?.ignoredChips?.set(self?.exceptions.ignoredSorted ?? [])
+        }
+        ignoredView.set(exceptions.ignoredSorted)
+        ignoredChips = ignoredView
+        let wInput = NSTextField()
+        wInput.placeholderString = L10n.t("exc.addPlaceholder")
+        wInput.target = self; wInput.action = #selector(addIgnoredWord)
+        wInput.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        // Высота как у чипов рядом (24). У голого NSTextField она на пару точек меньше, и рядом с
+        // кнопкой «Добавить» поле выглядело придавленным (замечание автора 04.08.2026).
+        wInput.heightAnchor.constraint(equalToConstant: 24).isActive = true
+        wordInput = wInput
+        let addWordBtn = NSButton(title: L10n.t("exc.addWord"), target: self, action: #selector(addIgnoredWord))
+        addWordBtn.bezelStyle = .rounded; addWordBtn.controlSize = .regular
+        addWordBtn.setContentHuggingPriority(.required, for: .horizontal)
+        let addRow = NSStackView(views: [wInput, addWordBtn])
+        addRow.orientation = .horizontal; addRow.spacing = 8; addRow.alignment = .centerY
+        // ⚠️ ПОЛЕ ВВОДА ВЫШЕ СПИСКА (автор, 04.08.2026). Было наоборот, и получалось нелогично:
+        // человек печатал слово внизу, а оно появлялось выше того места, куда он смотрел. Порядок
+        // «сначала чем добавляют, потом что добавлено» читается сверху вниз как действие и результат.
+        // Строка исхода. Пустая по умолчанию и НЕ занимает места: заводить под неё постоянный отступ
+        // значило бы держать дырку в разделе ради сообщения, которое человек видит раз в месяц.
+        let outcome = sub("")
+        outcome.isHidden = true
+        wordOutcome = outcome
+        views.append(contentsOf: [
+            group(12),
+            blockTitle("exc.title"),
+            sub(L10n.t("exc.sub")),
+            group(DS.itemGap - 4),
+            addRow,
+            outcome,
+            group(6),
+            ChipFieldView(ignoredView)
+        ])
+        // Обучение на отмене: тумблер + чипы выученных слов (крестик на каждом).
+        let learnedView = ChipFlowView()
+        learnedView.emptyText = L10n.t("learn.empty")
+        learnedView.onDelete = { [weak self] w in
+            self?.exceptions.removeLearned(w)
+            self?.learnedChips?.set(self?.exceptions.learnedSorted ?? [])
+        }
+        learnedView.set(exceptions.learnedSorted)
+        learnedChips = learnedView
+        let clearLearnedBtn = NSButton(title: L10n.t("learn.clear"), target: self, action: #selector(clearLearned))
+        clearLearnedBtn.bezelStyle = .rounded; clearLearnedBtn.controlSize = .regular
+        views.append(contentsOf: [
+            group(12),
+            switchRow(L10n.t("learn.title"), L10n.t("learn.sub"), settings.learnOnUndoEnabled, #selector(toggleLearnOnUndo),
+                      key: "learn.title"),
+            group(DS.itemGap - 4),
+            ChipFieldView(learnedView),
+            group(4),
+            buttonRow([clearLearnedBtn])
+        ])
+        return vstack(views)
+    }
+
+    private func appName(_ bundleID: String) -> String {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+        }
+        return bundleID
+    }
+    private func appExceptionRow(_ bundleID: String, _ mode: String) -> NSView {
+        let icon = NSImageView()
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            icon.image = NSWorkspace.shared.icon(forFile: url.path)
+        }
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.widthAnchor.constraint(equalToConstant: 22).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        let name = NSTextField(labelWithString: appName(bundleID))
+        name.font = .systemFont(ofSize: 13); name.lineBreakMode = .byTruncatingTail
+        let seg = NSSegmentedControl(labels: [L10n.t("exc.off"), L10n.t("exc.soft")],
+                                     trackingMode: .selectOne, target: self, action: #selector(appModeChanged(_:)))
+        seg.selectedSegment = mode == "soft" ? 1 : 0
+        seg.controlSize = .small
+        seg.identifier = NSUserInterfaceItemIdentifier(bundleID)
+        seg.setContentHuggingPriority(.required, for: .horizontal)
+        let del = NSButton(title: "", target: self, action: #selector(removeExceptionApp(_:)))
+        del.bezelStyle = .regularSquare; del.isBordered = false
+        del.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "remove")
+        del.contentTintColor = .tertiaryLabelColor
+        del.identifier = NSUserInterfaceItemIdentifier(bundleID)
+        del.setContentHuggingPriority(.required, for: .horizontal)
+        // ЖЁСТКАЯ РАСКЛАДКА НА ПРОГРАММУ (просьба Жени Сенина из BigGeek, 01.08.2026).
+        // Независимая ось от режима слева: в DaVinci нужны обе сразу — не конвертировать И всегда
+        // английский, иначе там не работают горячие клавиши. Прочерк = не трогать (по умолчанию).
+        let lang = NSPopUpButton()
+        lang.controlSize = .small
+        lang.addItems(withTitles: ["—", "EN", "RU"])
+        let curLang = ExceptionStore.shared.appLayout(bundleID)
+        lang.selectItem(at: curLang == "en" ? 1 : (curLang == "ru" ? 2 : 0))
+        lang.target = self; lang.action = #selector(appLayoutChanged(_:))
+        lang.identifier = NSUserInterfaceItemIdentifier(bundleID)
+        lang.setContentHuggingPriority(.required, for: .horizontal)
+        lang.toolTip = L10n.t("exc.forceLayoutHelp")
+        let spacer = NSView(); spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let row = NSStackView(views: [icon, name, spacer, lang, seg, del])
+        row.orientation = .horizontal; row.spacing = 9; row.alignment = .centerY
+        row.edgeInsets = NSEdgeInsets(top: 6, left: 12, bottom: 6, right: 10)
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 38).isActive = true
+        return row
+    }
+    private func runningAppsPopup() -> NSView {
+        let pop = NSPopUpButton(); pop.controlSize = .regular
+        pop.addItem(withTitle: L10n.t("exc.fromRunning"))
+        let apps = NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular && $0.bundleIdentifier != nil && $0.bundleIdentifier != "dev.speakey.app" }
+            .sorted { ($0.localizedName ?? "") < ($1.localizedName ?? "") }
+        runningAppsList = apps.compactMap { $0.bundleIdentifier }
+        for a in apps { pop.addItem(withTitle: a.localizedName ?? (a.bundleIdentifier ?? "?")) }
+        // SPOTLIGHT — ВРУЧНУЮ (05.08.2026). Он агент, а не обычная программа, и фильтр по
+        // `.regular` выше его не пропускает. Раньше строка про него появлялась сама, потому что мы
+        // засевали ему режим «выкл»; посев отменён, и без этой добавки Spotlight стал бы недоступен
+        // для настройки вовсе — а его как раз просят настраивать (отзыв #82: привязать язык).
+        if !runningAppsList.contains("com.apple.Spotlight") {
+            runningAppsList.append("com.apple.Spotlight")
+            pop.addItem(withTitle: "Spotlight")
+        }
+        pop.target = self; pop.action = #selector(addRunningApp(_:))
+        return pop
+    }
+    @objc private func appModeChanged(_ s: NSSegmentedControl) {
+        guard let bid = s.identifier?.rawValue else { return }
+        ExceptionStore.shared.setAppMode(bid, s.selectedSegment == 1 ? "soft" : "off")
+    }
+    @objc private func appLayoutChanged(_ p: NSPopUpButton) {
+        guard let bid = p.identifier?.rawValue else { return }
+        let v = ["", "en", "ru"][max(0, min(2, p.indexOfSelectedItem))]
+        ExceptionStore.shared.setAppLayout(bid, v)
+        // Отдельно «применить сейчас» не нужно: пока человек это настраивает, впереди наше окно
+        // настроек, а значит при переходе в саму программу bundle id сменится и правило сработает
+        // штатным путём (см. Engine.applyForcedLayout).
+    }
+    /// Фокусирует поле токенов — кнопка «Добавить слово» как альтернатива Enter.
+
+    @objc private func removeExceptionApp(_ s: NSButton) {
+        guard let bid = s.identifier?.rawValue else { return }
+        ExceptionStore.shared.removeApp(bid); reshow()
+    }
+    @objc private func addExceptionApp() {
+        let panel = NSOpenPanel()
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+        panel.allowedContentTypes = [.application]
+        panel.allowsMultipleSelection = false; panel.canChooseDirectories = false
+        if panel.runModal() == .OK, let url = panel.url, let bid = Bundle(url: url)?.bundleIdentifier {
+            ExceptionStore.shared.setAppMode(bid, "off"); reshow()
+        }
+    }
+    @objc private func addRunningApp(_ s: NSPopUpButton) {
+        let idx = s.indexOfSelectedItem - 1
+        guard idx >= 0, idx < runningAppsList.count else { return }
+        ExceptionStore.shared.setAppMode(runningAppsList[idx], "off"); reshow()
+    }
+
+    /// СПОРНЫЕ ПАРЫ. Одна строка — одна пара, тумблер из двух сегментов, подписанных САМИМИ словами:
+    /// [ vs | мы ]. Так не нужно объяснять, что значит «латиница победила» — человек видит результат.
+    /// Выделен тот сегмент, который выигрывает СЕЙЧАС (спрашиваем детектор, см. AmbiguousPairs.winner).
+    private func buildAmbiguous() -> NSView {
+        let back = NSButton(title: L10n.t("amb.back"), target: self, action: #selector(backToExceptions))
+        back.bezelStyle = .rounded; back.controlSize = .regular
+        var views: [NSView] = [buttonRow([back]), group(2),
+                               blockTitle("amb.title"), sub(L10n.t("amb.sub")), group(DS.itemGap)]
+        // Один центрированный столбец тумблеров, БЕЗ карточной подложки: у каждой строки один
+        // элемент, и горизонтальные ячейки во всю ширину только растягивали пустоту (правка 25.07).
+        let stack = vstack(views) as? NSStackView
+        for (i, p) in AmbiguousPairs.list.enumerated() {
+            let holder = ambiguousRow(p, index: i)
+            stack?.addView(holder, in: .bottom)
+            if let stack { holder.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        }
+        stack?.addView(group(6), in: .bottom)
+        let footer = hint(L10n.t("amb.hint"))
+        stack?.addView(footer, in: .bottom)
+        if let stack { footer.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true }
+        return stack ?? vstack(views)
+    }
+
+    /// Строка = один тумблер по центру. Три состояния: побеждает латиница · по контексту (наша
+    /// обычная логика, дефолт) · побеждает русское. «По контексту» посередине не случайно: это
+    /// нейтральная середина между двумя крайностями, и переход влево/вправо читается как выбор.
+    private func ambiguousRow(_ pair: AmbiguousPairs.Pair, index: Int) -> NSView {
+        let seg = NSSegmentedControl(labels: [pair.en, L10n.t("amb.auto"), pair.ru],
+                                     trackingMode: .selectOne,
+                                     target: self, action: #selector(ambiguousChanged(_:)))
+        seg.segmentDistribution = .fillEqually
+        switch AmbiguousPairs.choice(pair) {
+        case .en:   seg.selectedSegment = 0
+        case .auto: seg.selectedSegment = 1
+        case .ru:   seg.selectedSegment = 2
+        }
+        seg.tag = index                      // строку узнаём по тегу — список статичный, индекс стабилен
+        seg.toolTip = String(format: L10n.t("amb.rowTip"), pair.en, pair.ru)
+        seg.translatesAutoresizingMaskIntoConstraints = false
+        seg.widthAnchor.constraint(equalToConstant: 300).isActive = true
+        let holder = NSView()
+        holder.translatesAutoresizingMaskIntoConstraints = false
+        holder.addSubview(seg)
+        NSLayoutConstraint.activate([
+            seg.centerXAnchor.constraint(equalTo: holder.centerXAnchor),
+            seg.topAnchor.constraint(equalTo: holder.topAnchor, constant: 3),
+            seg.bottomAnchor.constraint(equalTo: holder.bottomAnchor, constant: -3)
+        ])
+        return holder
+    }
+
+    @objc private func ambiguousChanged(_ sender: NSSegmentedControl) {
+        guard sender.tag >= 0, sender.tag < AmbiguousPairs.list.count else { return }
+        let pair = AmbiguousPairs.list[sender.tag]
+        let choice: AmbiguousPairs.Choice = sender.selectedSegment == 0 ? .en
+                                         : sender.selectedSegment == 2 ? .ru : .auto
+        AmbiguousPairs.choose(pair, choice)
+        kbLog("спорная пара \(pair.en)/\(pair.ru) → \(choice)")
+    }
+
+    @objc private func openAmbiguous() { (view.window?.windowController as? SettingsWindowController)?.show(section: .ambiguous) }
+
+    @objc private func backToExceptions() { (view.window?.windowController as? SettingsWindowController)?.show(section: .exceptions) }
+
+    private func buildSnippets() -> NSView {
+        let editor = SnippetsEditor(frame: .zero)
+        editor.translatesAutoresizingMaskIntoConstraints = false
+
+        // Мультивыбор клавиш разворота автозамены (пробел/Enter/Tab). Все сняты → автозамена выключена.
+        let cSpace = check("key.space", settings.snippetExpandSpace, #selector(toggleSnipSpace))
+        let cEnter = check("key.enter", settings.snippetExpandEnter, #selector(toggleSnipEnter))
+        let cTab   = check("key.tab",   settings.snippetExpandTab,   #selector(toggleSnipTab))
+        let keys = NSStackView(views: [cSpace, cEnter, cTab])
+        keys.orientation = .horizontal; keys.spacing = 12
+
+        let disabled = hint(L10n.t("snip.disabled"))
+        disabled.isHidden = !settings.snippetsDisabled
+        snipDisabledLabel = disabled
+
+        // ВТОРОЙ СПИСОК — сниппеты для вставки. Тот же редактор, другое хранилище и другие подписи
+        // колонок: там «что заменять → на что», здесь «название → текст».
+        // Порядок важен ТОЛЬКО здесь: из этого списка человек выбирает цифрой в плашке, и что
+        // окажется под единицей, решает он. В автозамене порядок ни на что не влияет.
+        let textsEditor = SnippetsEditor(frame: .zero, store: TextSnippetStore.shared,
+                                         phLeft: "snip.phName", phRight: "snip.phText",
+                                         allowsReorder: true)
+        textsEditor.translatesAutoresizingMaskIntoConstraints = false
+
+        // Приглашение вместо пустоты: список стартует пустым (вариант А), и человеку надо показать,
+        // откуда взять содержимое, а не оставить его перед пустой таблицей.
+        let copyBtn = NSButton(title: L10n.t("snip.copyFrom"), target: self, action: #selector(copyFromAutoreplace))
+        copyBtn.bezelStyle = .rounded
+        let copyHint = hint(L10n.t("snip.copyFromHint"))
+        let showInvite = TextSnippetStore.shared.isEmpty && !SnippetStore.shared.pairs().filter { !$0.0.isEmpty }.isEmpty
+        copyBtn.isHidden = !showInvite
+        copyHint.isHidden = !showInvite
+
+        // ВСТАВКА ПО СОЧЕТАНИЮ (задача 17). Тумблер включает саму функцию, список рядом выбирает
+        // сочетание. Последняя строка списка — запись своего.
+        let pickPop = NSPopUpButton()
+        pickPop.addItems(withTitles: snipPickPresets.map { $0.0 } + [L10n.t("snip.pickCustom")])
+        pickPop.selectItem(at: snipPickPresets.firstIndex {
+            $0.1 == settings.snippetPickKeyCode && $0.2 == settings.snippetPickModifiers
+        } ?? 0)
+        pickPop.target = self; pickPop.action = #selector(snipPickChanged(_:))
+
+        // Строка сочетания РАСКРЫВАЕТСЯ по тумблеру, а не сереет: тот же приём, что у скрытого
+        // значка в «Общих». Выключенная функция не должна занимать место настройкой, которая ни на
+        // что не влияет.
+        var pickRows: [NSView] = [
+            switchRow(L10n.t("snip.pickOn"), nil, settings.snippetPickEnabled, #selector(snipPickToggled(_:)),
+                      key: "snip.pickOn")
+        ]
+        if settings.snippetPickEnabled {
+            pickRows.append(controlRow(L10n.t("snip.pickCombo"), pickPop, key: "snip.pickCombo"))
+        }
+
+        // ВСТАВКА БЕЗ ФОРМАТИРОВАНИЯ (задача 102). Живёт рядом со сниппетами: обе про то, что
+        // попадает в текст из буфера, а не про раскладку.
+        //
+        // ⚠️ Готовые сочетания списком, БЕЗ записи своего. Конечный автомат записи уже существует в
+        // трёх экземплярах (голос, перевод, сниппеты), и рядом с ним прямым текстом написано, что
+        // четвёртый был бы худшим решением. Трёх вариантов тут хватает: осмысленны только сочетания
+        // с ⌘V, других всё равно нет.
+        let plainPop = NSPopUpButton()
+        plainPop.addItems(withTitles: Self.plainPastePresets.map { $0.0 })
+        plainPop.selectItem(at: Self.plainPastePresets.firstIndex {
+            $0.1 == settings.plainPasteKeyCode && $0.2 == settings.plainPasteModifiers
+        } ?? 0)
+        plainPop.target = self; plainPop.action = #selector(plainPasteComboChanged(_:))
+
+        // ⚠️ СВОЙ БЛОК, А НЕ СТРОКА ВНУТРИ СНИППЕТОВ (автор 10.08). Сначала я положил её в карточку
+        // вставки по сочетанию, потому что обе про буфер. Это неверно: сниппеты вставляют НАШ
+        // заготовленный текст, а эта настройка меняет способ вставки ЧУЖОГО, скопированного человеком.
+        // Соседство по механике не делает функции одной темой, и в списке настроек это читалось как
+        // «одна из настроек сниппетов».
+        var plainRows: [NSView] = [
+            switchRow(L10n.t("paste.plain"), L10n.t("paste.plainSub"), settings.plainPaste,
+                      #selector(togglePlainPaste(_:)), help: L10n.t("paste.plainHelp"), key: "paste.plain")
+        ]
+        if settings.plainPaste {
+            plainRows.append(controlRow(L10n.t("paste.plainCombo"), plainPop, key: "paste.plainCombo"))
+        }
+
+        // Смена регистра выделенного (задача 122). Живёт в том же разделе, потому что это тоже
+        // работа с чужим текстом по сочетанию, а не с раскладкой.
+        let casePop = NSPopUpButton()
+        var caseTitles = Self.casePresets.map { $0.0 }
+        var caseSel = Self.casePresets.firstIndex {
+            $0.1 == settings.caseChangeKeyCode && $0.2 == settings.caseChangeModifiers
+        }
+        // Записанное своё сочетание в готовых не найдётся, а список обязан показывать ТО, что
+        // работает: иначе в строке стоит ⌃⌥U, а нажимается что-то другое, и это выглядит как
+        // поломка. Поэтому своя комбинация добавляется в список отдельным пунктом.
+        if caseSel == nil, settings.caseChangeEnabled, !settings.caseChangeKeyLabel.isEmpty {
+            caseTitles.append(settings.caseChangeKeyLabel)
+            caseSel = caseTitles.count - 1
+        }
+        casePop.addItems(withTitles: caseTitles + [L10n.t("snip.pickCustom")])
+        casePop.selectItem(at: caseSel ?? 0)
+        casePop.target = self; casePop.action = #selector(caseComboChanged(_:))
+        var caseRows: [NSView] = [
+            switchRow(L10n.t("case.title"), L10n.t("case.sub"), settings.caseChangeEnabled,
+                      #selector(toggleCaseChange(_:)), help: L10n.t("case.help"), key: "case.title")
+        ]
+        if settings.caseChangeEnabled {
+            caseRows.append(controlRow(L10n.t("case.assign"), casePop, key: "case.assign"))
+        }
+
+        return vstack([
+            blockTitle("snip.title"),
+            sub(L10n.t("snip.sub")),
+            group(DS.itemGap - 6),
+            editor,                      // список «что заменять | на что | корзина», правка по клику
+            group(8),
+            sectionTitle(L10n.t("snip.expandOn")),
+            keys,                        // [Пробел] [Enter] [Tab]
+            disabled,                    // «Автозамена отключена…» — видна, когда все галочки сняты
+            hint(L10n.t("snip.hint")),   // раскладка/регистр не учитываются + пример
+            group(DS.itemGap),
+            // Между автозаменой и сниппетами: это отдельная функция, а не настройка соседей.
+            sectionTitle(L10n.t("paste.section")),
+            card(plainRows),
+            group(DS.itemGap),
+            // ПРАВКА ТЕКСТА (перенесено из «Переключения», автор 11.08). Обе настройки чинят не
+            // раскладку, а сам набранный текст, и в разделе про конверсию читались как её часть —
+            // тем более что стояли прямо под «После слова», среди клавиш-триггеров конверсии.
+            // Свой заголовок, а не третья карточка под «ВСТАВКА ИЗ БУФЕРА»: буфер тут ни при чём.
+            sectionTitle(L10n.t("fix.section")),
+            // ⚠️ СМЕНА РЕГИСТРА ЖИВЁТ ЗДЕСЬ (автор 17.08). Раньше она стояла третьей карточкой под
+            // «ВСТАВКА ИЗ БУФЕРА» — только потому, что тоже работает по сочетанию с чужим текстом.
+            // Но буфер к ней отношения не имеет, а «Правка текста» это ровно её смысл: меняем не
+            // раскладку и не буфер, а сам набранный текст.
+            card([
+                switchRow(L10n.t("switch.typoFix"), L10n.t("switch.typoFixSub"), settings.typoFix,
+                          #selector(toggleTypoFix), help: L10n.t("switch.typoFixHelp"), key: "switch.typoFix"),
+                switchRow(L10n.t("switch.twoCaps"), L10n.t("switch.twoCapsSub"), settings.twoCapsFix,
+                          #selector(toggleTwoCaps), help: L10n.t("switch.twoCapsHelp"), key: "switch.twoCaps")
+            ] + caseRows),
+            group(DS.itemGap),
+            sectionTitle(L10n.t("snip.textsTitle")),
+            sub(L10n.t("snip.textsSub")),
+            group(4),
+            // ПОРЯДОК: сначала включаем функцию и назначаем сочетание, потом заполняем список
+            // (автор 06.08). Список без включённой функции это ящик, который некуда открыть.
+            card(pickRows),
+            group(2),
+            hint(L10n.t("snip.pickHint")),
+            group(6),
+            textsEditor,
+            copyHint,
+            copyBtn
+        ])
+    }
+    private weak var snipDisabledLabel: NSTextField?
+    private func refreshSnipDisabled() { snipDisabledLabel?.isHidden = !settings.snippetsDisabled }
+    @objc private func toggleSnipSpace(_ s: NSButton) { settings.snippetExpandSpace = (s.state == .on); refreshSnipDisabled() }
+    @objc private func toggleSnipEnter(_ s: NSButton) { settings.snippetExpandEnter = (s.state == .on); refreshSnipDisabled() }
+    @objc private func toggleSnipTab(_ s: NSButton)   { settings.snippetExpandTab   = (s.state == .on); refreshSnipDisabled() }
+
+    /// Приватность — чистая страница доверия (только манифест, без посторонних контролов).
+    private func buildPrivacy() -> NSView {
+        return vstack([
+            blockTitle("priv.title"),
+            sub(L10n.t("priv.body")),
+            group(2),
+            sub(L10n.t("priv.body2")),
+            // ⚠️ ВТОРОЙ ПРОЦЕСС НАЗЫВАЕМ САМИ (задачи 96 + 35). Теперь он спит всю сессию,
+            // поэтому объяснение тоже постоянно. Человек, увидевший в Мониторинге системы два
+            // «Speakey», должен найти объяснение у нас, а не гадать —
+            // необъяснённый второй процесс у программы, которая читает клавиатуру, выглядит ровно
+            // так, как выглядят вещи, из-за которых люди боятся ставить переключатели раскладки.
+            globeGuardNote(),
+            secureInputNote(),
+            group(6),
+            hint(L10n.t("priv.foot"))
+        ])
+    }
+
+    /// Объяснение скрытого ввода — ТОЛЬКО когда он реально мешает (решение автора 26.08.2026).
+    ///
+    /// Сначала это было отдельным модальным окном по клику в меню, и автор его отверг: «мне просто не
+    /// нравится отдельно всплывающее окно, большое с длинным текстом, странно выглядит». И он прав:
+    /// пять абзацев в NSAlert это стена, которую закрывают не читая.
+    ///
+    /// Здесь у текста есть свой дом. Раздел «Приватность» человек открывает именно с вопросом «что
+    /// эта программа видит и почему», и объяснение про защищённый ввод отвечает ровно на него. А
+    /// пока всё в порядке, блока нет вовсе: постоянная плашка про то, чего сейчас не происходит,
+    /// за неделю превращается в фон.
+    private func secureInputNote() -> NSView {
+        guard AppHealth.iconState == .secureInput else { return group(0) }
+        return vstack([
+            group(8),
+            blockTitle("health.secureInput"),
+            sub(L10n.t("health.secureInputWho"))
+        ])
+    }
+
+    /// Объединённый сторож живёт всю сессию приложения — показываем его честно всегда.
+    private func globeGuardNote() -> NSView {
+        let key = ReleaseFeatures.slap ? "priv.guard" : "priv.guardNoSlap"
+        return vstack([group(2), sub(L10n.t(key))])
+    }
+
+    /// Общие — настройки уровня приложения: язык интерфейса, автозапуск, доступ Accessibility.
+    private func buildGeneral() -> NSView {
+        let langPop = NSPopUpButton()
+        langPop.addItems(withTitles: [L10n.t("lang.auto"), L10n.t("lang.ru"), L10n.t("lang.en")])
+        switch settings.language { case "ru": langPop.selectItem(at: 1); case "en": langPop.selectItem(at: 2); default: langPop.selectItem(at: 0) }
+        langPop.target = self; langPop.action = #selector(langChanged(_:))
+
+        let perm = NSButton(title: L10n.t("priv.perm"), target: self, action: #selector(openPerms))
+        perm.bezelStyle = .rounded; perm.controlSize = .regular
+
+        let micGranted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        let mic = NSButton(title: L10n.t(micGranted ? "gen.micOk" : "gen.mic"),
+                           target: self, action: #selector(requestMic))
+        mic.bezelStyle = .rounded; mic.controlSize = .regular
+
+        // Оформление приложения: как в системе / светлое / тёмное. Порядок сегментов = themeKeys.
+        let themeKeys = ["system", "light", "dark"]
+        let themeSeg = NSSegmentedControl(labels: [L10n.t("gen.theme.system"),
+                                                   L10n.t("gen.theme.light"),
+                                                   L10n.t("gen.theme.dark")],
+                                          trackingMode: .selectOne,
+                                          target: self, action: #selector(themeChanged(_:)))
+        themeSeg.selectedSegment = themeKeys.firstIndex(of: settings.appTheme) ?? 0
+        // 🍺 Пасхалка (автор, 02.08.2026): «светлое» и «тёмное» в русском это ещё и про пиво.
+        // ⚠️ ТОЛЬКО ЭМОДЗИ, БЕЗ ТЕКСТА. Я сперва написал сюда две остроты, и автор их снял: шутка
+        // такого рода тем смешнее, чем меньше её объясняют. Одна кружка говорит всё сама, а
+        // подпись к ней превращает находку в разъяснение.
+        // Локализация не нужна: эмодзи одинаково читается на всех языках, поэтому literal, а не L10n.
+        // У «Как в системе» подсказки нет: шутка держится на паре, третий пункт её разбавил бы.
+        themeSeg.setToolTip("🍺", forSegment: 1)
+        themeSeg.setToolTip("🍺", forSegment: 2)
+
+        // Вид ЗНАЧКА — визуальный выбор квадратными сегментами с реальными значками (автор 23.07).
+        // Порядок сегментов = iconStyleKeys. Язык рядом — отдельная галка (работает со всеми).
+        let iconSeg = NSSegmentedControl()
+        iconSeg.segmentStyle = .texturedRounded
+        iconSeg.segmentCount = iconStyleKeys.count
+        iconSeg.trackingMode = .selectOne
+        let brandSeg: NSImage? = {
+            guard let url = Bundle.main.url(forResource: "menubar-mark", withExtension: "png"),
+                  let img = NSImage(contentsOf: url) else { return nil }
+            let sq = NSImage(size: NSSize(width: 17, height: 17))
+            sq.lockFocus(); img.draw(in: NSRect(x: 0, y: 1, width: 17, height: 15)); sq.unlockFocus()
+            sq.isTemplate = true; return sq
+        }()
+        let segImgs: [NSImage?] = [
+            brandSeg ?? NSImage(systemSymbolName: "k.square", accessibilityDescription: nil),
+            NSImage(systemSymbolName: "keyboard", accessibilityDescription: nil),
+            // В самом сегменте — монохромный символ флага, а не эмодзи: в выборе важна узнаваемость
+            // пункта, а цветной флажок рядом с серыми значками читался бы как «уже включено».
+            NSImage(systemSymbolName: "flag", accessibilityDescription: nil),
+            NSImage(systemSymbolName: "nosign", accessibilityDescription: nil),
+        ]
+        let segTips = [L10n.t("gen.icon.brand"), L10n.t("gen.icon.keyboard"),
+                       L10n.t("gen.icon.flag"), L10n.t("gen.icon.hidden")]
+        for (i, img) in segImgs.enumerated() {
+            iconSeg.setImage(img, forSegment: i)
+            iconSeg.setImageScaling(.scaleProportionallyDown, forSegment: i)
+            iconSeg.setWidth(44, forSegment: i)
+            iconSeg.setToolTip(segTips[i], forSegment: i)
+        }
+        iconSeg.selectedSegment = iconStyleKeys.firstIndex(of: settings.menuBarStyle) ?? 1
+        iconSeg.target = self; iconSeg.action = #selector(iconStyleSegChanged(_:))
+
+        // БЫСТРЫЕ ДЕЙСТВИЯ: правый клик сохраняет прежнее поведение и storage, а шлепок получает
+        // собственные enable/action/sound. Списки различаются намеренно: клик по status item забирает
+        // фокус у чужого поля, поэтому ручное исправление доступно только жесту.
+        let quickPop = NSPopUpButton()
+        quickPop.addItems(withTitles: quickActionOptions.map { L10n.t($0.l10nKey) })
+        quickPop.selectItem(at: quickActionOptions.firstIndex { $0.rawValue == settings.quickAction } ?? 0)
+        quickPop.target = self; quickPop.action = #selector(quickActionChanged(_:))
+
+        let slapPop = NSPopUpButton()
+        slapPop.addItems(withTitles: slapActionOptions.map { L10n.t($0.l10nKey) })
+        slapPop.selectItem(at: slapActionOptions.firstIndex(of: settings.slapAction) ?? 0)
+        slapPop.target = self; slapPop.action = #selector(slapActionChanged(_:))
+
+        let slapSensitivityPop = NSPopUpButton()
+        slapSensitivityPop.addItems(withTitles: slapSensitivityOptions.map { L10n.t($0.l10nKey) })
+        slapSensitivityPop.selectItem(at: slapSensitivityOptions.firstIndex(of: settings.slapSensitivity) ?? 0)
+        slapSensitivityPop.target = self
+        slapSensitivityPop.action = #selector(slapSensitivityChanged(_:))
+
+        let pausePop = NSPopUpButton()
+        pausePop.addItems(withTitles: pauseLenMinutes.map(Pause.lengthLabel))
+        pausePop.selectItem(at: pauseLenMinutes.firstIndex(of: settings.pauseMinutes) ?? 0)
+        pausePop.target = self; pausePop.action = #selector(pauseLenChanged(_:))
+
+        // ⚠️ ДОСТУПНОСТЬ СЧИТАЕТСЯ НЕ ПО «СКРЫТ ЛИ ЗНАЧОК» (автор 06.08, и это тонкое место).
+        // Пункт исчезает из строки меню, только если убраны И значок, И индикатор языка: при
+        // скрытом значке, но включённом языке в строке остаётся «RU/EN», и правый клик по нему
+        // прекрасно работает. Гасить функцию в этом случае значило бы соврать.
+        let rightClickAvailable = !(settings.menuBarStyle == "hidden" && !settings.menuBarShowLanguage)
+        Self.setEnabledDeep(quickPop, rightClickAvailable)
+
+        let slapSubtitle: String = {
+            guard settings.slapEnabled else { return L10n.t("quick.slapSub") }
+            switch settings.slapAvailability {
+            case .available:   return L10n.t("quick.slapReady")
+            case .unavailable: return L10n.t("quick.slapUnavailable")
+            case .checking, .disabled: return L10n.t("quick.slapChecking")
+            }
+        }()
+        // Кнопка «i» у правого клика остаётся живой даже когда строка приглушена: именно из неё
+        // человек узнает, почему действие сейчас недоступно.
+        var quickRows: [NSView] = [
+            controlRow(L10n.t("quick.rightClick"), quickPop, enabled: rightClickAvailable,
+                       help: L10n.t(rightClickAvailable ? "quick.help" : "quick.helpOff"),
+                       key: "quick.rightClick")
+        ]
+        if ReleaseFeatures.slap {
+            quickRows.append(contentsOf: [
+                switchRow(L10n.t("quick.slap"), slapSubtitle, settings.slapEnabled,
+                          #selector(toggleSlap), key: "quick.slap"),
+                controlRow(L10n.t("quick.slapAction"), slapPop, enabled: settings.slapEnabled,
+                           key: "quick.slapAction")
+            ])
+            // Пока жест выключен, порог не нужен вовсе. При включении появляются заводская
+            // «Сбалансированная» и более отзывчивая «Высокая» — без неясного числового слайдера.
+            if settings.slapEnabled {
+                quickRows.append(controlRow(L10n.t("quick.sensitivity"), slapSensitivityPop,
+                                            key: "quick.sensitivity"))
+            }
+        }
+
+        // Длительность общая для обоих источников. Видимость правого клика не должна гасить её,
+        // когда «Не мешать» выбрано у включённого шлепка.
+        let pauseByRightClick = settings.quickAction == QuickAction.pause.rawValue
+        let pauseBySlap = ReleaseFeatures.slap
+            && settings.slapEnabled && settings.slapAction == .pause
+        if pauseByRightClick || pauseBySlap {
+            let pauseAvailable = (pauseByRightClick && rightClickAvailable)
+                || (pauseBySlap && settings.slapEnabled)
+            quickRows.append(controlRow(L10n.t("quick.pauseLen"), pausePop, enabled: pauseAvailable,
+                                        key: "quick.pauseLen"))
+        }
+        // Тумблер показывает сохранённое «вкл», даже пока сам жест выключен: при включении шлепка
+        // звук не должен неожиданно менять заранее выбранное состояние.
+        if ReleaseFeatures.slap {
+            quickRows.append(switchRow(L10n.t("quick.slapSound"), nil, settings.slapSoundEnabled,
+                                       #selector(toggleSlapSound), enabled: settings.slapEnabled,
+                                       key: "quick.slapSound"))
+        }
+
+        var general: [NSView] = [
+            blockTitle("gen.title"),
+            sub(L10n.t("gen.sub")),
+            group(8),
+            card([
+                controlRow(L10n.t("priv.lang"), langPop, key: "priv.lang"),
+                // Оформление стоит рядом с языком интерфейса не случайно: обе строки про то, КАК
+                // приложение выглядит, а не что оно делает. «Как в системе» по умолчанию.
+                controlRow(L10n.t("gen.theme"), themeSeg, help: L10n.t("gen.themeHelp"), key: "gen.theme"),
+                switchRow(L10n.t("switch.login"), nil, settings.launchAtLogin, #selector(toggleLogin),
+                          key: "switch.login")
+            ]),
+            group(6),
+            sectionTitle(L10n.t("gen.icon")),
+            card([
+                controlRow(L10n.t("gen.iconPick"), iconSeg, key: "gen.iconPick"),
+                switchRow(L10n.t("gen.iconLang"), nil, settings.menuBarShowLanguage, #selector(toggleIconLang),
+                          key: "gen.iconLang")
+            ]),
+            group(2),
+            hint(L10n.t("gen.iconHint")),
+            group(6),
+            sectionTitle(L10n.t("quick.title")),
+            card(quickRows),
+            group(2),
+            hint(L10n.t(ReleaseFeatures.slap ? "quick.sub" : "quick.subNoSlap")),
+        ]
+        if settings.menuBarStyle == "hidden" {
+            // Значок скрыт — всегда объясняем, как добраться до приложения. Текст зависит от языка:
+            // виден язык → по клику на RU/EN открывается меню; ничего не видно → перезапуск из «Программ».
+            general.append(hint(L10n.t(settings.menuBarShowLanguage ? "gen.iconHiddenLang" : "gen.iconHidden")))
+        }
+        general.append(contentsOf: [
+            group(6),
+            card([ switchRow(L10n.t("gen.silent"), L10n.t("gen.silentSub"),
+                             !settings.silentMode, #selector(toggleSoundsEnabled), key: "gen.silent") ]),
+            group(6),
+            // Захват буфера в историю (задача 228). Стоит в «Общих», а не в голосовом наборе
+            // (решение автора 04.09.2026): буфер не имеет отношения к голосу, а общая история уже не
+            // только про диктовку. Зависит от «Хранить историю»: без неё строка гаснет и подсказка
+            // говорит, где включить. Остальные настройки истории остаются в голосовом наборе.
+            sectionTitle(L10n.t("gen.history")),
+            card([ switchRow(L10n.t("gen.clipHistory"),
+                             settings.voiceHistoryEnabled ? L10n.t("gen.clipHistorySub") : L10n.t("gen.clipHistoryNeedsHistory"),
+                             settings.voiceHistoryEnabled && settings.clipboardHistoryEnabled, #selector(toggleClipboardHistory),
+                             enabled: settings.voiceHistoryEnabled, help: L10n.t("gen.clipHistoryHelp"), key: "gen.clipHistory") ]),
+            group(2),
+            hint(L10n.t("gen.historyHint")),
+            group(6),
+            sectionTitle(L10n.t("gen.access")),
+            card([ buttonRow([perm, mic]) ]),
+            group(2),
+            hint(L10n.t("gen.accessHint")),
+            group(2),
+            hint(L10n.t("gen.micHint"))
+        ])
+        return vstack(general)
+    }
+
+    /// Ключи стилей значка в порядке сегментов (см. AppSettings.menuBarStyle).
+    private let iconStyleKeys = ["brand", "keyboard", "flag", "hidden"]
+
+    /// Готовые сочетания для вставки сниппета. Взяты те, что редко заняты системой и чужими
+    /// программами: ⌃⌥ и ⌥⌘ с буквой S (snippet) и с пробелом.
+    /// ⚠️ ПЕРВЫЙ В СПИСКЕ = УМОЛЧАНИЕ. Тумблер, включаясь впервые, ставит именно его, поэтому
+    /// порядок здесь не оформление, а поведение. ⌃⌥V выбран автором 06.08: V от «вставить», а ⌃⌥
+    /// свободнее прочих сочетаний в системе.
+    private let snipPickPresets: [(String, Int, UInt64)] = [
+        ("⌃⌥V", 9, CGEventFlags([.maskControl, .maskAlternate]).rawValue),
+        ("⌃⌥S", 1, CGEventFlags([.maskControl, .maskAlternate]).rawValue),
+        ("⌥⌘S", 1, CGEventFlags([.maskAlternate, .maskCommand]).rawValue),
+        // ⚠️ ЗДЕСЬ БЫЛ ⌃⌥Space, и его пришлось убрать (проверка 06.08). Это СИСТЕМНОЕ сочетание
+        // macOS «предыдущий источник ввода», оно нашлось включённым в com.apple.symbolichotkeys
+        // на живой машине. Предлагать в готовых вариантах то, что уже занято системой, значит
+        // раздавать заведомо неработающие настройки.
+        ("⌃⌥E", 14, CGEventFlags([.maskControl, .maskAlternate]).rawValue),
+    ]
+
+    /// ЗАПИСЬ СВОЕГО СОЧЕТАНИЯ для строк этого окна: вставка сниппета (автор 06.08), смена регистра
+    /// выделенного (автор 11.08).
+    ///
+    /// ⚠️ Намеренно НЕ копируем сюда конечный автомат из `VoiceHotkeyControl`/`TranslateHotkeyControl`:
+    /// он там уже в двух почти одинаковых экземплярах, и третий был бы худшим решением из возможных.
+    /// Пользуемся общей обвязкой: `HotkeyRecording.begin` глушит перехват на время записи (иначе
+    /// набираемое сочетание сработало бы как чужой хоткей), а панель показывает набранное.
+    /// По той же причине запись здесь ОДНА на все строки и параметризуется слотом: вторая строка,
+    /// умеющая записывать своё, не должна означать вторую копию этого автомата.
+    private var hkRecMonitor: Any?
+    /// Что применить, если человек нажмёт «Назначить». Пока nil — применять нечего.
+    private var hkPendingApply: (() -> Void)?
+
+    /// ⚠️ ЗАМОРОЗКА КАНДИДАТА (автор 07.09.2026: «клавиши приходится УДЕРЖИВАТЬ, чтобы назначить»).
+    ///
+    /// Было так: набранное сочетание включало кнопку «Назначить», но следующий же `flagsChanged` —
+    /// то есть отпускание клавиш — перерисовывал панель как незавершённую и кнопку гасил. Значит
+    /// нажать её можно было, только держа сочетание пальцами и целясь мышью. В контролах записи
+    /// для конверсии, диктовки, перевода и мгновенного переключения этого нет с самого начала: там
+    /// кандидат ЗАМОРАЖИВАЕТСЯ и переживает отпускание (см. `HotkeyControl.freeze`). Разъехались
+    /// две реализации, а не задумка, поэтому здесь повторяется ровно та же машинка состояний.
+    private var hkFrozen = false
+    /// Показали отказ, а клавиши ещё физически зажаты: их отпускание по одной приходит обычным
+    /// `flagsChanged` и иначе читалось бы как начало нового набора. Ждём чистого нуля.
+    private var hkAwaitingRelease = false
+    /// Предыдущий набор модификаторов — отличить «отпускает старое» от «начал новое».
+    private var hkLastMods: CGEventFlags = []
+
+    /// Человек начал набирать заново: модификаторы пошли вверх с нуля.
+    private func hkShouldRestart(_ mods: CGEventFlags) -> Bool { !mods.isEmpty && hkLastMods.isEmpty }
+
+    /// Сбросить замороженного кандидата перед новым набором.
+    private func hkRestartIfFrozen() {
+        guard hkFrozen else { return }
+        hkFrozen = false
+        hkPendingApply = nil
+    }
+
+    /// Отказ БЕЗ прерывания записи: причина видна в самой панели, человек жмёт другое сочетание.
+    private func hkWarn(_ text: String, parts: [String]) {
+        hkFrozen = false
+        hkPendingApply = nil
+        hkAwaitingRelease = true
+        HotkeyRecorderPanel.shared.warn(text, parts: parts)
+    }
+
+    /// `what` — что настраиваем (заголовок окна записи), `slot` — чья это комбинация в общем реестре
+    /// (иначе проверка «занято нашей же функцией» ругалась бы на саму настраиваемую строку),
+    /// `apply` получает готовую комбинацию и её подпись вида «⌃⌥U».
+    private func startHotkeyRecording(what: String, slot: HotkeyGuard.Slot,
+                                      apply: @escaping (Int, CGEventFlags, String) -> Void) {
+        hkPendingApply = nil
+        // Прошлую запись могли завершить с зажатыми модификаторами — начинаем с чистого состояния.
+        hkFrozen = false; hkAwaitingRelease = false; hkLastMods = []
+        HotkeyRecording.begin(stop: { [weak self] in self?.stopHotkeyRecording() }, in: view.window)
+        HotkeyRecorderPanel.shared.show(what: what, over: view.window,
+                                        onCommit: { [weak self] in self?.commitHotkeyRecording() },
+                                        onCancel: { [weak self] in self?.stopHotkeyRecording() })
+        hkRecMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] e in
+            guard let self else { return nil }
+            // Продлеваем сторожа записи: человек перебирает варианты, это не простой. Второй пункт
+            // того же расхождения двух реализаций — в контролах `UIControls` строка есть с самого
+            // начала, здесь её не было, и запись умирала через 90 секунд подбора.
+            HotkeyRecording.noteActivity()
+            let mods = CGEventFlags(rawValue: UInt64(e.modifierFlags.rawValue))
+                .intersection([.maskCommand, .maskControl, .maskAlternate, .maskShift])
+            if e.type == .keyDown {
+                guard e.keyCode != 53 else { self.stopHotkeyRecording(); return nil }
+                self.hkRestartIfFrozen()
+                // Одиночная клавиша без модификаторов отобрала бы у человека обычный ввод.
+                guard !mods.isEmpty else {
+                    self.hkWarn(L10n.t("snip.needMods"), parts: HotkeyRecorderPanel.parts(mods: mods))
+                    return nil
+                }
+                let parts = HotkeyRecorderPanel.parts(mods: mods,
+                                                      keyLabel: KeyLabels.symbol(forKeyCode: Int(e.keyCode)))
+                // Общий вердикт, как у остальных контролов: жёсткое запрещаем, мягкое показываем и
+                // отдаём решение человеку. Своих правил здесь нет намеренно.
+                switch HotkeyGuard.verdict(keyCode: Int(e.keyCode), mods: mods) {
+                case .blocked(let busy):
+                    self.hkWarn(HotkeyGuard.busyMessage(busy), parts: parts)
+                    return nil
+                case .warn(let who):
+                    self.armHotkey(keyCode: Int(e.keyCode), mods: mods, parts: parts, slot: slot,
+                                   apply: apply, warning: HotkeyGuard.conflictMessage(who))
+                case .ok:
+                    self.armHotkey(keyCode: Int(e.keyCode), mods: mods, parts: parts, slot: slot,
+                                   apply: apply, warning: nil)
+                }
+                return nil
+            }
+            // flagsChanged: живой показ зажатых модификаторов — и только он.
+            if self.hkAwaitingRelease {
+                self.hkLastMods = mods
+                if mods.isEmpty { self.hkAwaitingRelease = false }
+                return nil
+            }
+            // Кандидат заморожен: отпускание клавиш его не трогает, кнопка «Назначить» остаётся живой.
+            // Сбрасываем, только когда человек начал набирать заново (модификаторы пошли вверх с нуля).
+            if self.hkFrozen, !self.hkShouldRestart(mods) { self.hkLastMods = mods; return nil }
+            self.hkRestartIfFrozen()
+            self.hkLastMods = mods
+            // Пустой набор не рисуем: иначе отпускание затирало бы предупреждение о конфликте.
+            if !mods.isEmpty {
+                HotkeyRecorderPanel.shared.render(parts: HotkeyRecorderPanel.parts(mods: mods), complete: false)
+            }
+            return nil
+        }
+    }
+
+    /// Кандидат набран и показан. Настройки НЕ трогаем до нажатия «Назначить»: так человек успевает
+    /// прочитать предупреждение и передумать, а не узнаёт о конфликте после того, как всё применилось.
+    private func armHotkey(keyCode: Int, mods: CGEventFlags, parts: [String], slot: HotkeyGuard.Slot,
+                           apply: @escaping (Int, CGEventFlags, String) -> Void, warning: String?) {
+        if let busy = HotkeyGuard.ourBusy(mode: "key", keyCode: keyCode, mods: mods.rawValue, excluding: slot) {
+            hkWarn(String(format: L10n.t("hkrec.warn.ours"), busy), parts: parts)
+            return
+        }
+        hkPendingApply = { apply(keyCode, mods, parts.joined()) }
+        // Замораживаем: набранное остаётся на экране и переживает отпускание клавиш.
+        hkFrozen = true
+        HotkeyRecorderPanel.shared.render(parts: parts, complete: true, warning: warning)
+    }
+
+    private func commitHotkeyRecording() {
+        let apply = hkPendingApply
+        stopHotkeyRecording()
+        apply?()
+        reshow()
+    }
+
+    private func stopHotkeyRecording() {
+        if let m = hkRecMonitor { NSEvent.removeMonitor(m); hkRecMonitor = nil }
+        hkPendingApply = nil
+        hkFrozen = false; hkAwaitingRelease = false; hkLastMods = []
+        HotkeyRecording.end()
+        HotkeyRecorderPanel.shared.hide()
+        reshow()
+    }
+
+    private func startSnippetHotkeyRecording() {
+        startHotkeyRecording(what: L10n.t("snip.pickOn"), slot: .snippet) { [weak self] code, mods, _ in
+            self?.settings.snippetPickKeyCode = code
+            self?.settings.snippetPickModifiers = mods.rawValue
+        }
+    }
+
+    /// Готовые сочетания для вставки последней диктовки. Их ДВА, и это осознанно.
+    ///
+    /// ⚠️ ПЕРВЫЙ В СПИСКЕ = УМОЛЧАНИЕ (тумблер, включаясь, ставит первое СВОБОДНОЕ), поэтому порядок
+    /// здесь поведение, а не оформление.
+    ///
+    /// ⚠️ ТРИ МОДИФИКАТОРА ОТВЕРГНУТЫ (автор 07.09.2026): «неудобно, такое обычно не делают, надо все
+    /// пальцы обеих рук». До этого умолчанием стоял ⌃⌥D, и он оказался занят сторонним приложением
+    /// (Claude Code для Mac); попытка уйти от чужих хоткеев в ⌃⌥⌘V решала одну проблему ценой
+    /// другой. Правило, которое из этого следует: **лучше меньше готовых вариантов, но нажимаемых
+    /// одной рукой**. Кому оба не подошли, назначает своё — пункт «Назначить свою…» есть всегда.
+    ///
+    /// Чем проверяли: `SystemHotkeys.takenBy` спрашивает саму macOS (прогон полусотни кандидатов на
+    /// живой машине — занято только ⌃⌥Space, «предыдущий источник ввода»). Про чужие ПРОГРАММЫ
+    /// система не знает ничего, и списка таких сочетаний не существует, поэтому окончательную
+    /// проверку делает человек: не сработало — меняет.
+    ///
+    /// Буква V от «вставить», как у вставки без формата и у панели сниппетов: общая мнемоника.
+    /// ⌃⌥V стоит вторым не случайно — ровно оно умолчание у панели сниппетов (`snipPickPresets`),
+    /// и первым означало бы, что у человека со включёнными сниппетами тумблер молча уезжает на
+    /// второй вариант. Занятое своей же функцией отсекает `ourBusy`, так что в списке оно остаётся.
+    ///
+    /// ⌥⇧ и ⌘-сочетания сюда не берём: ⌥⇧ это заводская комбинация конверсии, а ⇧⌘V/⌥⌘V/⌃⌘V —
+    /// готовые варианты вставки без форматирования.
+    static let pasteDictationPresets: [(String, Int, UInt64)] = [
+        ("⌃⇧V", 9, CGEventFlags([.maskControl, .maskShift]).rawValue),
+        ("⌃⌥V", 9, CGEventFlags([.maskControl, .maskAlternate]).rawValue),
+    ]
+
+    /// Строки настройки «вставлять последнюю диктовку». Показываем ВСЕГДА, даже когда история
+    /// выключена: человек ищет функцию там, где про неё думает, а зависимость объясняет подпись
+    /// и подсказка. Сама вставка при выключенной истории честно скажет тостом, чего не хватает.
+    private func pasteDictationRows() -> [NSView] {
+        let pop = NSPopUpButton()
+        var titles = Self.pasteDictationPresets.map { $0.0 }
+        var sel = Self.pasteDictationPresets.firstIndex {
+            $0.1 == settings.pasteDictationKeyCode && $0.2 == settings.pasteDictationModifiers
+        }
+        // Своё записанное сочетание в готовых не найдётся, а список обязан показывать ТО, что
+        // работает (та же причина, что у смены регистра).
+        if sel == nil, settings.pasteDictationEnabled, !settings.pasteDictationKeyLabel.isEmpty {
+            titles.append(settings.pasteDictationKeyLabel)
+            sel = titles.count - 1
+        }
+        pop.addItems(withTitles: titles + [L10n.t("snip.pickCustom")])
+        pop.selectItem(at: sel ?? 0)
+        pop.target = self; pop.action = #selector(pasteDictationComboChanged(_:))
+        var rows: [NSView] = [
+            switchRow(L10n.t("voice.pasteLast"), L10n.t("voice.pasteLastSub"), settings.pasteDictationEnabled,
+                      #selector(togglePasteDictation(_:)), help: L10n.t("voice.pasteLastHelp"),
+                      key: "voice.pasteLast")
+        ]
+        if settings.pasteDictationEnabled {
+            rows.append(controlRow(L10n.t("voice.pasteLastAssign"), pop, key: "voice.pasteLastAssign"))
+        }
+        return rows
+    }
+
+    @objc private func togglePasteDictation(_ sw: NSSwitch) {
+        if sw.state == .on {
+            // Включили — ставим первое СВОБОДНОЕ готовое сочетание: тумблер «вкл» без работающей
+            // комбинации выглядит как поломка (та же логика, что у смены регистра).
+            let free = Self.pasteDictationPresets.first {
+                HotkeyGuard.ourBusy(mode: "key", keyCode: $0.1, mods: $0.2, excluding: .pasteDictation) == nil
+            }
+            // Оба готовых заняты нашими же функциями — не отбиваем тумблер алертом «назначьте своё
+            // через „Назначить свою…“»: этот пункт живёт в строке, которая видна ТОЛЬКО при
+            // включённом тумблере, то есть совет указывал бы на то, чего человек не видит. Вместо
+            // этого сразу открываем запись сочетания. Отменил — `reshow` вернёт тумблер в «выкл»
+            // сам, потому что комбинация так и осталась не назначенной.
+            guard let preset = free else {
+                startPasteDictationHotkeyRecording()
+                return
+            }
+            settings.pasteDictationKeyCode = preset.1
+            settings.pasteDictationModifiers = preset.2
+            settings.pasteDictationKeyLabel = preset.0
+        } else {
+            settings.pasteDictationKeyCode = -1
+            settings.pasteDictationModifiers = 0
+            settings.pasteDictationKeyLabel = ""
+        }
+        reshow()
+    }
+
+    @objc private func pasteDictationComboChanged(_ p: NSPopUpButton) {
+        let i = p.indexOfSelectedItem
+        if i == p.numberOfItems - 1 {            // последняя строка — «Назначить свою…»
+            startPasteDictationHotkeyRecording()
+            return
+        }
+        guard i >= 0, i < Self.pasteDictationPresets.count else { return }
+        let preset = Self.pasteDictationPresets[i]
+        if let busy = HotkeyGuard.ourBusy(mode: "key", keyCode: preset.1, mods: preset.2, excluding: .pasteDictation) {
+            HotkeyGuard.busyAlert(busy); reshow(); return
+        }
+        settings.pasteDictationKeyCode = preset.1
+        settings.pasteDictationModifiers = preset.2
+        settings.pasteDictationKeyLabel = preset.0
+    }
+
+    private func startPasteDictationHotkeyRecording() {
+        startHotkeyRecording(what: L10n.t("hkrec.what.pasteLast"), slot: .pasteDictation) { [weak self] code, mods, label in
+            self?.settings.pasteDictationKeyCode = code
+            self?.settings.pasteDictationModifiers = mods.rawValue
+            self?.settings.pasteDictationKeyLabel = label
+        }
+    }
+
+    private func startCaseHotkeyRecording() {
+        startHotkeyRecording(what: L10n.t("case.title"), slot: .caseChange) { [weak self] code, mods, label in
+            self?.settings.caseChangeKeyCode = code
+            self?.settings.caseChangeModifiers = mods.rawValue
+            self?.settings.caseChangeKeyLabel = label
+        }
+    }
+
+    @objc private func copyFromAutoreplace() {
+        TextSnippetStore.shared.copyFromAutoreplace()
+        reshow()
+    }
+
+    /// Сочетания для вставки без форматирования. ⇧⌘V первым: в программах, которые это умеют
+    /// сами, оно означает ровно то же самое, и человеку не придётся переучиваться.
+    /// Готовые сочетания для смены регистра. Выбраны те, которых нет ни в системе, ни в привычках
+    /// редакторов: ⇧F3 из Word занята Mission Control, а ⌃⇧Tab, которое предлагал автор просьбы,
+    /// в браузерах листает вкладки.
+    /// ⚠️ Своё сочетание здесь ЕСТЬ (автор 11.08): трёх готовых на всех не хватает, а третьей копии
+    /// автомата записи так и не появилось — она одна на окно, см. `startHotkeyRecording`.
+    static let casePresets: [(String, Int, UInt64)] = [
+        ("⌃⌥U", 32, CGEventFlags([.maskControl, .maskAlternate]).rawValue),
+        ("⌃⇧U", 32, CGEventFlags([.maskControl, .maskShift]).rawValue),
+        ("⌃⌥K", 40, CGEventFlags([.maskControl, .maskAlternate]).rawValue),
+    ]
+
+    static let plainPastePresets: [(String, Int, UInt64)] = [
+        ("⇧⌘V", 9, CGEventFlags([.maskShift, .maskCommand]).rawValue),
+        ("⌥⌘V", 9, CGEventFlags([.maskAlternate, .maskCommand]).rawValue),
+        ("⌃⌘V", 9, CGEventFlags([.maskControl, .maskCommand]).rawValue),
+    ]
+
+    @objc private func togglePlainPaste(_ s: NSSwitch) {
+        settings.plainPaste = (s.state == .on)
+        reshow()
+    }
+    @objc private func plainPasteComboChanged(_ p: NSPopUpButton) {
+        let i = p.indexOfSelectedItem
+        guard i >= 0, i < Self.plainPastePresets.count else { return }
+        let preset = Self.plainPastePresets[i]
+        if let busy = HotkeyGuard.ourBusy(mode: "key", keyCode: preset.1, mods: preset.2, excluding: .plainPaste) {
+            HotkeyGuard.busyAlert(busy); reshow(); return
+        }
+        settings.plainPasteKeyCode = preset.1
+        settings.plainPasteModifiers = preset.2
+        settings.plainPasteKeyLabel = preset.0
+    }
+
+    @objc private func toggleCaseChange(_ sw: NSSwitch) {
+        if sw.state == .on {
+            // Включили — ставим первое СВОБОДНОЕ готовое сочетание. Занятое своей же функцией
+            // означало бы тумблер «вкл» без работающей функции, а это выглядит как поломка.
+            let free = Self.casePresets.first {
+                HotkeyGuard.ourBusy(mode: "key", keyCode: $0.1, mods: $0.2, excluding: .caseChange) == nil
+            }
+            guard let preset = free else {
+                sw.state = .off
+                HotkeyGuard.busyAlert(L10n.t("is.busy.snippetNoFree"))
+                return
+            }
+            settings.caseChangeKeyCode = preset.1
+            settings.caseChangeModifiers = preset.2
+            settings.caseChangeKeyLabel = preset.0
+        } else {
+            settings.caseChangeKeyCode = -1
+            settings.caseChangeModifiers = 0
+            settings.caseChangeKeyLabel = ""
+        }
+        reshow()          // строка сочетания появляется и исчезает вместе с тумблером
+    }
+
+    @objc private func caseComboChanged(_ p: NSPopUpButton) {
+        let i = p.indexOfSelectedItem
+        if i == p.numberOfItems - 1 {            // последняя строка — «Назначить свою…»
+            startCaseHotkeyRecording()
+            return
+        }
+        // Между пресетами и «Назначить свою…» может стоять уже записанное своё сочетание: выбрали
+        // его — оно и так стоит, менять нечего.
+        guard i >= 0, i < Self.casePresets.count else { return }
+        let preset = Self.casePresets[i]
+        if let busy = HotkeyGuard.ourBusy(mode: "key", keyCode: preset.1, mods: preset.2, excluding: .caseChange) {
+            HotkeyGuard.busyAlert(busy); reshow(); return
+        }
+        settings.caseChangeKeyCode = preset.1
+        settings.caseChangeModifiers = preset.2
+        settings.caseChangeKeyLabel = preset.0
+    }
+
+    @objc private func snipPickToggled(_ sw: NSSwitch) {
+        if sw.state == .on {
+            // Включили, а сочетание ещё не выбрано — ставим первое из готовых, иначе тумблер стоит
+            // «вкл», а функции нет, и это выглядит как поломка.
+            if !settings.snippetPickEnabled {
+                // Первое свободное из готовых: иначе тумблер включал бы сочетание, уже занятое
+                // другой нашей функцией, молча и мимо всех проверок.
+                let free = snipPickPresets.first {
+                    HotkeyGuard.ourBusy(mode: "key", keyCode: $0.1, mods: $0.2, excluding: .snippet) == nil
+                }
+                guard let preset = free else {
+                    sw.state = .off
+                    HotkeyGuard.busyAlert(L10n.t("is.busy.snippetNoFree"))
+                    return
+                }
+                settings.snippetPickKeyCode = preset.1
+                settings.snippetPickModifiers = preset.2
+            }
+        } else {
+            settings.snippetPickKeyCode = -1
+            settings.snippetPickModifiers = 0
+        }
+        reshow()          // строка сочетания появляется и исчезает вместе с тумблером
+    }
+
+    @objc private func snipPickChanged(_ p: NSPopUpButton) {
+        let i = p.indexOfSelectedItem
+        if i >= snipPickPresets.count {          // последняя строка — «Назначить свою…»
+            startSnippetHotkeyRecording()
+            return
+        }
+        let preset = snipPickPresets[i]
+        if let busy = HotkeyGuard.ourBusy(mode: "key", keyCode: preset.1, mods: preset.2, excluding: .snippet) {
+            HotkeyGuard.busyAlert(busy); reshow(); return
+        }
+        settings.snippetPickKeyCode = preset.1
+        settings.snippetPickModifiers = preset.2
+    }
+
+    /// Порядок = порядок в меню выбора. Первый элемент это умолчание каждого источника.
+    private let quickActionOptions = QuickAction.rightClickOptions
+    private let slapActionOptions = QuickAction.slapOptions
+    private let slapSensitivityOptions = SlapSensitivity.allCases
+    private var pauseLenMinutes: [Int] { Pause.lengths }   // список один на меню и настройки
+
+    @objc private func quickActionChanged(_ p: NSPopUpButton) {
+        let i = max(0, min(quickActionOptions.count - 1, p.indexOfSelectedItem))
+        settings.quickAction = quickActionOptions[i].rawValue
+        reshow()   // строка «Сколько молчать» есть только у паузы, раздел надо пересобрать
+    }
+    @objc private func slapActionChanged(_ p: NSPopUpButton) {
+        let i = max(0, min(slapActionOptions.count - 1, p.indexOfSelectedItem))
+        settings.slapAction = slapActionOptions[i]
+        reshow()
+    }
+    @objc private func slapSensitivityChanged(_ p: NSPopUpButton) {
+        let i = max(0, min(slapSensitivityOptions.count - 1, p.indexOfSelectedItem))
+        settings.slapSensitivity = slapSensitivityOptions[i]
+    }
+    @objc private func toggleSlap(_ s: NSSwitch) {
+        settings.slapEnabled = (s.state == .on)
+        // Перестройка меняет доступность соседних контролов; не сносим NSSwitch из его action.
+        scheduleSlapReshow()
+    }
+    @objc private func toggleSlapSound(_ s: NSSwitch) {
+        settings.slapSoundEnabled = (s.state == .on)
+    }
+    @objc private func pauseLenChanged(_ p: NSPopUpButton) {
+        settings.pauseMinutes = pauseLenMinutes[max(0, min(pauseLenMinutes.count - 1, p.indexOfSelectedItem))]
+    }
+
+    @objc private func iconStyleSegChanged(_ s: NSSegmentedControl) {
+        settings.menuBarStyle = iconStyleKeys[max(0, min(s.selectedSegment, iconStyleKeys.count - 1))]
+        MenuBarController.shared?.applyIconStyle()
+        reshow()   // показать/скрыть предупреждение про пустую строку меню
+    }
+    // ⚠️ ЗДЕСЬ БЫЛ `voiceStreamingRow()` — УДАЛЁН 01.08.2026 вместе со строкой в настройках.
+    // Прятать его в бета-канал оказалось худшим из решений: тумблер обещал показ речи на плашке,
+    // не делал этого, и именно потому, что его видели немногие, никто и не сообщил. Прятать
+    // недоделанное — не то же самое, что не выпускать недоделанное.
+    // Сам потоковый путь (`StreamingEouEngine`, `VoiceController.useStreaming`) и загрузка модели
+    // в `toggleVoiceStreaming` ниже сохранены: в 0.4 фича вернётся с продуманным показом.
+
+    private func instantSwitchControl() -> NSView {
+        let c = InstantSwitchControl()
+        c.onChange = { [weak self] in
+            CapsRemap.reconcile()   // сменили комбинацию (на/с Caps) — ремап должен догнать выбор
+            GlobeKey.reconcile()    // …и системная роль 🌐 тоже (забрать/вернуть)
+            DispatchQueue.main.async { self?.reshow() }
+        }
+        return c
+    }
+
+    /// Честно пишем, ЧТО перестанет работать с выбранной комбинацией (Spotlight и т.п.) — и что
+    /// это обратимо: выключил тумблер, системное действие вернулось само (мы просто перестаём
+    /// глотать событие, системные настройки не трогаем).
+    private func instantSwitchStatusView() -> NSView {
+        // ⚠️ ПРИ ОСИРОТЕВШЕЙ 🌐 МОЛЧИМ. Строка «выключено, системные действия на месте» стояла бы
+        // ВПЛОТНУЮ к строке «клавиша 🌐 сейчас ничего не делает», то есть два соседних абзаца
+        // говорили бы противоположное. Поймано на рендере, до релиза.
+        guard settings.instantSwitchEnabled else {
+            return GlobeKey.looksOrphaned ? group(0) : hint(L10n.t("is.offHint"))
+        }
+        // ⚠️ ОТКАЗ CAPS-РЕЖИМА ПОКАЗЫВАЕМ ПЕРВЫМ ДЕЛОМ (01.08.2026). Ремап Caps идёт через hidutil в
+        // фоне и может не состояться: чужой ремап (Karabiner) мы принципиально не перебиваем, а
+        // система может и просто отказать. Раньше об этом знал только лог, и человек видел
+        // включённый тумблер рядом со словом «Работает» — при том, что клавиша язык не меняла.
+        // Живой случай: женщина написала в Директ, что не смогла назначить Caps Lock, и мы даже не
+        // могли отличить «не нашла настройку» от «нашла, а она молча не сработала».
+        if CapsRemap.wanted, let f = CapsRemap.failure {
+            return hint(L10n.t(f == .foreignMapping ? "is.capsForeign" : "is.capsFailed"))
+        }
+        let shadowed = InstantSwitchControl.shadows(mode: settings.instantSwitchMode,
+                                                    keyCode: settings.instantSwitchKeyCode,
+                                                    mods: settings.instantSwitchMods)
+        guard let shadowed else { return hint(L10n.t("is.onClean")) }
+        return hint(String(format: L10n.t("is.onShadow"), shadowed))
+    }
+
+    /// Caps отдан ручному переключению, но ремап не состоялся — сказать об этом ЗДЕСЬ.
+    ///
+    /// ⚠️ ЧУЖОЕ ПРЕДУПРЕЖДЕНИЕ НЕ ГОДИТСЯ. Такая же строка есть у мгновенного переключения, и её
+    /// условие (`CapsRemap.wanted`) теперь истинно и для нашего случая — но живёт она в ДРУГОМ
+    /// разделе и говорит, что сломана смена языка. Человек, назначивший Caps на конверсию, увидел
+    /// бы жалобу не про свою настройку, а в разделе, куда он не заходил.
+    /// Сам молчаливый отказ уже стоил нам живого случая: женщина написала в Директ, что не смогла
+    /// назначить Caps, и по логу нельзя было отличить «не нашла настройку» от «нашла, а она молча
+    /// не сработала».
+    private func manualCapsFailure() -> String? {
+        guard settings.hotkeyMode == "modkey", settings.hotkeyKeyCode == 57,
+              let f = CapsRemap.failure else { return nil }
+        return L10n.t(f == .foreignMapping ? "is.capsForeign" : "is.capsFailed")
+    }
+
+    /// СПАСАТЕЛЬНАЯ СТРОКА ДЛЯ ОСИРОТЕВШЕЙ 🌐 (задача 96).
+    ///
+    /// Видна только когда клавиша забрана, а мы её не используем: значит её забрали и не вернули.
+    /// До 0.4 такое чинилось единственным способом — включить нашу же настройку обратно и выключить,
+    /// и догадаться до этого нельзя. Со сторожем случай стал редким, но не исчез: у человека, который
+    /// пришёл со старой версии, клавиша уже мертва, и починить её должно приложение, а не инструкция.
+    private func globeOrphanView() -> NSView {
+        guard GlobeKey.looksOrphaned else { return group(0) }
+        let btn = NSButton(title: L10n.t("is.orphanFix"), target: self, action: #selector(fixGlobeOrphan))
+        btn.bezelStyle = .rounded
+        return vstack([group(4), hint(L10n.t("is.orphan")), group(4), btn])
+    }
+
+    @objc private func fixGlobeOrphan() {
+        GlobeKey.restoreSystemAction()
+        reshow()
+    }
+
+    /// Статус лампочки-индикатора: чего не хватает (доступ / клавиатура с лампочкой) или «работает».
+    /// Считаем ПОСЛЕ CapsLED.reconcile() — список клавиатур наполняется синхронно при включении.
+    private func capsLEDStatusView() -> NSView {
+        guard settings.capsLEDIndicator else { return hint(L10n.t("led.offHint")) }
+        if !Permissions.inputMonitoringGranted() { return hint(L10n.t("led.noPerm")) }
+        if CapsLED.running && CapsLED.ledKeyboardCount == 0 { return hint(L10n.t("led.noKb")) }
+        return hint(L10n.t("led.onHint"))
+    }
+
+    @objc private func toggleCapsLED(_ s: NSSwitch) {
+        settings.capsLEDIndicator = (s.state == .on)
+        // Лампочкой управляет HID-канал, а он закрыт без «Мониторинга ввода» (Accessibility тут не
+        // помогает — это ДРУГОЕ разрешение). Просим системным запросом ровно в момент включения.
+        if s.state == .on, !Permissions.inputMonitoringGranted() { Permissions.requestInputMonitoring() }
+        CapsLED.reconcile()
+        reshow()
+    }
+
+    @objc private func toggleInstantSwitch(_ s: NSSwitch) {
+        if s.state == .on {
+            let shadowed = InstantSwitchControl.shadows(mode: settings.instantSwitchMode,
+                                                        keyCode: settings.instantSwitchKeyCode,
+                                                        mods: settings.instantSwitchMods)
+            if let shadowed {
+                let a = NSAlert()
+                a.messageText = L10n.t("is.warn.title")
+                a.informativeText = String(format: L10n.t("is.warn.body"), shadowed)
+                a.addButton(withTitle: L10n.t("is.warn.ok"))
+                a.addButton(withTitle: L10n.t("common.cancel"))
+                guard a.runModal() == .alertFirstButtonReturn else { s.state = .off; return }
+            }
+        }
+        settings.instantSwitchEnabled = (s.state == .on)
+        CapsRemap.reconcile()   // Caps-режим живёт через hidutil-ремап — синхронизируем с тумблером
+        GlobeKey.reconcile()    // 🌐-режим: забрать клавишу у системы живьём / вернуть как было
+        reshow()
+    }
+
+    @objc private func toggleIconLang(_ s: NSSwitch) {
+        settings.menuBarShowLanguage = (s.state == .on)
+        MenuBarController.shared?.applyIconStyle()
+        reshow()
+    }
+
+    /// Сменили оформление. Применяем СРАЗУ и ко всем окнам, а не только к настройкам: человек
+    /// щёлкнул и должен увидеть результат под курсором, а не после перезапуска.
+    ///
+    /// ⚠️ Всплывающие HUD-поверхности (плашка диктовки) намеренно НЕ трогаем:
+    /// они и в системе тёмные при любой теме, как Spotlight, и светлыми смотрятся чужеродно.
+    @objc private func themeChanged(_ s: NSSegmentedControl) {
+        let keys = ["system", "light", "dark"]
+        settings.appTheme = keys[max(0, min(keys.count - 1, s.selectedSegment))]
+        let a = settings.appAppearance          // nil = «как в системе», и это ВАЛИДНОЕ значение:
+        for w in NSApp.windows where w.contentViewController is NSSplitViewController || w.isVisible {
+            w.appearance = a                    // присвоение nil возвращает окно системе
+        }
+        kbLog("тема: \(settings.appTheme)")
+    }
+
+    /// Все ползунки громкости в одном месте: ключ запоминания → чтение/запись значения.
+    private var volumeSliders: [(key: String, get: () -> Double, set: (Double) -> Void)] {
+        [("switch",    { self.settings.soundVolume },          { self.settings.soundVolume = $0 }),
+         ("translate", { self.settings.translateSoundVolume }, { self.settings.translateSoundVolume = $0 }),
+         ("voice",     { self.settings.voiceSoundVolume },     { self.settings.voiceSoundVolume = $0 })]
+    }
+
+    /// Пользователь двигал ползунок, пока звук был выключён → его выбор важнее нашей памяти.
+    /// Зовётся из каждого обработчика громкости.
+    private func noteVolumeTouchedWhileMuted(_ key: String) {
+        guard settings.silentMode else { return }
+        settings.setMutedBackup(key, nil)
+    }
+
+    /// Тумблер «Звуки». Формулировка ПОЛОЖИТЕЛЬНАЯ намеренно (просьба автора 28.07): у строки
+    /// «Вообще без звуков» включение означало тишину, и рефлекс «выключил — молчит, включил —
+    /// слышно» не срабатывал. Теперь срабатывает буквально.
+    ///
+    /// Логика громкостей (его же): выключаем звук — уводим все ползунки в ноль, но ЗАПОМИНАЕМ, где
+    /// они стояли. Ползунки остаются активными: захочет — подвинет. Включаем обратно — те, которых
+    /// он не трогал, возвращаются на прежние места, а тронутые остаются как он выставил (их память
+    /// стёрлась в момент, когда он их двинул).
+    @objc private func toggleSoundsEnabled(_ s: NSSwitch) {
+        let soundsOn = (s.state == .on)
+        settings.silentMode = !soundsOn
+        if !soundsOn {
+            for v in volumeSliders {
+                settings.setMutedBackup(v.key, v.get())
+                v.set(0)
+            }
+        } else {
+            for v in volumeSliders {
+                let saved = settings.mutedBackup(v.key)
+                if saved >= 0 { v.set(saved) }      // не трогал — вернём как было
+                settings.setMutedBackup(v.key, nil) // трогал — оставляем его значение
+            }
+            // Слышно, что именно вернулось и на какой громкости. При ВЫКЛЮЧЕНИИ, разумеется, молчим.
+            if settings.soundEnabled, !settings.soundName.isEmpty {
+                let cue = settings.soundName == "speakey"
+                    ? NSSound(data: CueSynth.switchData) : NSSound(named: settings.soundName)
+                Sounds.play(cue, volume: settings.soundVolume, as: "switch")
+            }
+        }
+        // Перерисовать раздел: ползунки должны показать новые значения (0 либо восстановленные).
+        DispatchQueue.main.async { [weak self] in self?.reshow() }
+    }
+    /// О программе — версия, лицензия и локальные счётчики.
+    private func buildAbout() -> NSView {
+        let ver = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "0.0.1"
+        let logBtn = NSButton(title: L10n.t("voice.log"), target: self, action: #selector(openLog))
+        logBtn.bezelStyle = .rounded; logBtn.controlSize = .regular
+        let welBtn = NSButton(title: L10n.t("about.welcome"), target: self, action: #selector(showWelcomeTour))
+        welBtn.bezelStyle = .rounded; welBtn.controlSize = .regular
+
+        return vstack([
+            blockTitle("about.title"),
+            sub(L10n.t("about.tagline")),
+            group(10),
+            sectionTitle(L10n.t("about.whatTitle")),
+            // Хоткеи в описании — ТЕКУЩИЕ пользовательские, а не зашитые: инструкция,
+            // которая расходится с настройками, хуже отсутствующей.
+            sub(String(format: L10n.t("about.what"), hotkeyDisplayString())),
+            group(8),
+            sectionTitle(L10n.t("about.canTitle")),
+            sub(String(format: L10n.t("about.can"), hotkeyDisplayString())),
+            group(8),
+            sectionTitle(L10n.t("about.nuanceTitle")),
+            sub(L10n.t("about.nuance")),
+            group(10),
+            card([
+                controlRow(L10n.t("about.version"), versionValue(ver),
+                           key: "about.version"),
+                controlRow(L10n.t("about.license"), valueText(L10n.t("about.licenseVal")),
+                           key: "about.license"),
+                controlRow(L10n.t("about.rescued"), valueText(rescuedDisplay()), key: "about.rescued"),
+                controlRow(L10n.t("about.dictated"), valueText(dictatedDisplay()), key: "about.dictated"),
+                buttonRow([logBtn, welBtn])
+            ]),
+            group(6),
+            hint(L10n.t("about.credits"))
+        ])
+    }
+    private func valueText(_ s: String) -> NSView {
+        let l = NSTextField(labelWithString: s)
+        l.font = .systemFont(ofSize: 13); l.textColor = .secondaryLabelColor
+        l.setContentHuggingPriority(.required, for: .horizontal)
+        return l
+    }
+    /// Счётчик спасённых раскладок с разделителями тысяч («1 247»). Пока 0 — тёплая заглушка.
+    private func rescuedDisplay() -> String {
+        let n = settings.rescuedCount
+        guard n > 0 else { return L10n.current == .ru ? "пока ни одной 🥚" : "none yet 🥚" }
+        return Self.grouped(n)
+    }
+    /// Счётчик надиктованного голосом: «12 480 символов · 1 903 слова». Пока 0 — тёплая заглушка.
+    private func dictatedDisplay() -> String {
+        let c = settings.voiceChars, w = settings.voiceWords
+        guard c > 0 else { return L10n.current == .ru ? "пока ни слова 🎙" : "not a word yet 🎙" }
+        if L10n.current == .ru {
+            return "\(Self.grouped(c)) \(Self.pluralRu(c, "символ", "символа", "символов"))"
+                 + " · \(Self.grouped(w)) \(Self.pluralRu(w, "слово", "слова", "слов"))"
+        }
+        return "\(Self.grouped(c)) chars · \(Self.grouped(w)) \(w == 1 ? "word" : "words")"
+    }
+    /// Число с пробелами-разделителями тысяч («1 247»).
+    private static func grouped(_ n: Int) -> String {
+        let fmt = NumberFormatter(); fmt.numberStyle = .decimal; fmt.groupingSeparator = " "
+        return fmt.string(from: NSNumber(value: n)) ?? "\(n)"
+    }
+    /// Русское склонение по числу: 1 символ / 2 символа / 5 символов (11–14 — всегда «многих»).
+    private static func pluralRu(_ n: Int, _ one: String, _ few: String, _ many: String) -> String {
+        let n100 = n % 100, n10 = n % 10
+        if n100 >= 11 && n100 <= 14 { return many }
+        if n10 == 1 { return one }
+        if (2...4).contains(n10) { return few }
+        return many
+    }
+    /// Версия как кликабельный текст — пасхалка: клик = «мяу».
+    private func versionValue(_ s: String) -> NSView {
+        let b = NSButton(title: s, target: self, action: #selector(meowEasterEgg))
+        b.isBordered = false; b.bezelStyle = .inline
+        b.attributedTitle = NSAttributedString(string: s, attributes: [
+            .foregroundColor: NSColor.secondaryLabelColor, .font: NSFont.systemFont(ofSize: 13)])
+        b.toolTip = "🐾"
+        b.setContentHuggingPriority(.required, for: .horizontal)
+        return b
+    }
+    @objc private func meowEasterEgg() { CueSynth.versionTap() }
+
+    private var welcomeTourWC: WelcomeWindowController?
+    @objc private func showWelcomeTour() {
+        if welcomeTourWC == nil { welcomeTourWC = WelcomeWindowController() }
+        welcomeTourWC?.show()
+    }
+
+    // MARK: helpers
+
+    private func buildVoice() -> NSView {
+        voiceModelStatus.removeAll()
+        voiceModelButton.removeAll()
+        // Раздел собран по ТЕКУЩЕМУ состоянию диска → запоминаем сигнатуру, чтобы ближайший
+        // revalidateVoiceIfShown (активация окна) не делал лишнюю пересборку впустую.
+        lastModelsSignature = modelsSignature()
+        // Единый список моделей (Parakeet + whisper) — без тумблера движка: движок выводится из
+        // активной модели. Любую можно скачать / активировать / удалить (по просьбе автора 2026-06-14).
+        unifiedCatalog = unifiedModels()
+        // РЕКОМЕНДУЕМЫЕ отдельно от остальных: из пяти моделей человек не понимает, какую брать
+        // (репорт 25.07). Сверху две, которыми стоит пользоваться, прочие — под спойлером.
+        // Индексы берём от ПОЛНОГО каталога: по ним работают кнопки строк (tag → unifiedCatalog).
+        let indexed = Array(unifiedCatalog.enumerated())
+        let recommended = indexed.filter { Self.recommendedModelIds.contains($0.element.id) }
+        let others = indexed.filter { !Self.recommendedModelIds.contains($0.element.id) }
+        // Спойлер раскрыт сам, если «спрятанная» модель активна или уже скачана — иначе человек
+        // не нашёл бы то, чем прямо сейчас пользуется.
+        if voiceOthersExpanded == nil {
+            voiceOthersExpanded = others.contains { isActiveModel($0.element) || $0.element.isInstalled() }
+        }
+        let modelCard = card(recommended.map { unifiedModelRow($0.element, index: $0.offset) })
+
+        let histClear = NSButton(title: L10n.t("voice.histClear"), target: self, action: #selector(clearVoiceHistory))
+        histClear.bezelStyle = .rounded; histClear.controlSize = .regular
+        let histShow = NSButton(title: L10n.t("voice.showHistory"), target: self, action: #selector(showVoiceHistory))
+        histShow.bezelStyle = .rounded; histShow.controlSize = .regular
+
+        // РАСКЛАДКА ПО СМЫСЛУ.
+        // Было: 12 разнородных строк в ОДНОЙ карточке. Микрофон стоял в пятой строке, а его же
+        // прогрев — в восьмой, через две чужие. Кнопка системной панели звука («Открыть настройки
+        // звука…») сидела прямо над нашим собственным «Звуком записи», и слово «звук» в двух
+        // разных смыслах читалось как дубль. Теперь четыре карточки с заголовками; ровно четыре,
+        // потому что коралловый акцент, встречающийся шесть раз на экране, перестаёт быть акцентом.
+        warmBox = nil; volumeBox = nil; autoEnterBox = nil; othersBox = nil; outputBox = nil   // ссылки прошлой сборки недействительны
+        var views: [NSView] = [
+            blockTitle("voice.title"),
+            group(8),
+            // A. Самое главное: включить и чем вызывать. Без заголовка — идёт сразу под названием.
+            card([
+                switchRow(L10n.t("voice.on"), nil, settings.voiceEnabled, #selector(toggleVoice), key: "voice.on"),
+                controlRow(L10n.t("voice.hotkey"), voiceHotkeyRow(), key: "voice.hotkey"),
+                controlRow(L10n.t("voice.mode"), voiceModeControl(), subtitle: L10n.t("voice.modeSub"),
+                           help: L10n.t("voice.modeHelp"), key: "voice.mode"),
+                // Подпись + кружок «i»: настройка молча ломала диктовку двуязычным людям. Тест 30.07
+                // (четыре диктовки смешанной речи): на «Авто» и на «Русском» всё хорошо, а с
+                // принудительным English русский не распознаётся вовсе. Связать одно с другим человеку
+                // было неоткуда. Подпись однострочная и усекается (settingRow), длинное объяснение — в help.
+                controlRow(L10n.t("voice.lang"), voiceLangControl(),
+                           subtitle: L10n.t("voice.langSub"), help: L10n.t("voice.langHelp"), key: "voice.lang"),
+            ]),
+            group(6),
+            // ⚠️ ПОДЗАГОЛОВОК ВПЛОТНУЮ К СВОЕЙ КАРТОЧКЕ, БЕЗ ПРОКЛАДКИ (автор 24.09.2026). Здесь после
+            // каждого из пяти подзаголовков стоял `group(8)`, и зазор до карточки выходил 28 pt
+            // вместо обычных 10: заголовок отрывался от своего блока и читался ничьим. В «Общих»,
+            // «Автозамене» и «Переводе» прокладки под заголовком нет, теперь и здесь так же.
+            sectionTitle(L10n.t("voice.grpMic")),
+            // B. Всё про устройство ввода в одном месте: выбор, прогрев и его окно, системный уровень.
+            card([
+                controlRow(L10n.t("voice.mic"), micSelectorControl(), key: "voice.mic"),
+                switchRow(L10n.t("voice.warm"), L10n.t("voice.warmSub"), settings.voiceWarmWindow, #selector(toggleWarmWindow),
+                          help: L10n.t("voice.warmHelp"), key: "voice.warm"),
+                makeWarmBox(),
+                // ⚠️ ЗДЕСЬ, А НЕ В КАРТОЧКЕ ПРИГЛУШЕНИЯ (08.08). Сначала я положил эти две строки
+                // рядом с «приглушать звук на время диктовки»: обе ведь про громкость. Но выше в
+                // этом файле стоит прямое указание, что системный уровень ВХОДА живёт в карточке
+                // микрофона, а приглушение ВЫХОДА отдельно, и это разные смыслы. Соседство по слову
+                // «громкость» не повод их смешивать: рядом уже стоит кнопка в системные настройки
+                // ровно про этот же ползунок.
+                switchRow(L10n.t("voice.micGain"),
+                          MicVolume.supported() ? L10n.t("voice.micGainSub") : L10n.t("voice.micGainUnsupported"),
+                          settings.voiceMicGain, #selector(toggleMicGain),
+                          enabled: MicVolume.supported(), help: L10n.t("voice.micGainHelp"), key: "voice.micGain"),
+            ] + (settings.voiceMicGain && MicVolume.supported()
+                 // ⚠️ СТРОКА УРОВНЯ ПОЯВЛЯЕТСЯ, А НЕ ГАСНЕТ (автор 08.08). У выключенной функции
+                 // уровень не значит ничего, и серая строка с числом только занимает место и
+                 // приглашает её потрогать. Тот же приём, что у «Сколько молчать» в быстрых
+                 // действиях: там строка тоже есть лишь тогда, когда выбрана пауза.
+                 // Раздел пересобирается по `reshow()` из `toggleMicGain`.
+                 ? [controlRow(L10n.t("voice.micGainLevel"), micGainLevelControl(),
+                               help: L10n.t("voice.micGainLevelHelp"), key: "voice.micGainLevel")]
+                 : []) + [
+                buttonRow([soundSettingsLink()]),
+            ]),
+            group(6),
+            sectionTitle(L10n.t("voice.grpDictation")),
+            // C. Поведение самой диктовки. Наш звук записи живёт ЗДЕСЬ, а системный уровень входа —
+            // в карточке микрофона: два разных смысла разведены по разным карточкам.
+            card([
+                // Первой строкой — то, что человек видит во время диктовки, и только потом то, чем
+                // она заканчивается: плашка появляется раньше, чем мысль про Escape.
+                controlRow(L10n.t("voice.hudPlace"), voiceHudPlaceControl(),
+                           subtitle: !Self.anyScreenHasNotch ? L10n.t("voice.hudNoNotch")
+                                     : (Self.notchIsCoveredByCompat ? L10n.t("voice.hudNotchCompat")
+                                                                    : L10n.t("voice.hudPlaceSub")),
+                           help: L10n.t("voice.hudPlaceHelp"), key: "voice.hudPlace"),
+                switchRow(L10n.t("voice.escCancel"), L10n.t("voice.escCancelSub"), settings.escCancelsDictation, #selector(toggleEscCancel),
+                          help: L10n.t("voice.escHelp"), key: "voice.escCancel"),
+                // Подчинённая настройка: без самой отмены по Escape ей нечего сохранять, поэтому
+                // при выключенном тумблере выше она гаснет.
+                switchRow(L10n.t("voice.escSave"), L10n.t("voice.escSaveSub"), settings.escSaveToHistory,
+                          #selector(toggleEscSave), enabled: settings.escCancelsDictation,
+                          help: L10n.t("voice.escSaveHelp"), key: "voice.escSave"),
+                // ⚠️ ЗДЕСЬ БЫЛ ПОТОКОВЫЙ НАБОР — УБРАН ДО 0.4 (автор, 01.08.2026), см. AppSettings.
+                // Строка обещала «показывает речь на плашке», и этого не происходило. Возвращать
+                // сюда же не надо: в 0.4 её место в разделе «Пока вы диктуете», рядом с остальным,
+                // что происходит во время речи.
+                //
+                // ⚠️ «Звук записи» и громкость ОСТАЮТСЯ ЗДЕСЬ. 01.08 они переехали в «Пока вы
+                // диктуете» (по смыслу: звучат во время диктовки), а 02.08 автор посмотрел на живом
+                // окне и вернул обратно. Не трогать без него: логика группировки тут проиграла
+                // привычке, и это его окно.
+                switchRow(L10n.t("voice.sound"), L10n.t("voice.soundSub"), settings.voiceSoundEnabled,
+                          #selector(toggleVoiceSound), help: L10n.t("voice.soundHelp"), key: "voice.sound"),
+                makeVolumeBox(),
+                // «Как вставлять текст» больше НЕ висит отдельной ссылкой между карточкой и
+                // заголовком — она была там сиротой, без карточки и без заголовка. Теперь это
+                // обычная строка внутри «Диктовки», а четыре правила выезжают под ней.
+                outputGroupRow(),
+                makeOutputBox(),
+            ]),
+        ]
+        // ⚠️ РЕДАКТОР СЛОВАРЯ УБРАН ИЗ НАСТРОЕК (решение автора 13.08.2026: «словарь в голосовом
+        // наборе не будем отображать, он будет под нашим контролем полностью»).
+        //
+        // Сам словарь никуда не делся и работает как работал — `VoiceDictionary` правит распознанное
+        // и кормит подсказку модели. Изменилось одно: список ведём мы, а не человек. Повод прямой —
+        // на «Claude Code» заготовок понадобилось тридцать шесть, и такой список в окне настроек
+        // выглядит свалкой, а не настройкой. Это ровно та линия, что и с простым режимом: минимум
+        // ручек, остальное решаем за человека.
+        //
+        // ⚠️ ЦЕНА НАЗВАНА ЧЕСТНО: пока редактора нет, человек не может добавить СВОЁ слово, и
+        // единственный путь для него — написать нам. Если таких просьб пойдёт много, редактор
+        // вернётся, но уже не свалкой: свои записи отдельно от заготовок.
+
+        views.append(contentsOf: [
+            group(6),
+            sectionTitle(L10n.t("voice.modelsTitle")),
+            modelCard
+        ])
+        // «Другие модели» — СРАЗУ за двумя рекомендованными, до пояснений: это продолжение списка,
+        // а не сноска к нему. Пояснительный текст уходит ниже — под раскрывшийся список.
+        if !others.isEmpty {
+            // Без треугольника раскрытия (он автору разонравился) и БЕЗ reshow: список строится
+            // всегда и лежит в шторке, кнопка лишь меняет её isHidden. Отправитель клика при этом
+            // жив, поэтому обёртка в async здесь не нужна.
+            let expanded = voiceOthersExpanded ?? false
+            let box = CollapsibleRow(row: card(others.map { unifiedModelRow($0.element, index: $0.offset) }),
+                                     separator: group(4), visible: expanded)
+            othersBox = box
+            views.append(contentsOf: [group(4),
+                                      flatLink(String(format: L10n.t("voice.othersN"), others.count),
+                                               action: #selector(toggleVoiceOthers)),
+                                      box])
+        }
+        views.append(contentsOf: [
+            group(6),
+            hint(L10n.t("voice.modelsNote")),
+            group(2),
+            hint(L10n.t("voice.sizeNote")),          // чем крупнее модель, тем медленнее (и, вероятно, точнее)
+            group(6),
+        ])
+        #if !arch(arm64)
+        views.append(contentsOf: [hint(L10n.t("voice.intelNote")), group(6)])
+        #endif
+        // Выгрузка после каждой диктовки (просьба пользователей, автор 24.09.2026). Стоит в группе
+        // моделей, потому что это про модель, а не про саму диктовку. Подпись сразу говорит, кому
+        // она НЕ нужна: у большинства памяти хватает, и им галочка только добавит задержку.
+        #if arch(arm64)
+        let unloadSub = L10n.t("voice.unloadAfterSub")
+        #else
+        let unloadSub = L10n.t("voice.unloadAfterSubIntel")
+        #endif
+        views.append(card([
+            switchRow(L10n.t("voice.unloadAfter"), unloadSub, settings.voiceUnloadAfterDictation,
+                      #selector(toggleUnloadAfterDictation), help: L10n.t("voice.unloadAfterHelp"), key: "voice.unloadAfter"),
+        ]))
+        views.append(contentsOf: [
+            group(6),
+            sectionTitle(L10n.t("voice.grpDuck")),
+            card([
+                switchRow(L10n.t("voice.duck"), L10n.t("voice.duckSub"), settings.voiceDuck,
+                          #selector(toggleDuck), help: L10n.t("voice.duckHelp"), key: "voice.duck"),
+                controlRow(L10n.t("voice.duckLevel"), duckLevelControl(), enabled: settings.voiceDuck,
+                           help: L10n.t("voice.duckLevelHelp"), key: "voice.duckLevel"),
+            ]),
+            group(6),
+            sectionTitle(L10n.t("voice.grpHistory")),
+            card([
+                switchRow(L10n.t("voice.history"), L10n.t("voice.historySub"), settings.voiceHistoryEnabled, #selector(toggleVoiceHistory),
+                          key: "voice.history"),
+                switchRow(L10n.t("hist.lock.toggle"), L10n.t("hist.lock.toggleSub"), HistoryGate.enabled, #selector(toggleHistoryLock),
+                          help: L10n.t("hist.lockHelp"), key: "hist.lock.toggle"),
+                // Срок хранения управляет не только окном истории: по нему же исчезает пункт меню
+                // «Скопировать последнюю диктовку» (MenuBarController → VoiceHistory.lastVisible).
+                // Связка неочевидная, поэтому названа вслух.
+                controlRow(L10n.t("voice.retention"), historyRetentionControl(),
+                           subtitle: L10n.t("voice.retentionSub"), help: L10n.t("voice.retentionHelp"),
+                           key: "voice.retention"),
+                // ⚠️ Сохранение аудио стоит ИМЕННО ЗДЕСЬ, под сроком хранения, а не в «Микрофоне»:
+                // клип живёт ровно столько же, сколько запись истории, и человек должен увидеть срок
+                // прямо над тумблером. В «Микрофоне» настройки того, КАК мы пишем, а это про то, что
+                // остаётся ПОСЛЕ.
+                switchRow(L10n.t("voice.saveAudio"), L10n.t("voice.saveAudioSub"), settings.voiceSaveAudio,
+                          #selector(toggleSaveAudio), help: L10n.t("voice.saveAudioHelp"), key: "voice.saveAudio"),
+                // Вставка последней диктовки по сочетанию (задача 242). Стоит в истории, а не в
+                // «Микрофоне»: вставляется именно ЗАПИСЬ ИЗ ИСТОРИИ, с её же сроком хранения и её
+                // же паролем. Соседство со «Скопировать последнюю диктовку» тут не случайно —
+                // это второй способ добраться до того же текста, только без похода в строку меню.
+                ] + pasteDictationRows() + [
+                buttonRow([histShow, histClear])
+            ]),
+            group(2),
+            hint(L10n.t("voice.foot"))
+        ])
+        return vstack(views)
+    }
+
+    // MARK: единый список моделей распознавания (Parakeet + whisper, без тумблера движка)
+
+    private var unifiedCatalog: [UnifiedModel] = []
+    /// Что показываем сразу: Neural-Engine-модель и самая сильная whisper. Остальные — под спойлером.
+    private static let recommendedModelIds: Set<String> = ["parakeet", "large-v3-turbo"]
+    /// nil — ещё не решали (решим по факту: активна/скачана ли «спрятанная» модель).
+    private var voiceOthersExpanded: Bool?
+    private var downloadingModelId: String?      // какая модель качается сейчас (одна за раз)
+    private var downloadProgress = 0.0
+    // Сторож застревания загрузки (репорт 23.07.2026: Parakeet «завис на 2%» — HF-CDN из RU
+    // капризен, а прогресс FluidAudio при затыке честно замирает; UI молчал и выглядел сломанным).
+    private var dlLastChangeAt = Date()
+    private var dlLoggedDecile = -1
+    private var dlStallTimer: Timer?
+
+    /// Одна запись каталога моделей. Движок выводится из активной модели (тумблер Whisper/Parakeet убран).
+    struct UnifiedModel {
+        let engine: String      // "parakeet" | "whisper"
+        let id: String          // "parakeet" или имя whisper-модели (base/small/…)
+        let display: String
+        let size: String
+        let note: String
+        /// Ключ L10n для подсказки. Для whisper приходит из `ModelDownloader.catalog`, для Parakeet
+        /// это «voice.pkHelp». ⚠️ НЕ вычислять из id — почему, написано у `struct Model` в
+        /// `ModelDownloader`.
+        let helpKey: String
+        /// Развёрнутое описание под кнопкой «i»: диск, память, скорость, для чего годится.
+        /// Собирается из ключа модели и общего хвоста про память (`model.memNote`).
+        var help: String {
+            let body = L10n.t(helpKey)
+            // Ключа нет в словаре → L10n.t возвращает сам ключ, и человек прочитал бы в поповере
+            // «model.large-v3-turbo-q5_0.help». Ловим это при добавлении модели, а не по отзыву.
+            assert(body != helpKey, "нет перевода для \(helpKey) — добавь пару ru/en")
+            return body.contains("%@") ? String(format: body, L10n.t("model.memNote")) : body
+        }
+        func isInstalled() -> Bool {
+            engine == "parakeet" ? ParakeetEngine.modelInstalled : ModelDownloader.shared.isInstalled(id)
+        }
+    }
+
+    /// Полный каталог: Parakeet (рекомендуемый, по умолчанию) первым, затем whisper по возрастанию размера.
+    private func unifiedModels() -> [UnifiedModel] {
+        var list: [UnifiedModel] = []
+        #if arch(arm64) && !SPEAKEY_NO_PARAKEET   // Intel: Parakeet физически отсутствует в сборке (нет Neural Engine) — не дразним
+        list.append(UnifiedModel(engine: "parakeet", id: "parakeet",
+                                 display: L10n.t("voice.pkName"), size: L10n.size("~465 MB"),
+                                 note: L10n.t("voice.pkDesc"), helpKey: "voice.pkHelp"))
+        #endif
+        list += ModelDownloader.catalog.map {
+            UnifiedModel(engine: "whisper", id: $0.name, display: Self.whisperDisplayName($0.name),
+                         size: L10n.size($0.size), note: L10n.t($0.note), helpKey: $0.help)
+        }
+        return list
+    }
+
+    /// Человекочитаемое имя whisper-модели (вопрос автора 28.07: «Base, Small, Medium — непонятно,
+    /// что это Whisper»). В списке они стояли голыми идентификаторами рядом с названным по имени
+    /// Parakeet, и выглядело это как размеры чего-то безымянного, а не как отдельный движок.
+    static func whisperDisplayName(_ id: String) -> String {
+        let pretty = id.split(separator: "-").map { part -> String in
+            // «v3» оставляем как есть, остальное с заглавной: large-v3-turbo → Large v3 Turbo
+            part.first == "v" && part.dropFirst().allSatisfy(\.isNumber) ? String(part) : part.capitalized
+        }.joined(separator: " ")
+        return "Whisper " + pretty
+    }
+
+    /// Шторки раздела «Голос». Ссылки СЛАБЫЕ и обнуляются в начале сборки: иначе после законной
+    /// пересборки (смена языка, докачка модели, revalidateVoiceIfShown) они указывали бы на строки
+    /// прошлой сборки, и анимация молча перестала бы работать.
+    private weak var warmBox: CollapsibleRow?
+    private weak var volumeBox: CollapsibleRow?
+
+    private func makeWarmBox() -> CollapsibleRow {
+        let box = CollapsibleRow(row: subordinateRow(controlRow(L10n.t("voice.warmDur"), warmDurationControl(),
+                                                                key: "voice.warmDur")),
+                                 separator: hairline(), visible: settings.voiceWarmWindow)
+        warmBox = box
+        return box
+    }
+    private func makeVolumeBox() -> CollapsibleRow {
+        let box = CollapsibleRow(row: subordinateRow(controlRow(L10n.t("voice.soundVol"), voiceVolumeSlider(),
+                                                                key: "voice.soundVol")),
+                                 separator: hairline(), visible: settings.voiceSoundEnabled)
+        volumeBox = box
+        return box
+    }
+    /// ⚠️ ЗДЕСЬ БЫЛ ЛЕВЫЙ ОТСТУП У ПОДЧИНЁННЫХ СТРОК — УБРАН 29.07, НЕ ВОЗВРАЩАТЬ БЕЗ РАЗБОРА.
+    /// Идея была пометить отступом строки-параметры («Громкость» под «Звуком записи», «Окно
+    /// прогрева» под «Мгновенным стартом»), чтобы они читались как подчинённые. На практике автор
+    /// увидел это как случайную поломку выравнивания: «почему надпись чуть правее съехала, как будто
+    /// какой-то отступ появился». Приём, который приходится объяснять, свою работу не делает.
+    /// Связь и так очевидна: подчинённая строка появляется и исчезает ВМЕСТЕ с родительским
+    /// тумблером, и стоит вплотную под ним.
+    private func subordinateRow(_ row: NSView) -> NSView { row }
+
+    private weak var outputBox: CollapsibleRow?
+    /// Строка «Как вставлять текст»: заголовок + сводка текущего состояния + ссылка-раскрытие.
+    /// Сводка нужна, чтобы человеку не приходилось раскрывать группу ради ответа «а что там сейчас».
+    private func outputGroupRow() -> NSView {
+        var parts: [String] = []
+        if settings.voiceNoCapital { parts.append(L10n.t("voice.sumNoCap")) }
+        if settings.voiceNoFinalPeriod { parts.append(L10n.t("voice.sumNoDot")) }
+        if settings.voiceAutoEnter { parts.append(L10n.t("voice.sumEnter")) }
+        if !settings.voiceTrailingSpace { parts.append(L10n.t("voice.sumNoSpace")) }
+        let summary = parts.isEmpty ? L10n.t("voice.sumDefault") : parts.joined(separator: " · ")
+        let link = NSButton(title: "", target: self, action: #selector(toggleVoiceOutputGroup))
+        link.isBordered = false; link.setButtonType(.momentaryChange)
+        link.attributedTitle = NSAttributedString(
+            string: L10n.t("voice.outputOpen"),
+            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: DS.coral])
+        link.setContentHuggingPriority(.required, for: .horizontal)
+        return settingRow(L10n.t("voice.outputGroup"), summary, trailing: link,
+                          help: L10n.t("voice.outputHelp"), key: "voice.outputGroup")
+    }
+    private func makeOutputBox() -> CollapsibleRow {
+        let inner = NSStackView(views: [
+            // ⓘ у всех четырёх (просьба автора 10.08): подписи под строкой обрезаются одной строкой,
+            // а объяснить тут есть что, и человеку прочитать это было негде.
+            subordinateRow(switchRow(L10n.t("voice.noCapital"), L10n.t("voice.noCapitalSub"), settings.voiceNoCapital, #selector(toggleVoiceNoCapital),
+                                     help: L10n.t("voice.noCapitalHelp"), key: "voice.noCapital")),
+            hairline(),
+            subordinateRow(switchRow(L10n.t("voice.noPeriod"), L10n.t("voice.noPeriodSub"), settings.voiceNoFinalPeriod, #selector(toggleVoiceNoPeriod),
+                                     help: L10n.t("voice.noPeriodHelp"), key: "voice.noPeriod")),
+            hairline(),
+            subordinateRow(switchRow(L10n.t("voice.noEmDash"), L10n.t("voice.noEmDashSub"), settings.voiceNoEmDash, #selector(toggleVoiceNoEmDash),
+                                     help: L10n.t("voice.noEmDashHelp"), key: "voice.noEmDash")),
+            hairline(),
+            subordinateRow(switchRow(L10n.t("voice.autoEnter"), L10n.t("voice.autoEnterSub"), settings.voiceAutoEnter, #selector(toggleVoiceAutoEnter),
+                                     help: L10n.t("voice.autoEnterHelp"), key: "voice.autoEnter")),
+            makeAutoEnterBox(),
+            hairline(),
+            subordinateRow(switchRow(L10n.t("voice.trailSpace"), L10n.t("voice.trailSpaceSub"), settings.voiceTrailingSpace, #selector(toggleVoiceTrailSpace),
+                                     help: L10n.t("voice.trailSpaceHelp"), key: "voice.trailSpace")),
+        ])
+        inner.orientation = .vertical; inner.alignment = .width; inner.spacing = 0
+        let box = CollapsibleRow(row: inner, separator: hairline(), visible: voiceOutputExpanded ?? false)
+        outputBox = box
+        return box
+    }
+
+    /// Блок «Как вставлять текст» свёрнут по умолчанию, и офскрин-дамп (`SPEAKEY_DUMP`) видит его
+    /// именно свёрнутым, то есть четыре строки внутри проверить глазами было нечем. Переменная
+    /// окружения раскрывает его на старте и существует ровно ради правила «смотреть на пиксели».
+    private var voiceOutputExpanded: Bool? = ProcessInfo.processInfo.environment["SPEAKEY_OUTOPEN"] == "1" ? true : nil
+    @objc private func toggleVoiceOutputGroup() {
+        let on = !(voiceOutputExpanded ?? false)
+        voiceOutputExpanded = on
+        outputBox?.setVisible(on, in: contentStack)
+    }
+
+    private weak var othersBox: CollapsibleRow?
+    @objc private func toggleVoiceOthers() {
+        let on = !(voiceOthersExpanded ?? false)
+        voiceOthersExpanded = on
+        othersBox?.setVisible(on, in: contentStack)
+    }
+
+    /// Активна ли модель (движок + конкретная whisper-модель).
+    private func isActiveModel(_ m: UnifiedModel) -> Bool {
+        m.engine == "parakeet"
+            ? settings.voiceEngine == "parakeet"
+            : (settings.voiceEngine == "whisper" && settings.voiceModel == m.id)
+    }
+
+    /// Сделать модель активной: движок выводится из неё (whisper-модель ещё и запоминается).
+    private func activateModel(_ m: UnifiedModel) {
+        if m.engine == "parakeet" {
+            settings.voiceEngine = "parakeet"
+        } else {
+            settings.voiceEngine = "whisper"
+            settings.voiceModel = m.id
+        }
+        // ⚠️ ГРЕЕМ НОВЫЙ ДВИЖОК СРАЗУ (фикс 30.07). Прогрев жил только в старте приложения
+        // (AppDelegate → VoiceController.preload) и грел тот движок, который выбран НА ТОТ МОМЕНТ.
+        // Человек менял движок в настройках, новый оставался холодным, и за это платила первая же
+        // диктовка: у паракита загрузка под ANE занимает больше полуминуты. Момент переключения —
+        // идеальное время греть: человек в настройках, диктовать прямо сейчас не собирается.
+        VoiceController.shared.preload()
+        // Кнопка «Использовать» живёт в ПЕРЕСОБИРАЕМОЙ строке — снос из её же action это тот самый
+        // класс, который на macOS 26 роняет приложение (см. toggleSilentUpdate). Откладываем на такт.
+        DispatchQueue.main.async { [weak self] in self?.reshow() }
+    }
+
+    /// Строка модели в едином списке: имя + (размер · статус) слева; справа — Скачать / Использовать
+    /// + корзина-удаление (для любой установленной). Активная подсвечена coral, статус «используется».
+    private func unifiedModelRow(_ m: UnifiedModel, index: Int) -> NSView {
+        let installed = m.isInstalled()
+        // Подсветка «активная» (coral + «используется») — только если модель РЕАЛЬНО скачана. Иначе
+        // дефолтный, но не скачанный Parakeet выглядел бы «активным» без файла на диске (путаница).
+        let activeNow = isActiveModel(m) && installed
+
+        let name = NSTextField(labelWithString: m.display)
+        name.font = .systemFont(ofSize: 13, weight: activeNow ? .semibold : .regular)
+        name.textColor = activeNow ? DS.coral : .labelColor
+        name.setContentCompressionResistancePriority(.required, for: .horizontal)
+        name.setContentHuggingPriority(.required, for: .horizontal)
+
+        let metaText = "\(m.size)  ·  " + (installed ? (activeNow ? L10n.t("voice.active") : L10n.t("voice.installed")) : m.note)
+        let status = NSTextField(labelWithString: metaText)
+        status.font = .systemFont(ofSize: 11)
+        status.textColor = activeNow ? DS.coral.withAlphaComponent(0.85) : .secondaryLabelColor
+        status.lineBreakMode = .byTruncatingTail
+        status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        voiceModelStatus[m.id] = status
+
+        let nameCol = NSStackView(views: [name, status]); nameCol.orientation = .vertical
+        nameCol.alignment = .leading; nameCol.spacing = 1
+
+        var right: [NSView] = []
+        if !installed {
+            let dl = NSButton(title: L10n.t("voice.download"), target: self, action: #selector(downloadModelAction(_:)))
+            dl.bezelStyle = .rounded; dl.controlSize = .regular; dl.tag = index
+            dl.setContentCompressionResistancePriority(.required, for: .horizontal)
+            if downloadingModelId == m.id { dl.isEnabled = false; dl.title = "\(Int(downloadProgress * 100))%" }
+            voiceModelButton[m.id] = dl
+            right = [dl]
+        } else {
+            if !activeNow {
+                let use = NSButton(title: L10n.t("voice.use"), target: self, action: #selector(activateModelAction(_:)))
+                use.bezelStyle = .rounded; use.controlSize = .regular; use.tag = index
+                use.setContentCompressionResistancePriority(.required, for: .horizontal)
+                right.append(use)
+            }
+            // Корзина-удаление — для ЛЮБОЙ установленной модели (освободить место).
+            let del = NSButton(title: "", target: self, action: #selector(deleteModelAction(_:)))
+            del.bezelStyle = .rounded; del.controlSize = .regular; del.tag = index
+            del.image = NSImage(systemSymbolName: "trash", accessibilityDescription: L10n.t("voice.delete"))
+            del.imagePosition = .imageOnly
+            del.toolTip = L10n.t("voice.delete")
+            del.setContentCompressionResistancePriority(.required, for: .horizontal)
+            del.setContentHuggingPriority(.required, for: .horizontal)
+            right.append(del)
+        }
+
+        let spacer = NSView(); spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        // «i» перед кнопками действия: человек должен узнать цену ДО того, как нажмёт «Скачать»,
+        // а не после того, как увидит полтора гигабайта в мониторе (задача 69).
+        let info = HelpButton(text: m.help, title: m.display)
+        let row = NSStackView(views: [nameCol, spacer, info] + right)
+        row.orientation = .horizontal; row.spacing = 8; row.alignment = .centerY
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 46).isActive = true
+        return row
+    }
+
+    /// Строка хоткея диктовки: селектор + кнопка «Проверить».
+    private func voiceHotkeyRow() -> NSView {
+        let picker = VoiceHotkeyControl()
+        let testBtn = NSButton(title: L10n.t("voice.hkTest"), target: self, action: #selector(testVoiceHotkey))
+        testBtn.bezelStyle = .rounded
+        let row = NSStackView(views: [picker, testBtn])
+        row.orientation = .horizontal; row.spacing = 8; row.alignment = .centerY
+        return row
+    }
+
+    /// Диагностика: перехватываем следующий keyDown через локальный монитор и сравниваем
+    /// с сохранёнными настройками голосового хоткея. Помогает понять, почему «не срабатывает».
+    @objc private func testVoiceHotkey() {
+        guard settings.voiceEnabled else {
+            let a = NSAlert()
+            a.messageText = L10n.t("voice.hkTestDisabled")
+            a.alertStyle = .informational
+            a.addButton(withTitle: L10n.t("voice.hkTestCancel"))
+            a.runModal()
+            return
+        }
+        // ⚠️ У ПАНЕЛИ ОБЯЗАН БЫТЬ ВЫХОД (отзыв #86, 04.08.2026: «на ровном месте появилось
+        // всплывающее сообщение»). Раньше стиль был [.titled, .nonactivatingPanel]: ни кнопки
+        // закрытия, ни Esc, ни таймаута. А монитор ЛОКАЛЬНЫЙ, то есть ловит нажатия, только пока
+        // фокус у нас. Достаточно было переключиться в другую программу, и панель оставалась на
+        // экране навсегда, всплывая потом «сама собой». Теперь у неё три независимых выхода:
+        // крестик, Esc и таймаут, и любой из них снимает монитор.
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 340, height: 90),
+                            styleMask: [.titled, .closable, .nonactivatingPanel],
+                            backing: .buffered, defer: false)
+        panel.title = "Speakey"
+        panel.isReleasedWhenClosed = false
+        panel.level = .floating   // иначе уезжает за окно настроек и человек её теряет из виду
+        let lbl = NSTextField(labelWithString: L10n.t("voice.hkTestPrompt"))
+        lbl.font = .systemFont(ofSize: 14)
+        lbl.translatesAutoresizingMaskIntoConstraints = false
+        panel.contentView?.addSubview(lbl)
+        NSLayoutConstraint.activate([
+            lbl.centerXAnchor.constraint(equalTo: panel.contentView!.centerXAnchor),
+            lbl.centerYAnchor.constraint(equalTo: panel.contentView!.centerYAnchor)
+        ])
+        panel.center()
+        panel.makeKeyAndOrderFront(nil)
+        var monitor: Any?
+        var closed = false
+        // Единая точка выхода: снять монитор и убрать панель. Зовётся из всех трёх путей.
+        func finish() {
+            guard !closed else { return }
+            closed = true
+            if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+            panel.orderOut(nil)
+        }
+        // Выход по времени: если человек отвлёкся или ушёл в другую программу, панель не должна
+        // пережить это молча. Пятнадцати секунд хватает на «нажми свой хоткей» с запасом.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { finish() }
+        // ⚠️ .flagsChanged ТОЖЕ, а не только .keyDown. Заводской хоткей диктовки это ОДИНОЧНЫЙ
+        // модификатор (правый ⌥), а он keyDown не порождает вовсе: проверка «нажми свой хоткей»
+        // для настройки по умолчанию не могла завершиться в принципе и висела до таймаута.
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak panel] ev in
+            guard panel != nil, !closed else { return ev }
+            // Esc — отмена проверки, а не «нажатый хоткей».
+            if ev.type == .keyDown, ev.keyCode == 53 { finish(); return nil }
+            // Отпускание модификаторов пропускаем: интересует нажатие.
+            if ev.type == .flagsChanged, ev.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty {
+                return ev
+            }
+            finish()
+            // Что нажато
+            let pressedKC = Int(ev.keyCode)
+            var pressedMod: CGEventFlags = []
+            if ev.modifierFlags.contains(.option)  { pressedMod.insert(.maskAlternate) }
+            if ev.modifierFlags.contains(.shift)   { pressedMod.insert(.maskShift) }
+            if ev.modifierFlags.contains(.command) { pressedMod.insert(.maskCommand) }
+            if ev.modifierFlags.contains(.control) { pressedMod.insert(.maskControl) }
+            // Что сохранено
+            let savedMode = self.settings.voiceHotkeyMode
+            let savedKC   = self.settings.voiceHotkeyKeyCode
+            let savedMod  = CGEventFlags(rawValue: self.settings.voiceHotkeyModifiers)
+            let kcOK  = (savedMode == "key") && (pressedKC == savedKC)
+            let modOK = pressedMod == savedMod
+            let match = kcOK && modOK
+            let pressedLabel = ev.charactersIgnoringModifiers?.uppercased() ?? "?"
+            func modStr(_ f: CGEventFlags) -> String {
+                var s = ""
+                if f.contains(.maskControl)  { s += "⌃" }
+                if f.contains(.maskAlternate){ s += "⌥" }
+                if f.contains(.maskShift)    { s += "⇧" }
+                if f.contains(.maskCommand)  { s += "⌘" }
+                return s
+            }
+            let pressedDisp = modStr(pressedMod) + pressedLabel
+            let savedDisp   = savedMode == "key"
+                ? modStr(savedMod) + (self.settings.voiceHotkeyKeyLabel.isEmpty ? "·" : self.settings.voiceHotkeyKeyLabel)
+                : (savedMode == "modkey" ? "одиночный модификатор" : savedMode)
+            let a = NSAlert()
+            a.messageText = match ? L10n.t("voice.hkTestOk") : L10n.t("voice.hkTestFail")
+            var info = "Нажато:   \(pressedDisp)  (kc=\(pressedKC), mod=0x\(String(pressedMod.rawValue, radix: 16)))\n"
+            info     += "Сохранено: \(savedDisp)"
+            if savedMode == "key" { info += "  (kc=\(savedKC), mod=0x\(String(savedMod.rawValue, radix: 16)))" }
+            if !match {
+                if savedMode != "key" { info += "\n\nРежим «\(savedMode)» — хоткей-клавиша не задана (нужна запись)." }
+                else if !kcOK  { info += "\n\nkeyCode не совпадает: нажата кнопка kc=\(pressedKC), сохранена kc=\(savedKC)." }
+                else if !modOK { info += "\n\nМодификатор не совпадает: нажато 0x\(String(pressedMod.rawValue, radix: 16)), сохранено 0x\(String(savedMod.rawValue, radix: 16))." }
+            }
+            a.informativeText = info
+            a.alertStyle = match ? .informational : .warning
+            a.addButton(withTitle: "OK")
+            a.runModal()
+            return nil  // не пускаем в поле
+        }
+        // Если пользователь просто закрыл панель мышью — чистим монитор через 30 сек
+        DispatchQueue.main.asyncAfter(deadline: .now() + 30) {
+            if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        }
+    }
+
+    /// Где показывать плашку диктовки: у курсора или вверху под чёлкой (задача 125).
+    private func voiceHudPlaceControl() -> NSView {
+        // ⚠️ ВАРИАНТА «ВВЕРХУ» В НАСТРОЙКАХ БОЛЬШЕ НЕТ (автор 13.08). Он был промежуточным: панель
+        // под строкой меню, пока не было острова. Остров делает то же самое, но честно — вырастая из
+        // выреза, — и держать рядом два похожих варианта значит заставлять человека выбирать между
+        // «почти то» и «то». Код режима остался (`voiceHudTop`) и работает фолбэком там, где выреза
+        // нет: настройка исчезла, поведение — нет.
+        let seg = NSSegmentedControl(labels: [L10n.t("voice.hudCaret"), L10n.t("voice.hudIsland")],
+                                     trackingMode: .selectOne, target: self, action: #selector(hudPlaceChanged(_:)))
+        seg.selectedSegment = settings.voiceHudIsland ? 1 : 0
+        // ⚠️ БЕЗ ВЫРЕЗА ТРЕТИЙ ВАРИАНТ НЕДОСТУПЕН, А НЕ «МОЛЧА НЕ РАБОТАЕТ». Предлагать человеку
+        // кнопку, которая у него не делает ничего, хуже, чем не предлагать вовсе: он нажмёт,
+        // подиктует и решит, что программа сломана. Причину говорим строкой рядом (voice.hudNoNotch).
+        if !Self.anyScreenHasNotch { seg.setEnabled(false, forSegment: 1) }
+        return seg
+    }
+
+    /// Есть ли СЕЙЧАС экран с вырезом.
+    ///
+    /// ⚠️ БЫЛО `static let`, И ЭТО ОКАЗАЛОСЬ ЛОВУШКОЙ (автор 13.08). Значение вычислялось один раз за
+    /// запуск, а «есть ли вырез» — величина непостоянная: отключил внешний монитор, сменил
+    /// разрешение, и система перестаёт (или начинает) сообщать про вырез. С кэшем вариант «В вырезе»
+    /// мог остаться выключенным до перезапуска приложения уже после того, как вырез вернулся, —
+    /// человек смотрит на свой MacBook с чёлкой и на серую кнопку рядом.
+    ///
+    /// Перебор двух-трёх экранов стоит микросекунды и делается только при сборке окна настроек.
+    ///
+    /// ⚠️ СПРАШИВАЕМ ЖЕЛЕЗО, А НЕ `safeAreaInsets` (13.08.2026). Нулевой inset означает не только
+    /// «выреза нет», но и «вырез есть, но система закрыла его режимом совместимости с корпусом
+    /// камеры». Второе macOS включает сама и держит, пока не переоценит рабочий стол, так что по
+    /// insets вариант «В вырезе» гас у человека с чёлкой посреди работы, без единого его действия.
+    /// Железо же не меняется никогда: чёлка либо есть в панели, либо нет.
+    static var anyScreenHasNotch: Bool { NSScreen.screens.contains { NotchIsland.hasPhysicalNotch($0) } }
+
+    /// Вырез в панели есть, но система прямо сейчас его закрыла. Рисовать туда нечего, и это стоит
+    /// сказать словами: иначе выбранный вариант «В вырезе» молча ведёт себя как «У курсора».
+    static var notchIsCoveredByCompat: Bool {
+        NSScreen.screens.contains { NotchIsland.hasPhysicalNotch($0) && $0.safeAreaInsets.top <= 0 }
+    }
+
+    @objc private func hudPlaceChanged(_ s: NSSegmentedControl) {
+        settings.voiceHudIsland = (s.selectedSegment == 1)
+        settings.voiceHudTop = false     // промежуточный режим больше не выбирают руками
+    }
+
+    private func voiceModeControl() -> NSView {
+        let seg = NSSegmentedControl(labels: [L10n.t("voice.modeHold"), L10n.t("voice.modeToggle")],
+                                     trackingMode: .selectOne, target: self, action: #selector(voiceModeChanged(_:)))
+        seg.selectedSegment = settings.voiceHoldMode == "toggle" ? 1 : 0
+        return seg
+    }
+
+    /// Отпустили ли ползунок ПРЯМО СЕЙЧАС.
+    ///
+    /// ⚠️ `NSSlider` непрерывный, то есть действие прилетает на КАЖДЫЙ пиксель перетаскивания. Пока
+    /// в действии стояло проигрывание превью, звук старта диктовки трещал очередью всё время, пока
+    /// человек вёл ползунок (жалоба пользователя). Само значение обновлять непрерывно правильно, а вот
+    /// звук уместен ровно один раз, когда движение закончилось. Отличаем по типу текущего события:
+    /// на отпускании это `.leftMouseUp`. Клавиатурная стрелка (`.keyDown`) тоже считается концом,
+    /// иначе с клавиатуры превью не звучало бы вовсе.
+    private var sliderDragEnded: Bool {
+        switch NSApp.currentEvent?.type {
+        case .leftMouseUp, .keyDown: return true
+        default: return false
+        }
+    }
+
+    private func soundVolumeSlider() -> NSView {
+        let s = NSSlider(value: settings.soundVolume, minValue: 0, maxValue: 1,
+                         target: self, action: #selector(soundVolChanged(_:)))
+        s.controlSize = .small
+        s.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        return s
+    }
+    @objc private func soundVolChanged(_ s: NSSlider) {
+        noteVolumeTouchedWhileMuted("switch")
+        settings.soundVolume = s.doubleValue
+        // Превью — только когда ползунок отпустили (см. sliderDragEnded).
+        if sliderDragEnded, settings.soundEnabled, !settings.soundName.isEmpty {
+            Sounds.play(NSSound(named: settings.soundName), volume: settings.soundVolume)
+        }
+    }
+
+    private func voiceVolumeSlider() -> NSView {
+        let s = NSSlider(value: settings.voiceSoundVolume, minValue: 0, maxValue: 1,
+                         target: self, action: #selector(voiceVolChanged(_:)))
+        s.controlSize = .small
+        s.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        return s
+    }
+    @objc private func toggleVoiceNoCapital(_ s: NSSwitch) { settings.voiceNoCapital = (s.state == .on) }
+    @objc private func toggleVoiceNoEmDash(_ s: NSSwitch) { settings.voiceNoEmDash = (s.state == .on) }
+    @objc private func toggleVoiceNoPeriod(_ s: NSSwitch) { settings.voiceNoFinalPeriod = (s.state == .on) }
+    /// Чем «отправлять» после диктовки. Порядок — по распространённости: Enter (Telegram, iMessage,
+    /// большинство чатов), ⌘Enter (Gmail, Linear, Slack в режиме «Enter = перенос строки»), ⇧Enter и
+    /// ⌃Enter встречаются реже, но у людей просили и их.
+    private static let autoEnterCombos: [(String, UInt64)] = [
+        ("Enter", 0),
+        ("⌘ Enter", CGEventFlags.maskCommand.rawValue),
+        ("⇧ Enter", CGEventFlags.maskShift.rawValue),
+        ("⌃ Enter", CGEventFlags.maskControl.rawValue),
+    ]
+    private func autoEnterCombo() -> NSView {
+        let pop = NSPopUpButton(frame: .zero, pullsDown: false)
+        pop.addItems(withTitles: Self.autoEnterCombos.map { $0.0 })
+        let cur = settings.voiceAutoEnterMods
+        pop.selectItem(at: Self.autoEnterCombos.firstIndex { $0.1 == cur } ?? 0)
+        pop.target = self; pop.action = #selector(autoEnterComboChanged(_:))
+        return pop
+    }
+    @objc private func autoEnterComboChanged(_ p: NSPopUpButton) {
+        settings.voiceAutoEnterMods = Self.autoEnterCombos[p.indexOfSelectedItem].1
+    }
+
+    private weak var autoEnterBox: CollapsibleRow?
+    private func makeAutoEnterBox() -> CollapsibleRow {
+        let box = CollapsibleRow(row: subordinateRow(controlRow(L10n.t("voice.autoEnterKey"), autoEnterCombo(),
+                                                                key: "voice.autoEnterKey")),
+                                 separator: hairline(), visible: settings.voiceAutoEnter)
+        autoEnterBox = box
+        return box
+    }
+
+    @objc private func toggleVoiceAutoEnter(_ s: NSSwitch) {
+        let on = (s.state == .on)
+        settings.voiceAutoEnter = on
+        autoEnterBox?.setVisible(on, in: contentStack)
+    }
+    @objc private func toggleVoiceTrailSpace(_ s: NSSwitch) { settings.voiceTrailingSpace = (s.state == .on) }
+    @objc private func toggleVoiceSound(_ s: NSSwitch) {
+        let on = (s.state == .on)
+        settings.voiceSoundEnabled = on
+        // Никакого reshow: анимируем ДРУГУЮ вью, отправитель этого action остаётся жив.
+        volumeBox?.setVisible(on, in: contentStack)
+    }
+
+    private func translateVolumeSlider() -> NSView {
+        let s = NSSlider(value: settings.translateSoundVolume, minValue: 0, maxValue: 1,
+                         target: self, action: #selector(translateVolChanged(_:)))
+        s.controlSize = .small
+        s.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        return s
+    }
+    @objc private func toggleTranslateSound(_ s: NSSwitch) { settings.translateSoundEnabled = (s.state == .on) }
+    private var translateVolPreview: NSSound?   // удерживаем превью, иначе оборвётся
+    @objc private func translateVolChanged(_ s: NSSlider) {
+        noteVolumeTouchedWhileMuted("translate")
+        settings.translateSoundVolume = s.doubleValue
+        // Тот же случай, что у двух ползунков выше: превью один раз, на отпускании.
+        guard sliderDragEnded, settings.translateSoundEnabled else { return }
+        let vol = Float(settings.translateSoundVolume)
+        let name = settings.translateSoundName
+        if name == "speakey" {
+            translateVolPreview?.stop()
+            translateVolPreview = Sounds.play(NSSound(data: CueSynth.translateData), volume: Double(vol))
+        } else if !name.isEmpty {
+            Sounds.play(NSSound(named: name), volume: Double(vol))
+        }
+    }
+    @objc private func toggleEscCancel(_ s: NSSwitch) { settings.escCancelsDictation = (s.state == .on) }
+    @objc private func toggleWarmWindow(_ s: NSSwitch) {
+        let on = (s.state == .on)
+        settings.voiceWarmWindow = on
+        warmBox?.setVisible(on, in: contentStack)
+    }
+    @objc private func toggleVoiceStreaming(_ s: NSSwitch) {
+        let on = (s.state == .on)
+        settings.voiceStreaming = on
+        // Включили, а потоковой модели нет → честно спрашиваем и качаем (~120 МБ).
+        guard on, !StreamingEouEngine.modelInstalled, downloadingModelId == nil else { return }
+        let a = NSAlert()
+        a.messageText = L10n.t("voice.streamDlTitle")
+        a.informativeText = L10n.t("voice.streamDlSub")
+        a.addButton(withTitle: L10n.t("voice.streamDlGo"))
+        a.addButton(withTitle: L10n.t("common.cancel"))
+        guard a.runModal() == .alertFirstButtonReturn else {
+            settings.voiceStreaming = false; s.state = .off; return   // отказались — выключаем тумблер
+        }
+        downloadingModelId = "eou-streaming"
+        Task {
+            let ok = await StreamingEouEngine.shared.download(progress: { _ in })
+            await MainActor.run {
+                self.downloadingModelId = nil
+                let r = NSAlert()
+                r.messageText = ok ? L10n.t("voice.streamDlOk") : L10n.t("voice.streamDlFail")
+                r.runModal()
+                if !ok { self.settings.voiceStreaming = false; s.state = .off }
+            }
+        }
+    }
+    private var cuePreview: NSSound?   // удерживаем превью, иначе звук оборвётся
+    @objc private func voiceVolChanged(_ s: NSSlider) {
+        noteVolumeTouchedWhileMuted("voice")
+        settings.voiceSoundVolume = s.doubleValue
+        if sliderDragEnded, settings.voiceSoundEnabled {   // превью звука старта — один раз, на отпускании
+            cuePreview?.stop()
+            cuePreview = Sounds.play(NSSound(data: CueSynth.startData), volume: settings.voiceSoundVolume)
+        }
+    }
+
+    private let voiceLangCodes = ["auto", "ru", "en"]
+    private func voiceLangControl() -> NSView {
+        let pop = NSPopUpButton()
+        pop.addItems(withTitles: [L10n.t("voice.langAuto"), "Русский", "English"])
+        let idx = voiceLangCodes.firstIndex(of: settings.voiceLanguage) ?? 1
+        pop.selectItem(at: idx)
+        pop.target = self; pop.action = #selector(voiceLangChanged(_:))
+        return pop
+    }
+    @objc private func voiceLangChanged(_ s: NSPopUpButton) {
+        let i = s.indexOfSelectedItem
+        if i >= 0, i < voiceLangCodes.count { settings.voiceLanguage = voiceLangCodes[i] }
+    }
+
+    // MARK: - Карточки (нативный grouped-стиль macOS System Settings)
+
+    /// Скруглённая карточка: строки, разделённые тонкими hairline (как в System Settings).
+    /// Цвета заливки/границы задаёт CardView.updateLayer — адаптивно к РЕАЛЬНОЙ теме view (иначе
+    /// dynamic-NSColor.cgColor резолвится один раз под дефолтной темой → карточка белеет в dark).
+    /// `vPad` — поля самой панели сверху и снизу. По умолчанию ноль: в разделах Pro строки прижаты
+    /// к кромке карточки намеренно, там их много и лишний воздух растянул бы список. На корневом
+    /// экране строк четыре, и без полей первая с последней липнут к краю.
+    private func card(_ rows: [NSView], vPad: CGFloat = 0) -> CardView {
+        let c = CardView()
+        c.wantsLayer = true
+        let v = NSStackView()
+        v.orientation = .vertical; v.alignment = .width; v.spacing = 0
+        v.translatesAutoresizingMaskIntoConstraints = false
+        for (i, r) in rows.enumerated() {
+            // Шторка несёт разделитель внутри себя (см. CollapsibleRow): если добавить ещё и здесь,
+            // при схлопывании в карточке повиснет лишняя линия.
+            if i > 0, !(r is CollapsibleRow) { v.addArrangedSubview(hairline()) }
+            v.addArrangedSubview(r)
+        }
+        c.addSubview(v)
+        NSLayoutConstraint.activate([
+            v.leadingAnchor.constraint(equalTo: c.leadingAnchor),
+            v.trailingAnchor.constraint(equalTo: c.trailingAnchor),
+            v.topAnchor.constraint(equalTo: c.topAnchor, constant: vPad),
+            v.bottomAnchor.constraint(equalTo: c.bottomAnchor, constant: -vPad)
+        ])
+        return c
+    }
+    private func hairline() -> NSView {
+        let wrap = NSView(); wrap.translatesAutoresizingMaskIntoConstraints = false
+        let line = HairlineView(); line.wantsLayer = true
+        line.translatesAutoresizingMaskIntoConstraints = false
+        wrap.addSubview(line)
+        NSLayoutConstraint.activate([
+            wrap.heightAnchor.constraint(equalToConstant: 1),
+            line.leadingAnchor.constraint(equalTo: wrap.leadingAnchor, constant: 14),  // hairline под текстом, как у Apple
+            line.trailingAnchor.constraint(equalTo: wrap.trailingAnchor),
+            line.topAnchor.constraint(equalTo: wrap.topAnchor),
+            line.bottomAnchor.constraint(equalTo: wrap.bottomAnchor)
+        ])
+        return wrap
+    }
+    /// Строка-переключатель: заголовок (+подзаголовок) слева, NSSwitch справа (on = coral через accent).
+    private func switchRow(_ title: String, _ subtitle: String?, _ on: Bool, _ action: Selector,
+                           help: String? = nil, key: String? = nil, wraps: Bool = false) -> NSView {
+        let sw = NSSwitch(); sw.state = on ? .on : .off; sw.target = self; sw.action = action
+        return settingRow(title, subtitle, trailing: sw, help: help, key: key, wraps: wraps)
+    }
+    /// Вариант switchRow с возможностью приглушить (серый + недоступен) — для зависимых настроек.
+    private func switchRow(_ title: String, _ subtitle: String?, _ on: Bool, _ action: Selector,
+                           enabled: Bool, help: String? = nil, key: String? = nil, wraps: Bool = false) -> NSView {
+        let sw = NSSwitch(); sw.state = on ? .on : .off; sw.target = self; sw.action = action
+        sw.isEnabled = enabled
+        let row = settingRow(title, subtitle, trailing: sw, help: help, key: key, wraps: wraps, keepSubtitle: !enabled)
+        row.alphaValue = enabled ? 1.0 : 0.5
+        return row
+    }
+    /// Тумблер «переключать несколько слов». Доступен ТОЛЬКО при выключенном авто-переключении
+    /// (см. Engine.convertGroup guard): при авто sessionWords рассинхронятся с экраном → группа
+    /// испортила бы текст, и она бессмысленна (авто чинит на лету). Поэтому серый, пока auto вкл.
+    private func groupConvertRow() -> NSView {
+        let autoOn = settings.autoEnabled
+        let subtitle = autoOn ? L10n.t("exp.groupConvertAutoOff") : L10n.t("exp.groupConvertSub")
+        return switchRow(L10n.t("exp.groupConvert"), subtitle,
+                         settings.groupConvert && !autoOn, #selector(toggleGroupConvert),
+                         enabled: !autoOn, key: "exp.groupConvert")
+    }
+    /// Строка с произвольным контролом справа (popup / segmented / hotkey).
+    private func controlRow(_ title: String, _ control: NSView, enabled: Bool = true,
+                            subtitle: String? = nil, help: String? = nil, key: String? = nil,
+                            wraps: Bool = false, keepSubtitle: Bool = false) -> NSView {
+        control.setContentHuggingPriority(.required, for: .horizontal)
+        control.setContentCompressionResistancePriority(.required, for: .horizontal)
+        // Выключенная функция не должна предлагать настраивать себя (нелогично и путает): гасим
+        // контрол вместе со вложенными — правые контролы часто контейнеры из нескольких кнопок.
+        if !enabled { Self.setEnabledDeep(control, false) }
+        let row = settingRow(title, subtitle, trailing: control, help: help, key: key, wraps: wraps, keepSubtitle: keepSubtitle || !enabled)
+        if !enabled { row.alphaValue = 0.45 }
+        return row
+    }
+
+    /// Рекурсивно выключить контрол и всё, что внутри (NSControl + наши кастомные вью).
+    private static func setEnabledDeep(_ view: NSView, _ on: Bool) {
+        if let c = view as? NSControl { c.isEnabled = on }
+        for sub in view.subviews { setEnabledDeep(sub, on) }
+    }
+    /// Ширины правых контролов — КОНСТАНТЫ, без обращения к AppKit-раскладке.
+    ///
+    /// macOS 26: NSSwitch / NSSlider / NSSegmentedControl / NSPopUpButton внутри рисуются SwiftUI
+    /// (AppKit линкует SwiftUICore + PrivateFrameworks/DesignLibrary — WWDC26 session 272). Любой
+    /// запрос intrinsicContentSize/fittingSize у такого контрола (и у NSStackView, который их
+    /// содержит) прогоняет SwiftUI-ViewGraph через AttributeGraph и делает Swift-Concurrency-проверку
+    /// изоляции. Именно там поймали EXC_BREAKPOINT (аппаратный PAC-trap) на машине пользователя в
+    /// 0.2.57. Значение нужно ТОЛЬКО чтобы решить, вешать ли tooltip, — меряем «на бумаге».
+    /// Белый список «безопасных» вью не годится: правые контролы часто NSStackView-контейнеры,
+    /// их intrinsicContentSize рекурсивно меряет вложенные слайдеры/сегменты.
+    /// Замеры на macOS 26.3.1 (25D771280a): NSSwitch 54×24, NSPopUpButton 58×24, NSSegmentedControl
+    /// 57×24, NSSlider width = NSView.noIntrinsicMetric (-1).
+    private enum RowMetrics {
+        /// NSSwitch — контрол фиксированного размера (замеры 2026-06-09 и 2026-07-20 совпали).
+        static let nsSwitch: CGFloat = 54
+        /// Всё остальное справа (popup, слайдер, hotkey-контрол, сегменты, контейнеры-стеки) —
+        /// консервативная оценка. Ошибка в бо́льшую сторону безопасна: лишь лишний tooltip там,
+        /// где текст и так влезал. Раньше здесь был баг: у NSSlider ширина -1 → ветка `tw > 1`
+        /// молча подставляла ширину переключателя строке громкости.
+        static let wideControl: CGFloat = 200
+        /// Слот кнопки-подсказки «i». Есть у КАЖДОЙ строки, иначе правый край рассыпается между
+        /// строками со справкой и без. 22pt — минимум HIG для цели клика: меньше означает, что
+        /// промах мимо кружка ПЕРЕКЛЮЧИТ соседний тумблер.
+        static let helpSlot: CGFloat = 22
+    }
+
+    /// Доступная ширина текстовой колонки строки = ширина блока − отступы − контрол справа − зазор.
+    /// contentWidth 600, insets 14+14, spacing 10 → под переключателем ≈508pt (было 388 при 480).
+    /// tooltip ставим ТОЛЬКО когда текст в неё не влезает.
+    private func availTextWidth(trailing: NSView) -> CGFloat {
+        let trailingW = (trailing is NSSwitch) ? RowMetrics.nsSwitch : RowMetrics.wideControl
+        return contentW - 28 - trailingW - 10
+    }
+    private func truncates(_ text: String, font: NSFont, within avail: CGFloat) -> Bool {
+        (text as NSString).size(withAttributes: [.font: font]).width > avail
+    }
+    /// `wraps` — подпись ПЕРЕНОСИТСЯ, а не режется многоточием, и строка растёт в высоту.
+    ///
+    /// ⚠️ ТОЛЬКО ДЛЯ КОРНЕВОГО ЭКРАНА (автор 15.08: «описание слишком короткое, вообще ничего
+    /// непонятно… мы делаем для самых бестолковых пользователей»). В разделах Pro подписи остаются
+    /// однострочными: там их полсотни, и перенос ломает выравнивание всей колонки, это уже
+    /// откатывали. На корневом экране строк шесть, каждая объясняет двигатель человеку, который
+    /// видит приложение впервые, и обрезанное «Переключит…» там хуже, чем лишние двадцать пунктов
+    /// высоты. Высота строки задана как `>= 44`, поэтому она просто вырастет.
+    private func settingRow(_ title: String, _ subtitle: String?, trailing: NSView,
+                            help: String? = nil, key: String? = nil, wraps: Bool = false, keepSubtitle: Bool = false) -> NSView {
+        if !wraps, let control = trailing as? NSControl {
+            control.controlSize = .small
+            control.font = .systemFont(ofSize: 12)
+        }
+        // ⚠️ У ПЕРЕНОСИМОЙ ПОДПИСИ ШИРИНУ СЧИТАЕМ ПО ФАКТУ, А НЕ ПО КОНСТАНТЕ. `RowMetrics.wideControl`
+        // это ЗАПАС под самый широкий контрол в проекте, и для узкой строки он съедал половину
+        // колонки: текст переносился на пять строк рядом с пустым местом (снимок 15.08).
+        let reserve = wraps ? max(RowMetrics.nsSwitch, ceil(trailing.fittingSize.width))
+                            : ((trailing is NSSwitch) ? RowMetrics.nsSwitch : RowMetrics.wideControl)
+        let avail = contentW - 28 - reserve - 10 - (help == nil ? 0 : RowMetrics.helpSlot + 10)
+        let l = NSTextField(labelWithString: title)
+        l.font = .systemFont(ofSize: wraps ? 13 : 12); l.textColor = .labelColor
+        l.lineBreakMode = .byTruncatingTail
+        l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // tooltip — только если заголовок реально усекается (обычно короткий → нет tooltip)
+        if truncates(title, font: l.font!, within: avail) { l.toolTip = title }
+        let textCol: NSView
+        let visibleSubtitle = !wraps && help != nil && !keepSubtitle ? nil : subtitle
+        if let sub = visibleSubtitle {
+            // Однострочная подсказка с усечением «…»; полный текст — в tooltip ТОЛЬКО когда не
+            // умещается (откат правки с переносом на 2 строки — она ломала выравнивание).
+            let s: NSTextField
+            if wraps {
+                s = wrappingText(sub, size: 11, color: .secondaryLabelColor)
+                s.preferredMaxLayoutWidth = max(120, avail)
+            } else {
+                s = NSTextField(labelWithString: sub)
+                s.font = .systemFont(ofSize: 11); s.textColor = .secondaryLabelColor
+                s.lineBreakMode = .byTruncatingTail
+            }
+            // ⚠️ Подсказку в tooltip кладём ВСЕГДА (репорт #41 на 0.2.70: «под некоторыми пунктами
+            // есть описание, но оно не отображается полностью… наводя курсор, можно было бы
+            // прочитать полностью, хотелось бы иметь возможность прочитать, что там хотел сказать
+            // автор»). Раньше tooltip ставился только когда `truncates()` СЧИТАЛ, что текст не
+            // влезает, а доступная ширина там оценочная: стоило оценке ошибиться в большую сторону,
+            // и текст на экране обрезался, а tooltip не появлялся — то есть прочитать описание было
+            // нельзя вообще никак. Лишний tooltip на короткой строке безвреден, недостающий — нет.
+            s.toolTip = sub
+            s.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            let vs = NSStackView(views: [l, s]); vs.orientation = .vertical; vs.alignment = .leading
+            vs.spacing = wraps ? 3 : 1
+            // ⚠️ КОЛОНКУ ТЕКСТА НЕЛЬЗЯ СЖИМАТЬ ПО ВЫСОТЕ. автор 17.08: «текст подсказки прилип к
+            // разделителю». Дело было не в полях: подпись честно меряла себя в три строки (42 pt),
+            // но сама строка ужималась до 62 pt при нужных 101 и текст рисовался ЗА своей рамкой,
+            // поверх разделителя. Ужимался только тот, у кого подпись выше контрола, поэтому поля
+            // и выглядели разными в каждой строке. Сопротивление сжатию делает 20/20 неизменными.
+            vs.setClippingResistancePriority(.required, for: .vertical)
+            // Догоняем нижнюю пустоту рамки до верхней: см. разбор полей ниже по коду.
+            if wraps { vs.edgeInsets = NSEdgeInsets(top: 0, left: 0,
+                                                    bottom: (6.5 - 3.5), right: 0) }
+            textCol = vs
+        } else { textCol = l }
+        textCol.translatesAutoresizingMaskIntoConstraints = false
+        trailing.translatesAutoresizingMaskIntoConstraints = false
+        let spacer = NSView(); spacer.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        spacer.setContentCompressionResistancePriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        // ⚠️ ПОДСКАЗКА СЛЕВА ОТ КОНТРОЛА И ТОЛЬКО ТАМ, ГДЕ ОНА ЕСТЬ (правка 29.07).
+        // Сначала я сделал слот фиксированной ширины в КАЖДОЙ строке — чтобы кружки встали в одну
+        // колонку. Вышло хуже: пустые слоты сдвинули ВСЕ тумблеры влево, и ровный правый край,
+        // который был раньше, развалился. автор поймал это сразу: «справа от тумблера, там, где их
+        // нет, пустое место, отстойно выглядит».
+        // Правильно наоборот: кружок вставляем ПЕРЕД контролом и только при наличии текста. Тогда
+        // правый край контролов у всех строк одинаковый, а кружок просто стоит рядом со своим.
+        var items: [NSView] = [textCol, spacer]
+        if let help {
+            let explanation = !wraps ? [subtitle, help].compactMap { $0 }.joined(separator: "\n\n") : help
+            items.append(HelpButton(text: explanation, title: title))
+        }
+        items.append(trailing)
+        let row = NSStackView(views: items)
+        row.orientation = .horizontal; row.alignment = .centerY; row.spacing = wraps ? 10 : 8
+        row.setClippingResistancePriority(.required, for: .vertical)
+        let verticalPadding: CGFloat = wraps ? 9.5 : 5
+        let horizontalPadding: CGFloat = wraps ? 16 : 11
+        row.edgeInsets = NSEdgeInsets(top: verticalPadding, left: horizontalPadding,
+                                      bottom: verticalPadding, right: horizontalPadding)
+        row.heightAnchor.constraint(greaterThanOrEqualTo: textCol.heightAnchor,
+                                    constant: verticalPadding * 2).isActive = true
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: wraps ? 44 : 35).isActive = true
+        // Ключ L10n остаётся на самой вью: собранная строка это просто NSStackView, и по нему уже
+        // не понять, какая настройка внутри. Простому режиму нужно уметь отбирать строки после
+        // сборки — по заголовку нельзя, он переводится и меняется вместе с языком.
+        if let key { row.identifier = NSUserInterfaceItemIdentifier(key) }
+        return row
+    }
+    /// Маленький серый заголовок-секция над карточкой.
+    /// Подзаголовок-секция: коралловый «eyebrow» (uppercase + кернинг), как на сайте и в онбординге.
+    /// БЕЗ левого отступа — выравнивается с телом (старые 11pt серые + indent 4px выглядели мелко и
+    /// рассинхронно). Единый стиль с WelcomeWindow.eyebrowLabel.
+    private func sectionTitle(_ t: String) -> NSView {
+        // Метка `eyebrowID` жила здесь для фильтра простого режима: он по ней понимал, что заголовок
+        // принадлежит карточке под ним, и прятал их вместе. Фильтр удалён 15.08, метка не нужна.
+        return Self.eyebrowLabel(t)
+    }
+    /// Общий стиль «eyebrow» (используется и в онбординге через WelcomeWindow).
+    static func eyebrowLabel(_ t: String) -> NSTextField {
+        let l = NSTextField(labelWithString: "")
+        l.attributedStringValue = NSAttributedString(string: t.uppercased(), attributes: [
+            .font: NSFont.systemFont(ofSize: 11.5, weight: .semibold),
+            .foregroundColor: DS.coral,
+            .kern: 1.1
+        ])
+        l.isEditable = false; l.isSelectable = false; l.isBordered = false; l.drawsBackground = false
+        l.alignment = .left
+        l.setContentHuggingPriority(.required, for: .horizontal)
+        return l
+    }
+    /// Строка-карточка с кнопками слева (история / приватность).
+    private func buttonRow(_ buttons: [NSView]) -> NSView {
+        let hs = NSStackView(views: buttons); hs.orientation = .horizontal; hs.spacing = 8
+        let spacer = NSView(); spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let row = NSStackView(views: [hs, spacer]); row.orientation = .horizontal; row.alignment = .centerY
+        row.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        row.heightAnchor.constraint(greaterThanOrEqualToConstant: 44).isActive = true
+        return row
+    }
+
+    private func vstack(_ views: [NSView]) -> NSView {
+        let s = NSStackView(views: views)
+        s.orientation = .vertical
+        // research-канон (Apple docs NSStackView.alignment): .leading — X-якорь ВЛЕВО для всех subview.
+        // НЕ .width: .width — атрибут РАЗМЕРА, не позиции; single-line label не растягивается из-за
+        // content-hugging и центрируется по дефолтному .centerX вертикального стека → уезжает вправо.
+        s.alignment = .leading
+        s.distribution = .fill
+        s.spacing = showingRoot ? 10 : DS.itemGap
+        // Растягиваемые (multiline-текст, скроллы, поля, row-стеки) пиним по ширине к стеку — иначе
+        // .leading даёт им intrinsic-ширину, и multiline-текст не знает ширину для переноса.
+        for v in views {
+            let wide = v is NSScrollView || v is NSTokenField || v is SnippetsEditor || v is NSStackView
+                || v is CardView   // карточки — во всю ширину колонки
+                || v is NSSegmentedControl   // переключатель движка — две широкие кнопки на всю ширину
+                || v is NSButton   // чекбоксы: пин к ширине колонки → длинная подпись переносится, не торчит
+                || v is ChipFlowView   // поток чипов — знает ширину для переноса + считает высоту
+                || v is ChipFieldView  // поле-обрамление вокруг чипов — во всю ширину колонки
+                || ((v as? NSTextField)?.maximumNumberOfLines == 0)
+            if wide { v.widthAnchor.constraint(equalTo: s.widthAnchor).isActive = true }
+        }
+        return s
+    }
+    private func stackH(_ views: [NSView]) -> NSView {
+        let s = NSStackView(views: views); s.orientation = .horizontal; s.spacing = 12; return s
+    }
+    private func leftAlign(_ v: NSView) -> NSView {
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
+        let row = NSStackView(views: [v, spacer]); row.orientation = .horizontal
+        return row
+    }
+    /// ЗАГОЛОВОК САМОСТОЯТЕЛЬНОГО БЛОКА внутри раздела (задача 15, требование автора 13.08:
+    /// «не только конкретные настройки, но и целые разделы тоже нужно уметь скрывать»).
+    ///
+    /// Метка на заголовке — это и есть граница блока: простой режим прячет сам заголовок и всё, что
+    /// идёт за ним, до следующего такого же заголовка. Так фильтр остаётся в одном месте и не
+    /// размазывается условиями по девяти builder-ам, ровно как и задумано в `applySimpleMode`.
+    private func blockTitle(_ key: String) -> NSTextField {
+        let l = title(L10n.t(key))
+        l.identifier = NSUserInterfaceItemIdentifier("block." + key)
+        return l
+    }
+
+    private func title(_ t: String) -> NSTextField {
+        let l = NSTextField(labelWithString: t); l.font = .systemFont(ofSize: 20, weight: .semibold); l.textColor = .labelColor; l.alignment = .left; return l
+    }
+    private func sub(_ t: String) -> NSTextField { wrappingText(t, size: 13, color: .secondaryLabelColor) }
+    private func hint(_ t: String) -> NSTextField {
+        return wrappingText(t, size: 11, color: .tertiaryLabelColor)
+    }
+    private func wrappingText(_ t: String, size: CGFloat, color: NSColor) -> NSTextField {
+        let l = WrappingLabel(string: t)
+        l.font = .systemFont(ofSize: size)
+        l.textColor = color
+        l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        l.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return l
+    }
+    private func check(_ key: String, _ on: Bool, _ a: Selector) -> NSButton {
+        let b = NSButton(checkboxWithTitle: L10n.t(key), target: self, action: a)
+        b.state = on ? .on : .off; b.font = .systemFont(ofSize: 13)
+        // КЛЮЧ: длинная подпись чекбокса по умолчанию НЕ переносится и НЕ усекается →
+        // распирает колонку и заезжает за правый край. Включаем перенос по словам + низкую
+        // compression-resistance, чтобы подпись жила в пределах ширины колонки (см. wide-правило vstack).
+        b.lineBreakMode = .byWordWrapping
+        (b.cell as? NSButtonCell)?.wraps = true
+        (b.cell as? NSButtonCell)?.usesSingleLineMode = false
+        b.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        b.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        return b
+    }
+    private func labeledRow(_ text: String, _ control: NSView) -> NSView {
+        let l = NSTextField(labelWithString: text); l.font = .systemFont(ofSize: 13)
+        // Если окно совсем узкое — усекаем ПОДПИСЬ, а контрол держит нужную ширину (не торчит).
+        l.lineBreakMode = .byTruncatingTail
+        l.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        control.setContentCompressionResistancePriority(.required, for: .horizontal)
+        let row = NSStackView(views: [l, control]); row.orientation = .horizontal; row.spacing = 10; row.alignment = .centerY
+        return row
+    }
+    private func group(_ h: CGFloat) -> NSView {
+        let v = NSView(); v.translatesAutoresizingMaskIntoConstraints = false
+        v.heightAnchor.constraint(equalToConstant: max(0, h)).isActive = true; return v
+    }
+
+    @objc private func toggleAuto(_ s: NSSwitch) {
+        settings.autoEnabled = (s.state == .on)
+        // reshow обновляет доступность тумблера «несколько слов» (серый при авто вкл), но сносит
+        // contentStack вместе с этим же NSSwitch — на macOS 26 нельзя делать это изнутри его
+        // собственного action (teardown SwiftUI-графа из его же диспатча). Откладываем на такт.
+        DispatchQueue.main.async { [weak self] in self?.reshow() }
+    }
+    @objc private func toggleLive(_ s: NSSwitch) { settings.liveFixEnabled = (s.state == .on) }
+    @objc private func toggleTranslate(_ s: NSSwitch) { settings.translateEnabled = (s.state == .on) }
+    @objc private func toggleDev(_ s: NSSwitch) { settings.developerMode = (s.state == .on) }
+    @objc private func toggleSound(_ s: NSSwitch) { settings.soundEnabled = (s.state == .on) }
+    @objc private func toggleLogin(_ s: NSSwitch) { settings.launchAtLogin = (s.state == .on); s.state = settings.launchAtLogin ? .on : .off }
+    @objc private func toggleTSpace(_ s: NSButton) { settings.triggerSpace = (s.state == .on) }
+    @objc private func toggleTEnter(_ s: NSButton) { settings.triggerEnter = (s.state == .on) }
+    @objc private func toggleTTab(_ s: NSButton) { settings.triggerTab = (s.state == .on) }
+    @objc private func toggleArrows(_ s: NSSwitch) { settings.arrowsCancel = (s.state == .on) }
+    @objc private func toggleTwoCaps(_ s: NSSwitch) { settings.twoCapsFix = (s.state == .on) }
+    @objc private func toggleTypoFix(_ s: NSSwitch) { settings.typoFix = (s.state == .on) }
+    @objc private func toggleEscSave(_ s: NSSwitch) { settings.escSaveToHistory = (s.state == .on) }
+    @objc private func toggleChatter(_ s: NSSwitch) { settings.dedupeChatter = (s.state == .on) }
+
+    /// Насколько приглушать — СЛАЙДЕР (просьба автора 30.07; раньше был выбор из пяти процентов).
+    /// Ползунок здесь честнее списка: величина непрерывная, «правильного» значения не существует, и
+    /// подбирают её на слух, а не выбирают из вариантов. Рядом живая подпись, иначе ползунок без
+    /// цифры превращается в гадание.
+    private weak var duckValueLabel: NSTextField?
+    private func duckLevelControl() -> NSView {
+        let s = NSSlider(value: Double(settings.voiceDuckLevel), minValue: 0,
+                         maxValue: Double(AppSettings.duckMaxPercent),
+                         target: self, action: #selector(duckLevelChanged(_:)))
+        s.controlSize = .small
+        s.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        let label = NSTextField(labelWithString: duckValueText(settings.voiceDuckLevel))
+        label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .right
+        label.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        duckValueLabel = label
+        let row = NSStackView(views: [s, label])
+        row.orientation = .horizontal; row.spacing = 8; row.alignment = .centerY
+        return row
+    }
+    /// Ноль — это не «ноль процентов», а другое поведение, поэтому и называется словом.
+    private func duckValueText(_ v: Int) -> String { v == 0 ? L10n.t("voice.duckMute") : "\(v)%" }
+    @objc private func duckLevelChanged(_ s: NSSlider) {
+        let v = Int(s.doubleValue.rounded())
+        settings.voiceDuckLevel = v
+        duckValueLabel?.stringValue = duckValueText(v)
+    }
+    private weak var micGainValueLabel: NSTextField?
+    private func micGainLevelControl() -> NSView {
+        let sl = NSSlider(value: Double(settings.voiceMicGainLevel), minValue: 10, maxValue: 100,
+                          target: self, action: #selector(micGainLevelChanged(_:)))
+        sl.controlSize = .small
+        sl.widthAnchor.constraint(equalToConstant: 130).isActive = true
+        let label = NSTextField(labelWithString: "\(settings.voiceMicGainLevel)%")
+        label.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular)
+        label.textColor = .secondaryLabelColor
+        label.alignment = .right
+        label.widthAnchor.constraint(equalToConstant: 58).isActive = true
+        micGainValueLabel = label
+        let row = NSStackView(views: [sl, label])
+        row.orientation = .horizontal; row.spacing = 8; row.alignment = .centerY
+        return row
+    }
+    @objc private func micGainLevelChanged(_ s: NSSlider) {
+        let v = Int(s.doubleValue.rounded())
+        settings.voiceMicGainLevel = v
+        micGainValueLabel?.stringValue = "\(v)%"
+    }
+    @objc private func toggleMicGain(_ s: NSSwitch) {
+        settings.voiceMicGain = (s.state == .on)
+        DispatchQueue.main.async { [weak self] in self?.reshow() }   // строка уровня гаснет/зажигается
+    }
+
+    @objc private func toggleDuck(_ s: NSSwitch) {
+        settings.voiceDuck = (s.state == .on)
+        DispatchQueue.main.async { [weak self] in self?.reshow() }   // строка уровня гаснет/зажигается
+    }
+    @objc private func openLog() { Permissions.openDiagnosticLog() }
+    @objc private func openPerms() { Permissions.openAccessibilitySettings() }
+    /// Ручной доступ к микрофону: не спрашивали → системный промпт; иначе — открыть
+    /// панель System Settings (отозвать/выдать вручную). После промпта — обновить заголовок.
+    @objc private func requestMic() {
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .notDetermined:
+            Task { @MainActor in
+                _ = await AudioRecorder.requestAccess()
+                self.reshow()
+            }
+        default:
+            Permissions.openMicrophoneSettings()
+        }
+    }
+    @objc private func langChanged(_ s: NSPopUpButton) {
+        settings.language = [0: "auto", 1: "ru", 2: "en"][s.indexOfSelectedItem] ?? "auto"
+        onLanguageChanged?()
+        // Меню в статус-баре локализуется отдельно — пнём его пересобраться.
+        NotificationCenter.default.post(name: .speakeyLanguageChanged, object: nil)
+    }
+    @objc private func toggleVoice(_ s: NSSwitch) { settings.voiceEnabled = (s.state == .on) }
+    @objc private func voiceModeChanged(_ s: NSSegmentedControl) { settings.voiceHoldMode = s.selectedSegment == 1 ? "toggle" : "hold" }
+    @objc private func toggleVoiceHistory(_ s: NSSwitch) {
+        settings.voiceHistoryEnabled = (s.state == .on)
+        // Без истории буфер не пишем. Зависимая строка живёт в «Общих» и перестроится при показе
+        // раздела, поэтому перерисовывать текущий раздел (и сбрасывать прокрутку) незачем.
+        ClipboardWatcher.shared.apply()
+    }
+    /// Захват буфера (задача 228). Выключение сразу останавливает новые записи; судьбу уже
+    /// собранных решает человек: тумблер не удаляет ничего молча, промах пальцем не стоит
+    /// истории, но и «выключил, а оно лежит» без вопроса не оставляем.
+    @objc private func toggleClipboardHistory(_ s: NSSwitch) {
+        settings.clipboardHistoryEnabled = (s.state == .on)
+        ClipboardWatcher.shared.apply()
+        guard s.state == .off else { return }
+        let n = VoiceHistory.shared.clipboardCount
+        guard n > 0 else { return }
+        let a = NSAlert()
+        a.messageText = String(format: L10n.t("gen.clipOff.title"), n)
+        a.informativeText = L10n.t("gen.clipOff.msg")
+        a.addButton(withTitle: L10n.t("gen.clipOff.keep"))
+        let del = a.addButton(withTitle: L10n.t("gen.clipOff.delete"))
+        del.hasDestructiveAction = true
+        if let w = view.window {
+            a.beginSheetModal(for: w) { r in
+                if r == .alertSecondButtonReturn { VoiceHistory.shared.removeClipboardEntries() }
+            }
+        } else if a.runModal() == .alertSecondButtonReturn {
+            VoiceHistory.shared.removeClipboardEntries()
+        }
+    }
+    /// Включили — модель уходит из памяти сразу, не дожидаясь следующей диктовки. Выключили —
+    /// греем её обратно, иначе первая диктовка после этого заплатила бы за загрузку зря.
+    @objc private func toggleUnloadAfterDictation(_ s: NSSwitch) {
+        settings.voiceUnloadAfterDictation = (s.state == .on)
+        VoiceController.shared.applyUnloadSetting()
+    }
+    /// ⚠️ ВЫКЛЮЧЕНИЕ УНОСИТ УЖЕ ЗАПИСАННОЕ. Оставить клипы лежать после того, как человек снял
+    /// галочку «сохранять запись голоса», значит соврать ему тумблером: он думает, что записей больше
+    /// нет, а на диске остаются часы его речи. Сами тексты истории при этом не трогаем.
+    @objc private func toggleSaveAudio(_ s: NSSwitch) {
+        settings.voiceSaveAudio = (s.state == .on)
+        guard s.state == .off else { return }
+        let freed = VoiceClips.totalBytes()
+        VoiceClipPlayerView.stopAll()
+        VoiceClips.deleteAll()
+        VoiceHistory.shared.forgetAudio()
+        if freed > 0 { kbLog("аудио диктовки: выключено, удалено \(VoiceClips.humanSize(freed))") }
+    }
+    /// Пароль на историю: включение — задать пароль, выключение — подтвердить текущим.
+    /// Тумблер откатывается, если пользователь передумал в диалоге.
+    @objc private func toggleHistoryLock(_ s: NSSwitch) {
+        if s.state == .on {
+            HistoryGate.promptSetPassword { ok in s.state = ok ? .on : .off }
+        } else {
+            HistoryGate.promptDisable { ok in s.state = ok ? .off : .on }
+        }
+    }
+    // Значения в МИНУТАХ, список и порядок держит `HistoryPolicy.retentionMenu` (0 = без удаления).
+    // Минуты лежат в `tag` пункта, а не в параллельном массиве: у человека со старым вариантом
+    // (2 или 4 часа) в списке на один пункт больше, и индексы разъехались бы.
+    private func historyRetentionControl() -> NSView {
+        let pop = NSPopUpButton()
+        fillRetention(pop)
+        pop.target = self; pop.action = #selector(retentionChanged(_:))
+        return pop
+    }
+    private func fillRetention(_ pop: NSPopUpButton) {
+        let cur = settings.voiceHistoryMinutes
+        pop.removeAllItems()
+        for mins in HistoryPolicy.retentionMenu(current: cur) {
+            pop.addItem(withTitle: L10n.retentionTitle(mins))
+            pop.lastItem?.tag = mins
+        }
+        pop.selectItem(withTag: cur)
+    }
+    /// ⚠️ СОКРАЩЕНИЕ СРОКА СПРАШИВАЕТ (ревью 24.09.2026). Новый срок применяется сразу, и всё, что
+    /// старше него, уходит насовсем вместе с записью голоса. Пока история держала 50 диктовок, это
+    /// было терпимо; с 7 и 30 днями и потолком 3000 промах мышью на соседний пункт стирал бы месяц.
+    /// Правило то же, что у выключения захвата буфера: промах пальцем не стоит истории. Первая
+    /// кнопка, то есть Return, оставляет всё как было.
+    @objc private func retentionChanged(_ s: NSPopUpButton) {
+        guard let mins = s.selectedItem?.tag else { return }
+        let old = settings.voiceHistoryMinutes
+        let apply = { [weak self] in
+            guard let self else { return }
+            self.settings.voiceHistoryMinutes = mins
+            VoiceHistory.shared.applyRetention()
+            self.fillRetention(s)   // старый пункт «2 часа» исчезает, как только выбран другой
+        }
+        let shorter = mins > 0 && (old == 0 || mins < old)
+        let n = shorter ? VoiceHistory.shared.countOlder(thanMinutes: mins) : 0
+        guard n > 0 else { apply(); return }
+        let a = NSAlert()
+        a.messageText = String(format: L10n.t("voice.retShrink.title"), n)
+        a.informativeText = L10n.t("voice.retShrink.msg")
+        a.addButton(withTitle: L10n.t("voice.retShrink.keep"))
+        let del = a.addButton(withTitle: L10n.t("voice.retShrink.delete"))
+        del.hasDestructiveAction = true
+        let done: (NSApplication.ModalResponse) -> Void = { [weak self] r in
+            if r == .alertSecondButtonReturn { apply() } else { self?.fillRetention(s) }
+        }
+        if let w = view.window { a.beginSheetModal(for: w, completionHandler: done) } else { done(a.runModal()) }
+    }
+    private let warmSecondsOptions = [15, 30, 60, 120, 300]   // 10 мин убрано — слишком долго держать HAL
+    private func warmDurationControl() -> NSView {
+        let pop = NSPopUpButton()
+        pop.addItems(withTitles: warmSecondsOptions.map { L10n.warmDurTitle($0) })
+        pop.selectItem(at: warmSecondsOptions.firstIndex(of: settings.voiceWarmSeconds) ?? 1)
+        pop.target = self; pop.action = #selector(warmDurationChanged(_:))
+        return pop
+    }
+    @objc private func warmDurationChanged(_ s: NSPopUpButton) {
+        settings.voiceWarmSeconds = warmSecondsOptions[s.indexOfSelectedItem]
+    }
+    @objc private func clearVoiceHistory() { VoiceHistory.shared.clear() }
+    @objc private func showVoiceHistory() {
+        if historyWC == nil { historyWC = VoiceHistoryWindowController() }
+        historyWC?.show()
+    }
+    // MARK: - G: Mic selector
+
+    private func micSelectorControl() -> NSView {
+        let pop = NSPopUpButton()
+        pop.addItem(withTitle: L10n.t("voice.micSystem"))
+        pop.lastItem?.representedObject = ""
+        let devices = AudioDevices.inputs()
+        for d in devices {
+            pop.addItem(withTitle: d.name)
+            pop.lastItem?.representedObject = d.uid
+        }
+        // Выбрать текущий UID (или первый пункт «системный» если UID не найден)
+        let curUID = settings.voiceMicUID
+        if curUID.isEmpty {
+            pop.selectItem(at: 0)
+        } else if let idx = (0..<pop.numberOfItems).first(where: { (pop.item(at: $0)?.representedObject as? String) == curUID }) {
+            pop.selectItem(at: idx)
+        } else {
+            pop.selectItem(at: 0)
+        }
+        pop.target = self; pop.action = #selector(micSelectorChanged(_:))
+        return pop
+    }
+    @objc private func micSelectorChanged(_ s: NSPopUpButton) {
+        settings.voiceMicUID = (s.selectedItem?.representedObject as? String) ?? ""
+    }
+    /// Ссылка-раскрывашка вместо кнопки. Кнопка читалась как действие («скачать», «применить») и
+    /// массивной плашкой перетягивала внимание с двух рекомендованных моделей, хотя всё, что она
+    /// делает — «покажи остальные». Правка 25.07.
+    /// Коралловая плоская подпись без треугольника: сама говорит, что произойдёт по клику.
+    /// Пришла на смену disclosureLink там, где раскрытие анимируется шторкой (автор 28.07:
+    /// «эти раскрывающиеся списки я придумал когда-то, но они мне уже не особо нравятся»).
+    private func flatLink(_ text: String, action: Selector) -> NSView {
+        let b = NSButton(title: "", target: self, action: action)
+        b.isBordered = false
+        b.setButtonType(.momentaryChange)
+        b.attributedTitle = NSAttributedString(
+            string: text,
+            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                         .foregroundColor: DS.coral])
+        b.setContentHuggingPriority(.required, for: .horizontal)
+        let row = NSStackView(views: [b, NSView()])
+        row.orientation = .horizontal; row.spacing = 0; row.alignment = .centerY
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 2, bottom: 0, right: 0)
+        return row
+    }
+
+    private func disclosureLink(_ text: String, expanded: Bool, action: Selector) -> NSView {
+        let b = NSButton(title: "", target: self, action: action)
+        b.isBordered = false
+        b.setButtonType(.momentaryChange)
+        b.attributedTitle = NSAttributedString(
+            string: (expanded ? "⌄  " : "›  ") + text,
+            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium),
+                         .foregroundColor: DS.coral])
+        b.setContentHuggingPriority(.required, for: .horizontal)
+        // В общий столбец кладём через контейнер: у vstack выравнивание по левому краю, а плоская
+        // кнопка без рамки иначе растянулась бы на всю ширину и ловила клики по пустому месту.
+        let row = NSStackView(views: [b, NSView()])
+        row.orientation = .horizontal; row.spacing = 0; row.alignment = .centerY
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 2, bottom: 0, right: 0)
+        return row
+    }
+
+    private func soundSettingsLink() -> NSButton {
+        let b = NSButton(title: L10n.t("voice.micSettings"), target: self, action: #selector(openSoundSettings))
+        b.bezelStyle = .rounded; b.controlSize = .regular
+        return b
+    }
+    @objc private func openSoundSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Sound-Settings.extension") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    @objc private func activateModelAction(_ s: NSButton) {
+        guard s.tag < unifiedCatalog.count else { return }
+        activateModel(unifiedCatalog[s.tag])
+    }
+
+    @objc private func downloadModelAction(_ s: NSButton) {
+        guard s.tag < unifiedCatalog.count else { return }
+        let m = unifiedCatalog[s.tag]
+        guard downloadingModelId == nil else { return }   // одна загрузка за раз
+        downloadingModelId = m.id; downloadProgress = 0
+        s.isEnabled = false; s.title = "0%"
+        dlLastChangeAt = Date(); dlLoggedDecile = -1
+        dlStallTimer?.invalidate()
+        dlStallTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            guard let self, let id = self.downloadingModelId else { return }
+            let quiet = Date().timeIntervalSince(self.dlLastChangeAt)
+            guard quiet > 45 else { return }
+            let pct = Int(self.downloadProgress * 100)
+            self.voiceModelStatus[id]?.stringValue = L10n.t("voice.dlStalledShort")
+            self.voiceModelStatus[id]?.toolTip = String(format: L10n.t("voice.dlStalledTip"), pct)
+            kbLog("модель \(id): скачивание застряло на \(pct)% (без прогресса \(Int(quiet))с) — вероятно, сеть до Hugging Face")
+        }
+        // ⚠️ Кнопку берём ИЗ СЛОВАРЯ, а не по захваченной ссылке (репорт #39 на 0.2.70: «проценты
+        // под моделью растут, а справа стоят на месте; переключишь раздел и вернёшься — актуальные»).
+        // Раньше здесь висел `[weak s]` на конкретную кнопку: при любой перестройке раздела кнопка
+        // пересоздаётся, слабая ссылка обнуляется, и правая часть замирает навсегда. Метка слева
+        // жила в словаре по id и потому продолжала обновляться — отсюда и расхождение цифр.
+        let onProgress: (Double) -> Void = { [weak self] p in
+            guard let self else { return }
+            if p != self.downloadProgress { self.dlLastChangeAt = Date() }
+            let dec = Int(p * 10)
+            if dec > self.dlLoggedDecile {   // журналим каждые ~10% — репорты «зависло» станут диагностируемыми
+                self.dlLoggedDecile = dec
+                kbLog("модель \(m.id): скачано \(Int(p * 100))%")
+            }
+            self.downloadProgress = p
+            self.voiceModelStatus[m.id]?.stringValue = "\(Int(p * 100)) %"
+            self.voiceModelStatus[m.id]?.toolTip = nil
+            self.voiceModelButton[m.id]?.title = "\(Int(p * 100))%"
+        }
+        let onDone: (Bool) -> Void = { [weak self] ok in
+            self?.dlStallTimer?.invalidate(); self?.dlStallTimer = nil
+            self?.downloadingModelId = nil
+            if ok { self?.activateModel(m) }   // скачал → сразу активна (reshow внутри)
+            else { self?.reshow() }
+        }
+        if m.engine == "whisper" {
+            ModelDownloader.shared.download(m.id, progress: onProgress, done: onDone)
+        } else {
+            Task {
+                let ok = await ParakeetEngine.shared.download(progress: { p in
+                    DispatchQueue.main.async { onProgress(p) }
+                })
+                await MainActor.run { onDone(ok) }
+            }
+        }
+    }
+
+    @objc private func deleteModelAction(_ s: NSButton) {
+        guard s.tag < unifiedCatalog.count else { return }
+        let m = unifiedCatalog[s.tag]
+        guard downloadingModelId != m.id else { return }   // не удаляем то, что качается
+        let a = NSAlert()
+        a.messageText = String(format: L10n.t("voice.delConfirm"), m.display)
+        a.informativeText = L10n.t("voice.delConfirmSub")
+        a.alertStyle = .warning
+        a.addButton(withTitle: L10n.t("voice.delete"))
+        a.addButton(withTitle: L10n.t("common.cancel"))
+        a.buttons.first?.hasDestructiveAction = true
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+
+        let wasActive = isActiveModel(m)
+        // Удаление тяжёлое (освобождение CoreML-менеджера + removeItem ~465 МБ) и раньше шло на
+        // main-потоке → окно морозилось намертво (репорт 03.07.2026, Force Quit). Теперь операция
+        // в фоне; кнопку гасим (без двойных кликов), а по завершении на main обновляем список.
+        s.isEnabled = false
+        s.toolTip = L10n.t("voice.deleting")
+        let finish: (Bool) -> Void = { [weak self] _ in
+            guard let self = self else { return }
+            // Удалили активную → переключиться на другую установленную, если есть (иначе диктовка
+            // честно попросит скачать модель при следующем использовании — onNeedModel).
+            if wasActive, let fallback = self.unifiedModels().first(where: { $0.id != m.id && $0.isInstalled() }) {
+                self.activateModel(fallback)   // reshow внутри
+            } else {
+                self.reshow()
+            }
+        }
+        if m.engine == "whisper" { ModelDownloader.shared.delete(m.id, completion: finish) }
+        else { ParakeetEngine.shared.deleteModel(completion: finish) }
+    }
+}
+
+/// Flipped — контент идёт сверху вниз.
+final class FlippedView: NSView { override var isFlipped: Bool { true } }
+
+/// Карточка-секция настроек. Цвет резолвится в updateLayer под РЕАЛЬНОЙ темой view
+/// (dynamic NSColor → .cgColor статичен и не подхватывает смену темы).
+final class CardView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() {
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        layer?.cornerRadius = 11
+        layer?.cornerCurve = .continuous
+        layer?.borderWidth = 1
+        // ⚠️ В СВЕТЛОЙ ТЕМЕ У НАС БЫЛО ИНВЕРТИРОВАНО ОТНОСИТЕЛЬНО macOS (замечание автора 29.07 со
+        // скриншотом системных настроек). У системы: страница белая, группы чуть СЕРЕЕ. У нас было
+        // наоборот — серая страница и белые карточки. В тёмной теме наша схема с системой совпадала,
+        // поэтому годами и не бросалось в глаза: баг жил ровно в одной теме.
+        // Берём НЕ фиксированный серый, а полупрозрачный чёрный поверх белой страницы: так оттенок
+        // следует за «Увеличить контраст» и прочими настройками универсального доступа.
+        layer?.backgroundColor = (dark ? NSColor.white.withAlphaComponent(0.075)
+                                        : NSColor.black.withAlphaComponent(0.035)).cgColor
+        layer?.borderColor = (dark ? NSColor.white.withAlphaComponent(0.10)
+                                    : NSColor.black.withAlphaComponent(0.06)).cgColor
+    }
+}
+
+/// Подложка страницы настроек: в тёмной теме — живое размытие за окном, в светлой — белый лист.
+///
+/// Зачем разное (правка 29.07): у macOS в СВЕТЛОЙ теме страница белая, а группы чуть серее. У нас
+/// было наоборот, потому что `.underPageBackground` под .aqua даёт серый, а карточки мы рисовали
+/// белыми. В тёмной теме материал выглядит правильно, поэтому его и оставляем — меняем только
+/// светлую ветку.
+final class ThemedBackgroundView: NSView {
+    private let darkView: NSView
+    private let lightView: NSView
+    init(dark: NSView, light: NSView) {
+        darkView = dark; lightView = light
+        super.init(frame: .zero)
+        for v in [dark, light] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+            NSLayoutConstraint.activate([
+                v.topAnchor.constraint(equalTo: topAnchor),
+                v.bottomAnchor.constraint(equalTo: bottomAnchor),
+                v.leadingAnchor.constraint(equalTo: leadingAnchor),
+                v.trailingAnchor.constraint(equalTo: trailingAnchor),
+            ])
+        }
+        light.wantsLayer = true
+        apply()
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); apply() }
+    private func apply() {
+        let dark = effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        darkView.isHidden = !dark
+        lightView.isHidden = dark
+        // ⚠️ `.cgColor` СНИМАЕТ ЦВЕТ ПОД ТЕКУЩЕЕ ОФОРМЛЕНИЕ, А НЕ ПОД НАШЕ (баг, 03.08.2026).
+        //
+        // Здесь была причина, по которой светлая тема «не работала»: динамический
+        // `textBackgroundColor` разрешался в тот момент, когда текущим оформлением рисования была
+        // ТЁМНАЯ тема, и в слой ложился почти чёрный цвет. Светлая подложка при этом честно
+        // показывалась — просто покрашенная в чёрное. Отсюда и картина из отзывов: боковое меню
+        // светлое (оно на системном материале и не зависит от нас), правая часть тёмная, а подписи
+        // на динамических цветах уже светлой темы, то есть тёмные по тёмному.
+        //
+        // Проявлялось только в режиме «как в системе», потому что при ЯВНО выбранной теме окно
+        // получает оформление раньше и текущее совпадает с нашим. Из-за этого я дважды объявлял
+        // тему починенной, проверив только явный выбор.
+        //
+        // Лечится не цветом, а КОНТЕКСТОМ: разрешаем цвет внутри нашего оформления. Тот же приём
+        // уже используется ниже в файле для чипов.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            lightView.layer?.backgroundColor = NSColor.textBackgroundColor.cgColor
+        }
+    }
+}
+
+/// Кружок «i» в строке настройки: по клику показывает полное описание.
+///
+/// Зачем (репорт #41 и просьба автора 29.07): подписи под строками не влезают по ширине даже после
+/// расширения окна до 600 — замерено рендером, четыре подписи всё равно обрезаются. Ширина лечит
+/// заголовки и воздух, а описания лечит только сокращённая подпись плюс полный текст по клику.
+///
+/// Показывается СТРОГО по наличию текста справки, а НЕ по оценке «влезает ли подпись»: эта оценка
+/// уже один раз соврала (из-за неё 28.07 tooltip'ы сделали безусловными), и вешать на неё видимую
+/// кнопку нельзя.
+///
+/// Поповер держим СИЛЬНОЙ ссылкой: без неё он умирает сразу после показа (прецедент в
+/// VoiceHistoryWindow.showOpacitySlider).
+final class HelpButton: NSButton {
+    private let helpText: String
+    private let rowTitle: String
+    private var popover: NSPopover?
+
+    init(text: String, title: String) {
+        helpText = text; rowTitle = title
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        isBordered = false
+        setButtonType(.momentaryChange)
+        image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: title)?
+            .withSymbolConfiguration(.init(pointSize: 13, weight: .regular))
+        contentTintColor = .tertiaryLabelColor
+        imagePosition = .imageOnly
+        target = self
+        action = #selector(show)
+        // ⚠️ tooltip у кружка НЕ ставим (автор 29.07). Он дублировал бы поповер и вылезал при
+        // случайном проходе мышью. Подсказка на «i» — строго по КЛИКУ. Tooltip остаётся у самой
+        // ПОДПИСИ строки (там он показывает обрезанный хвост при наведении) — это разные роли.
+        widthAnchor.constraint(equalToConstant: 22).isActive = true
+        heightAnchor.constraint(equalToConstant: 22).isActive = true
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+
+    @objc private func show() {
+        popover?.close()
+        let t = NSTextField(labelWithString: rowTitle)
+        t.font = .systemFont(ofSize: 13, weight: .semibold)
+        let body = NSTextField(wrappingLabelWithString: helpText)
+        body.font = .systemFont(ofSize: 12)
+        body.textColor = .secondaryLabelColor
+        body.preferredMaxLayoutWidth = 300
+        let stack = NSStackView(views: [t, body])
+        stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 6
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let host = NSView()
+        host.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: host.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: host.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: host.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: host.bottomAnchor),
+            host.widthAnchor.constraint(equalToConstant: 328),
+        ])
+        let vc = NSViewController()
+        vc.view = host
+        let p = NSPopover()
+        p.contentViewController = vc
+        p.behavior = .transient
+        p.show(relativeTo: bounds, of: self, preferredEdge: .maxY)
+        popover = p
+    }
+}
+
+/// Строка-«шторка»: подчинённый параметр, который выезжает из-под своего тумблера.
+///
+/// Зачем именно так: была просьба, чтобы
+/// дополнительные пункты «плавно разъезжались, выезжали вниз», и чтобы исчезли треугольники
+/// раскрытия. Ключевое ограничение — `reshow()` пересобирает раздел и сносит тот самый тумблер, из
+/// чьего action всё началось; анимировать поверх пересборки невозможно в принципе. Поэтому шторка
+/// строится ВСЕГДА, а меняется у неё только `isHidden` — отправитель остаётся жив, пересборки нет.
+///
+/// Скрытый arranged-subview исключается из раскладки NSStackView, поэтому высота карточки и
+/// `fittingSize` (её меряет sectionHeight при подгонке окна) остаются честными.
+///
+/// Свой разделитель несёт ВНУТРИ себя: иначе при схлопывании в карточке повисала бы лишняя линия.
+final class CollapsibleRow: NSStackView {
+    init(row: NSView, separator: NSView, visible: Bool) {
+        super.init(frame: .zero)
+        orientation = .vertical
+        alignment = .width
+        spacing = 0
+        translatesAutoresizingMaskIntoConstraints = false
+        addArrangedSubview(separator)
+        addArrangedSubview(row)
+        isHidden = !visible
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+
+    /// Показать/спрятать.
+    ///
+    /// ⚠️ НЕ `animator().isHidden` (правка 29.07 по замечанию автора: «откуда-то они сейчас издалека
+    /// очень вылетают»). Появляющаяся вью до первой раскладки имеет нулевой фрейм в левом верхнем
+    /// углу, и анимация честно везёт её ОТТУДА на место — через пол-окна. Выглядит как влёт издалека.
+    ///
+    /// Правильный порядок: сначала показать БЕЗ анимации (вью встаёт на своё место мгновенно, но
+    /// прозрачной), и только потом проявить. При скрытии наоборот: сперва погасить, спрятать в
+    /// завершении. Двигается при этом только то, что ниже по стеку, и ровно на высоту строки.
+    func setVisible(_ on: Bool, in container: NSView?) {
+        if on {
+            alphaValue = 0
+            isHidden = false
+            container?.layoutSubtreeIfNeeded()   // встали на место БЕЗ анимации
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.18
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                self.animator().alphaValue = 1
+            }
+        } else {
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.12
+                ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+                self.animator().alphaValue = 0
+            }, completionHandler: { [weak self, weak container] in
+                self?.isHidden = true
+                self?.alphaValue = 1          // вернуть, иначе следующий показ будет невидимым
+                container?.layoutSubtreeIfNeeded()
+            })
+        }
+    }
+}
+
+/// Тонкий разделитель строк в карточке (цвет — под реальную тему).
+final class HairlineView: NSView {
+    override var wantsUpdateLayer: Bool { true }
+    override func updateLayer() { layer?.backgroundColor = NSColor.separatorColor.cgColor }
+}
+
+/// NSTextField, который сам держит preferredMaxLayoutWidth = своей ширине → корректный
+/// перенос многострочного текста в Auto Layout (иначе AppKit считает текст однострочным
+/// и он уезжает за край). Это надёжнее ручного пересчёта в viewDidLayout.
+final class WrappingLabel: NSTextField {
+    init(string: String) {
+        super.init(frame: .zero)
+        isEditable = false; isSelectable = false; isBordered = false; isBezeled = false
+        drawsBackground = false
+        alignment = .left
+        usesSingleLineMode = false          // КЛЮЧ: иначе label однострочный и текст обрезается
+        cell?.usesSingleLineMode = false
+        cell?.wraps = true
+        cell?.isScrollable = false
+        lineBreakMode = .byWordWrapping
+        maximumNumberOfLines = 0
+        setContentCompressionResistancePriority(.defaultLow, for: .horizontal)  // не диктовать ширину
+        setContentHuggingPriority(.defaultLow, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .vertical)      // не обрезать по высоте
+        stringValue = string
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+    /// КАНОН self-sizing wrapping NSTextField: ширину переноса обновляем в setFrameSize —
+    /// он срабатывает РОВНО когда Auto Layout ставит реальный кадр (в отличие от layout(),
+    /// который в живом окне может выстрелить пока колонка ещё транзитно широкая → текст не
+    /// переносится и уезжает за край). Прецедент: настройки лезли вправо именно из-за этого.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        if abs(preferredMaxLayoutWidth - newSize.width) > 0.5 {
+            preferredMaxLayoutWidth = newSize.width
+            invalidateIntrinsicContentSize()
+        }
+    }
+    override func layout() {
+        super.layout()
+        if abs(preferredMaxLayoutWidth - bounds.width) > 0.5 {
+            preferredMaxLayoutWidth = bounds.width
+            invalidateIntrinsicContentSize()
+        }
+    }
+}
+
+/// Поток «чипов»-слов с крестиком на каждом (списки исключений и выученных слов). Перенос по ширине,
+/// высота считается сама. Стиль — округлый прямоугольник в общем DS-стиле (как keycap-плашки).
+/// Удаление — клик по ✕ на чипе (раньше было неочевидно: выдели тег + Delete).
+final class ChipFlowView: NSView {
+    var onDelete: ((String) -> Void)?
+    var emptyText: String = ""
+    private(set) var words: [String] = []
+    private var heightC: NSLayoutConstraint!
+    private let rowGap: CGFloat = 8, chipGap: CGFloat = 8
+    private var emptyLabel: NSTextField?
+
+    override init(frame: NSRect) { super.init(frame: frame); commonInit() }
+    required init?(coder: NSCoder) { super.init(coder: coder); commonInit() }
+    private func commonInit() {
+        translatesAutoresizingMaskIntoConstraints = false
+        heightC = heightAnchor.constraint(equalToConstant: 28)
+        heightC.isActive = true
+    }
+    override var isFlipped: Bool { true }   // y вниз — проще флоу сверху-вниз
+
+    func set(_ words: [String]) {
+        self.words = words
+        subviews.forEach { $0.removeFromSuperview() }
+        emptyLabel = nil
+        if words.isEmpty {
+            let l = NSTextField(labelWithString: emptyText)
+            l.font = .systemFont(ofSize: 12); l.textColor = .tertiaryLabelColor
+            addSubview(l); emptyLabel = l
+        } else {
+            for w in words { addSubview(makeChip(w)) }
+        }
+        needsLayout = true
+    }
+
+    private func makeChip(_ word: String) -> NSView {
+        let label = NSTextField(labelWithString: word)
+        label.font = .systemFont(ofSize: 12.5); label.textColor = .labelColor
+        let x = NSButton()
+        x.target = self; x.action = #selector(deleteTapped(_:))
+        x.bezelStyle = .regularSquare; x.isBordered = false; x.imagePosition = .imageOnly
+        x.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: L10n.t("act.delete"))
+        x.contentTintColor = .tertiaryLabelColor
+        x.identifier = NSUserInterfaceItemIdentifier(word)
+        x.translatesAutoresizingMaskIntoConstraints = false
+        x.widthAnchor.constraint(equalToConstant: 13).isActive = true
+        x.heightAnchor.constraint(equalToConstant: 13).isActive = true
+        let stack = NSStackView(views: [label, x])
+        stack.orientation = .horizontal; stack.spacing = 5; stack.alignment = .centerY
+        stack.edgeInsets = NSEdgeInsets(top: 4, left: 10, bottom: 4, right: 8)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        let chip = NSView(); chip.wantsLayer = true
+        chip.layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.08).cgColor
+        chip.layer?.cornerRadius = 7
+        chip.layer?.borderWidth = 1
+        chip.layer?.borderColor = NSColor.labelColor.withAlphaComponent(0.07).cgColor
+        chip.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: chip.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: chip.trailingAnchor),
+            stack.topAnchor.constraint(equalTo: chip.topAnchor),
+            stack.bottomAnchor.constraint(equalTo: chip.bottomAnchor)
+        ])
+        return chip
+    }
+
+    @objc private func deleteTapped(_ sender: NSButton) {
+        if let w = sender.identifier?.rawValue { onDelete?(w) }
+    }
+
+    override func layout() {
+        super.layout()
+        let W = bounds.width
+        guard W > 1 else { return }
+        if let e = emptyLabel {
+            e.sizeToFit()
+            e.frame = NSRect(x: 0, y: 5, width: W, height: max(e.frame.height, 16))
+            setHeight(e.frame.height + 8); return
+        }
+        var x: CGFloat = 0, y: CGFloat = 0, rowH: CGFloat = 0
+        for chip in subviews {
+            chip.layoutSubtreeIfNeeded()
+            let sz = chip.fittingSize
+            if x > 0 && x + sz.width > W { x = 0; y += rowH + rowGap; rowH = 0 }
+            chip.frame = NSRect(x: x, y: y, width: sz.width, height: sz.height)
+            x += sz.width + chipGap
+            rowH = max(rowH, sz.height)
+        }
+        setHeight(y + rowH)
+    }
+    private func setHeight(_ h: CGFloat) {
+        let hh = max(h, 24)
+        if abs(heightC.constant - hh) > 0.5 { heightC.constant = hh }
+    }
+}
+
+/// Поле-контейнер для потока чипов (исключения / выученные слова): округлая рамка + фон, как у
+/// поля ввода. Высота следует за ChipFlowView внутри (тот считает высоту по числу строк чипов) —
+/// поле само растёт, когда слов больше. Чтобы чипы не «висели в воздухе» без обрамления.
+final class ChipFieldView: NSView {
+    init(_ chips: ChipFlowView) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.borderWidth = 1
+        chips.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(chips)
+        let p: CGFloat = 10
+        NSLayoutConstraint.activate([
+            chips.leadingAnchor.constraint(equalTo: leadingAnchor, constant: p),
+            chips.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -p),
+            chips.topAnchor.constraint(equalTo: topAnchor, constant: p),
+            chips.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -p)
+        ])
+        applyColors()
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    override func viewDidChangeEffectiveAppearance() { super.viewDidChangeEffectiveAppearance(); applyColors() }
+    private func applyColors() {
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            layer?.backgroundColor = NSColor.labelColor.withAlphaComponent(0.04).cgColor
+            layer?.borderColor = NSColor.separatorColor.cgColor
+        }
+    }
+}

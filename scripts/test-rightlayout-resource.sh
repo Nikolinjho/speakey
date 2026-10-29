@@ -13,7 +13,7 @@ import sys
 import tempfile
 
 root = Path(sys.argv[1])
-relative = Path('Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel')
+relative = Path('Sources/Speakey/Resources/RightLayout/LayoutClassifier.mlmodel')
 source = root / relative
 original = source.read_bytes()
 expected_sha = '5fab7216bce448129fe89e3e5d3fa63896cee8612364a72c631e24034e59f704'
@@ -26,11 +26,11 @@ assert manifest['sourceBytes'] == len(original) == 13880886
 assert manifest['parameters'] == 3462292
 assert manifest['inputLength'] == 20
 assert manifest['classes'] == ['ru', 'en', 'he', 'ru_from_en', 'he_from_en', 'en_from_ru', 'en_from_he', 'he_from_ru', 'ru_from_he']
-assert (root / 'Sources/Keyboop/Resources/RightLayout/model.json').read_bytes() == (root / 'Resources/RightLayout/model.json').read_bytes()
-assert (root / 'Sources/Keyboop/Resources/RightLayout/LICENSE').read_bytes() == (root / 'Resources/RightLayout/LICENSE').read_bytes()
+assert (root / 'Sources/Speakey/Resources/RightLayout/model.json').read_bytes() == (root / 'Resources/RightLayout/model.json').read_bytes()
+assert (root / 'Sources/Speakey/Resources/RightLayout/LICENSE').read_bytes() == (root / 'Resources/RightLayout/LICENSE').read_bytes()
 print('PASS: manifest, лицензия и контрольная сумма модели')
 
-with tempfile.TemporaryDirectory(prefix='keyboop-rightlayout-test-') as temporary:
+with tempfile.TemporaryDirectory(prefix='speakey-rightlayout-test-') as temporary:
     fixture = Path(temporary)
     (fixture / 'scripts').mkdir()
     shutil.copy2(root / 'scripts/fetch-rightlayout-model.sh', fixture / 'scripts')
@@ -85,7 +85,7 @@ with tempfile.TemporaryDirectory(prefix='keyboop-rightlayout-test-') as temporar
     print('PASS: проверенное скачивание сохранено, повторный запуск без сети')
 
     shutil.copy2(root / 'build-app.sh', fixture / 'build-app.sh')
-    shutil.copy2(root / 'Sources/Keyboop/L10n.swift', fixture / 'Sources/Keyboop/L10n.swift')
+    shutil.copy2(root / 'Sources/Speakey/L10n.swift', fixture / 'Sources/Speakey/L10n.swift')
     app = fixture / 'Existing.app'
     app.mkdir()
     sentinel = app / 'keep.txt'
@@ -94,7 +94,7 @@ with tempfile.TemporaryDirectory(prefix='keyboop-rightlayout-test-') as temporar
     swift = bin_dir / 'swift'
     swift.write_text('#!/bin/bash\nset -eu\ntouch "$TEST_COMPILER_MARKER"\necho "Ожидаемый отказ компилятора" >&2\nexit 73\n')
     swift.chmod(0o755)
-    environment.update(KEYBOOP_BUILD_APP=str(app), TEST_COMPILER_MARKER=str(compiler_marker))
+    environment.update(SPEAKEY_BUILD_APP=str(app), TEST_COMPILER_MARKER=str(compiler_marker))
     result = subprocess.run(['bash', str(fixture / 'build-app.sh')], env=environment, text=True, capture_output=True)
     assert result.returncode == 73, result.stdout + result.stderr
     assert compiler_marker.exists(), 'Сборка не дошла до компилятора модели'

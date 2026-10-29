@@ -1,0 +1,1986 @@
+import AppKit
+import CoreGraphics
+
+/// Человекочитаемая запись текущего хоткея.
+func hotkeyDisplayString() -> String {
+    let s = AppSettings.shared
+    if s.hotkeyMode == "doubletap" {
+        let mods = CGEventFlags(rawValue: s.hotkeyModifiers)
+        if mods.contains(.maskShift) { return "2× ⇧" }
+        if mods.contains(.maskCommand) { return "2× ⌘" }
+        if mods.contains(.maskAlternate) { return "2× ⌥" }
+        return L10n.t("hk.dblMod")
+    }
+    if s.hotkeyMode == "modkey" {
+        switch s.hotkeyKeyCode {
+        case 61: return L10n.t("hk.rOpt")
+        case 58: return L10n.t("hk.lOpt")
+        case 54: return L10n.t("hk.rCmd")
+        case 55: return L10n.t("hk.lCmd")
+        case 60: return L10n.t("hk.rShift")
+        case 62: return L10n.t("hk.rCtrl")
+        default: return L10n.t("hk.key")
+        }
+    }
+    let mods = CGEventFlags(rawValue: s.hotkeyModifiers)
+    var out = ""
+    if mods.contains(.maskControl) { out += "⌃" }
+    if mods.contains(.maskAlternate) { out += "⌥" }
+    if mods.contains(.maskShift) { out += "⇧" }
+    if mods.contains(.maskCommand) { out += "⌘" }
+    if s.hotkeyMode == "key", s.hotkeyKeyCode >= 0 {
+        let ks = KeyLabels.symbol(forKeyCode: s.hotkeyKeyCode)   // подпись по keyCode (стабильно: `` ` `` ≠ ё)
+        out += ks.isEmpty ? "·" : ks
+    }
+    return out.isEmpty ? "—" : out
+}
+
+/// Человекочитаемый хоткей ДИКТОВКИ (та же логика, что в пункте «Свой…» VoiceHotkeyControl).
+/// Вынесено наружу, чтобы онбординг мог подставлять РЕАЛЬНО назначенные комбинации в текст,
+/// а не абстрактное «нажми хоткей» — так пользователю проще их запомнить (просьба автора 21.07).
+func voiceHotkeyDisplayString() -> String {
+    let s = AppSettings.shared
+    if s.voiceHotkeyMode == "modkey" {
+        switch s.voiceHotkeyKeyCode {
+        case 61: return L10n.t("hk.rOpt"); case 58: return L10n.t("hk.lOpt")
+        case 54: return L10n.t("hk.rCmd"); case 55: return L10n.t("hk.lCmd")
+        case 60: return L10n.t("hk.rShift"); case 56: return L10n.t("hk.lShift")
+        case 62: return L10n.t("hk.rCtrl"); case 59: return L10n.t("hk.lCtrl")
+        default: return L10n.t("hk.key")
+        }
+    }
+    return modsPlusKey(CGEventFlags(rawValue: s.voiceHotkeyModifiers), s.voiceHotkeyKeyCode)
+}
+
+/// Человекочитаемый хоткей ПЕРЕВОДА (напр. «⌃⌥T»).
+func translateHotkeyDisplayString() -> String {
+    let s = AppSettings.shared
+    return modsPlusKey(CGEventFlags(rawValue: s.translateHotkeyModifiers), s.translateHotkeyKeyCode)
+}
+
+/// «модификаторы + клавиша» → «⌃⌥T». Подпись клавиши берём по keyCode (стабильно: `` ` `` ≠ ё).
+private func modsPlusKey(_ mods: CGEventFlags, _ keyCode: Int) -> String {
+    var out = ""
+    if mods.contains(.maskControl) { out += "⌃" }
+    if mods.contains(.maskAlternate) { out += "⌥" }
+    if mods.contains(.maskShift) { out += "⇧" }
+    if mods.contains(.maskCommand) { out += "⌘" }
+    let ks = KeyLabels.symbol(forKeyCode: keyCode)
+    out += ks.isEmpty ? "·" : ks
+    return out.isEmpty ? "—" : out
+}
+
+/// Хоткей: пресеты (combo + правые модификаторы) + «Свой…».
+/// ЗАПИСЬ СВОЕЙ КОМБИНАЦИИ — общая механика для всех хоткей-контролов.
+///
+/// Баг, который это лечит (репорты пользователей 25.07: «нажимаю переназначить — не ловит»):
+/// наш CGEventTap стоит на сессии ПЕРЕД приложениями и активно ГЛОТАЕТ уже назначенные хоткеи
+/// (перевод/диктовка/мгновенное переключение). Пока идёт запись, пользователь жмёт как раз такие
+/// комбинации — tap съедал нажатие и запускал СТАРОЕ действие, а локальный монитор окна настроек
+/// не получал ничего. Поэтому на время записи tap перестаёт трогать наши хоткеи (см. EventTap).
+/// Режим записи комбинации. Пока он включён, EventTap пропускает ВСЁ насквозь (EventTap.swift:161) —
+/// то есть авто-переключение, исправление на лету и сниппеты не работают вовсе.
+///
+/// ⚠️ Почему здесь сторожа (28.07). Раньше флаг снимался только из `capture()`, то есть по факту
+/// нажатия клавиши. Человек открывал «Назначить свою…», передумывал и закрывал окно — флаг оставался
+/// поднятым до конца жизни процесса: движок молча мёртв, в логе ни строки, лечится только
+/// перезапуском. Вторая половина хуже: локальный монитор контрола продолжал глотать клавиши в наших
+/// окнах, и следующее нажатие могло назначить на хоткей что угодно, вплоть до пробела.
+/// `reset()` для этого и был задуман, но его никто не вызывал — предохранитель без проводов.
+///
+/// Теперь запись гасится сама: по закрытию СВОЕГО окна, по потере фокуса приложением и по таймауту.
+enum HotkeyRecording {
+    /// Идёт запись комбинации (читает EventTap; всё на main-потоке, гонки нет).
+    private(set) static var active = false
+
+    /// Сколько ждём БЕЗДЕЙСТВИЯ, прежде чем считать, что человек передумал.
+    ///
+    /// ⚠️ Это таймер ПРОСТОЯ, а не общий лимит на запись (баг-репорт: «окошко исчезло само,
+    /// я перебирал варианты и не успел»). Раньше он отсчитывал 15с от начала и не продлевался — то
+    /// есть наказывал именно за то, ради чего окно и сделано: спокойно попробовать несколько
+    /// сочетаний. Теперь любое нажатие продлевает его заново, а сам порог поднят: окно записи теперь
+    /// ВИДНО, поэтому сторож нужен лишь как страховка от протечки, а не как средство сигнализации.
+    private static let watchdogSeconds: TimeInterval = 90
+    /// Абсолютный потолок сессии записи: продлеваемый таймер простоя можно продлевать бесконечно
+    /// теми же клавишами, которые локальный монитор глотает в наших окнах. Этот не продлевается
+    /// ничем (найдено ревью 28.07).
+    private static let hardCapSeconds: TimeInterval = 180
+    private static var hardCap: Timer?
+    /// Насколько недавним должно быть нажатие, чтобы уход из приложения НЕ считался отказом.
+    /// Нужен, потому что часть назначаемых сочетаний система забирает себе (⌘Space открывает
+    /// Spotlight) и фокус уезжает сам собой — это не «человек ушёл», это он нажал то, что просили.
+    private static let recentActivityWindow: TimeInterval = 3
+    private static var lastActivity: TimeInterval = 0
+
+    private static var stopper: (() -> Void)?
+    private static var watchdog: Timer?
+    private static var observers: [NSObjectProtocol] = []
+    /// Поколение записи. Наблюдатели ставятся с `queue: .main`, то есть их блок уходит в очередь;
+    /// `removeObserver` уже поставленную операцию не отменяет. Без этого счётчика отложенный колбэк
+    /// от ПРОШЛОЙ записи мог погасить УЖЕ ДРУГУЮ, начатую мгновением позже.
+    private static var session = 0
+
+    /// Начать запись. `stop` — как вернуть КОНКРЕТНЫЙ контрол в обычный вид (снять локальный
+    /// монитор, перерисовать список): сторожа зовут именно его, а не только гасят флаг.
+    ///
+    /// `window` — окно, в котором идёт запись. Наблюдатель закрытия вешается ИМЕННО на него.
+    /// ⚠️ Почему не `object: nil` (найдено ревью 28.07): уведомление о закрытии прилетает от ЛЮБОГО
+    /// окна процесса. У нас есть окна, которые закрываются сами: окно докачки языковых пакетов
+    /// (TranslationEngine закрывает его из колбэка, когда загрузка кончилась) и окно отзыва
+    /// (закрывается по таймеру через ~1.1с после отправки). Человек начал назначать хоткей, в этот
+    /// момент докачалась модель — запись молча умирала, тап оживал, и следующее нажатие запускало
+    /// СТАРЫЙ хоткей вместо записи. Это ровно тот баг 25.07, который сторожа и должны были лечить.
+    static func begin(stop: @escaping () -> Void, in window: NSWindow?) {
+        // Повторный вход: не выбрасываем прошлый stopper молча, а честно ЗАВЕРШАЕМ ту запись —
+        // иначе её локальный монитор остаётся висеть и глотает клавиши во всех наших окнах
+        // (в поле сниппетов, в поиске исключений, в форме отзыва — «не набирается ни символа»).
+        forceStop("начата запись другой комбинации")
+        session &+= 1
+        let mySession = session
+        active = true
+        stopper = stop
+        lastActivity = ProcessInfo.processInfo.systemUptime
+        kbLog("хоткей: запись комбинации начата")
+        armWatchdog(session: mySession)
+        armHardCap(session: mySession)
+        let nc = NotificationCenter.default
+        if let window {
+            observers.append(nc.addObserver(forName: NSWindow.willCloseNotification,
+                                            object: window, queue: .main) { _ in
+                forceStop("окно закрыто", session: mySession)
+            })
+        }
+        observers.append(nc.addObserver(forName: NSApplication.didResignActiveNotification,
+                                        object: nil, queue: .main) { _ in
+            // Если человек только что нажимал — фокус увела САМА система (Spotlight на ⌘Space и
+            // подобное), и обрывать запись из-за этого нельзя.
+            let idle = ProcessInfo.processInfo.systemUptime - lastActivity
+            if idle > recentActivityWindow {
+                forceStop("ушли из приложения", session: mySession)
+                return
+            }
+            // Нажатие было только что: возможно, фокус увела САМА система (⌘Space открыл Spotlight).
+            // Но молча оставлять запись живой нельзя — иначе человек уйдёт работать в другую
+            // программу, а движок будет отключён. Перепроверяем через recentActivityWindow.
+            DispatchQueue.main.asyncAfter(deadline: .now() + recentActivityWindow) {
+                guard !NSApp.isActive else { return }
+                forceStop("ушли из приложения", session: mySession)
+            }
+        })
+    }
+
+    /// Была активность в записи: продлеваем сторожа. Зовут контролы из своих capture().
+    static func noteActivity() {
+        guard active else { return }
+        lastActivity = ProcessInfo.processInfo.systemUptime
+        armWatchdog(session: session)
+    }
+
+    private static func armWatchdog(session sess: Int) {
+        watchdog?.invalidate()
+        watchdog = Timer.scheduledTimer(withTimeInterval: watchdogSeconds, repeats: false) { _ in
+            forceStop("ничего не нажимали \(Int(watchdogSeconds))с", session: sess)
+        }
+    }
+
+    private static func armHardCap(session sess: Int) {
+        hardCap?.invalidate()
+        hardCap = Timer.scheduledTimer(withTimeInterval: hardCapSeconds, repeats: false) { _ in
+            forceStop("запись идёт дольше \(Int(hardCapSeconds / 60)) мин", session: sess)
+        }
+    }
+
+    /// Штатное завершение (клавиша нажата либо Esc).
+    static func end() {
+        guard active else { return }
+        active = false
+        disarm()
+        kbLog("хоткей: запись комбинации завершена")
+    }
+
+    /// Аварийный сброс: окно закрыли / потеряли фокус / истёк таймаут / начали другую запись.
+    /// `session` — чью именно запись гасим; отложенный колбэк от прошлой не трогает текущую.
+    private static func forceStop(_ reason: String, session sess: Int? = nil) {
+        guard active else { return }
+        if let sess, sess != session { return }
+        active = false
+        let s = stopper
+        disarm()
+        kbLog("хоткей: запись прервана (\(reason)) — движок снова работает")
+        s?()      // вернуть контрол в нормальный вид и снять его локальный монитор
+    }
+
+    private static func disarm() {
+        watchdog?.invalidate(); watchdog = nil
+        hardCap?.invalidate(); hardCap = nil
+        observers.forEach { NotificationCenter.default.removeObserver($0) }
+        observers.removeAll()
+        stopper = nil
+    }
+}
+
+/// Общее правило «хватает ли модификаторов». Живёт здесь, чтобы рекордеры и тап судили ОДИНАКОВО.
+///
+/// Почему это правило вообще есть (репорты #13/#22/#30, 27.07): назначенная по недосмотру «голая»
+/// клавиша перехватывается у ВСЕЙ системы. В пределе человек назначает пробел и остаётся без
+/// пробела во всех программах, пока не выйдет из Speakey. Раньше запрет стоял только в контроле
+/// перевода, остальные три принимали что угодно.
+enum HotkeyKeys {
+    /// ⚠️ Белый список F13…F20 УБРАН (ревью 28.07). Он был реализован наполовину: рекордеры голую
+    /// F-клавишу принимали, но тап её перехватывал только для мгновенного переключения (у конверсии
+    /// и перевода стоит `!isEmpty`), а подписи KeyLabels знают лишь F1–F12 — панель рисовала пустую
+    /// капсулу и всё равно давала нажать «Назначить». Человек получал вечно мёртвый хоткей.
+    /// Полдела хуже, чем ничего: правило теперь одно и без исключений.
+
+    /// Допустима ли клавиша с таким набором модификаторов.
+    static func modifiersSufficient(keyCode: Int, mods: CGEventFlags) -> Bool {
+        let relevant: CGEventFlags = [.maskAlternate, .maskShift, .maskCommand, .maskControl]
+        return !mods.intersection(relevant).isEmpty
+    }
+}
+
+/// Комбинации, которые НЕЛЬЗЯ отдавать под наши хоткеи.
+///
+/// Репорт 25.07: пользователь при записи нажал ⌘C — и оно записалось. После этого КАЖДОЕ копирование
+/// запускало перевод, а перевод сам делает ⌘C → бесконечный цикл с «ритмичным звуком», пока человек
+/// не сменит хоткей в настройках. Петлю мы разорвали маркером синтетики, но назначать системные
+/// сочетания всё равно нельзя — они нужны самому пользователю.
+enum HotkeyGuard {
+    /// keyCode → подпись, для чистого ⌘ (буквы, которые везде значат своё).
+    private static let cmdCritical: [Int: String] = [
+        8: "⌘C", 9: "⌘V", 7: "⌘X", 6: "⌘Z", 0: "⌘A", 1: "⌘S", 12: "⌘Q", 13: "⌘W",
+        45: "⌘N", 31: "⌘O", 35: "⌘P", 3: "⌘F", 4: "⌘H", 46: "⌘M", 15: "⌘R", 2: "⌘D",
+        48: "⌘Tab", 51: "⌘⌫"
+    ]
+    /// Объяснить человеку, почему не взяли (без этого «нажал — ничего» выглядит как поломка).
+    /// Текст «эта комбинация занята системой» — показываем ПРЯМО в окне записи, не отдельным
+    /// модальным окном (просьба автора 28.07: алерт перекрывал само окно и обрывал запись, вместо
+    /// того чтобы дать спокойно нажать другое сочетание).
+    static func busyMessage(_ what: String) -> String {
+        String(format: L10n.t("hkrec.warn.busy"), what)
+    }
+
+    /// Текст «нужен хотя бы один модификатор».
+    static func needsModifierMessage() -> String { L10n.t("hkrec.warn.bare") }
+
+    /// ДВА РАЗНЫХ «ЗАНЯТО» (решение автора 06.08.2026), и разница принципиальная.
+    ///
+    /// `blocked` — то, что отбирать нельзя ни при каких обстоятельствах: ⌘C, ⌘V, ⌘Z и прочая
+    /// мышечная память. Человек, назначивший туда нашу функцию, сломает себе не Speakey, а вообще
+    /// весь Mac, и связать это с нами не сможет.
+    ///
+    /// `warn` — системные функции macOS (Spotlight, Mission Control, переключение раскладки). Это
+    /// его Mac и его выбор: он вправе отключить системное сочетание в настройках и занять его нами.
+    /// Наше дело предупредить, а не запретить. Кнопка «Назначить» остаётся живой.
+    enum Verdict {
+        case ok
+        case blocked(String)
+        case warn(String)
+    }
+
+    static func verdict(keyCode: Int, mods: CGEventFlags) -> Verdict {
+        if let hard = rejection(keyCode: keyCode, mods: mods) { return .blocked(hard) }
+        if let who = SystemHotkeys.takenBy(keyCode: keyCode, mods: mods) { return .warn(who) }
+        return .ok
+    }
+
+    /// Мягкое предупреждение: занято системой, но назначить можно.
+    static func conflictMessage(_ what: String) -> String {
+        String(format: L10n.t("hkrec.warn.system"), what)
+    }
+
+    // MARK: - Наши собственные хоткеи
+
+    /// Одно действие на одну комбинацию. Кто именно её занял, если занял.
+    ///
+    /// ⚠️ ЕДИНЫЙ РЕЕСТР, И ЭТО ГЛАВНОЕ В НЁМ. Проверка «занято нашей же функцией» существовала с
+    /// 24.07, но жила ВНУТРИ одного контрола (мгновенная смена языка) и знала о трёх функциях из
+    /// шести. То есть работала ровно в одну сторону: мгновенная смена берегла себя от чужих
+    /// комбинаций, а назначить конверсию поверх диктовки не мешал никто.
+    ///
+    /// Чем это оборачивается у человека, видно по отзывам. В диагностике отзыва #113 (08.08.2026)
+    /// стоит `конверсия=modkey/61 · диктовка=modkey/61`: обе функции на правом ⌥, и правый ⌥ это
+    /// заводская комбинация диктовки, то есть человек назначил конверсию на занятое и не получил ни
+    /// слова предупреждения. Отсюда же класс писем «поставил хоткей на диктовку, перестало работать
+    /// ручное переключение»: ничего не ломалось, просто на одно нажатие претендовали двое, и
+    /// выигрывал всегда один и тот же.
+    ///
+    /// Правило проекта (автор): **две функции на одну комбинацию не уживаются, и решать это надо в
+    /// интерфейсе, а не в момент нажатия.** Арбитраж на горячем пути был бы и медленнее, и
+    /// необъяснимее для человека: «нажал, сработало не то» без единой подсказки почему.
+    ///
+    /// Добавляя СЛЕДУЮЩИЙ хоткей, добавь его сюда же. Это единственное место, где перечислены все.
+    enum Slot: CaseIterable {
+        case convert, voice, translate, instant, snippet, plainPaste, caseChange, pasteDictation
+
+        /// Как назвать функцию человеку в тексте «занято: %@».
+        var name: String {
+            switch self {
+            case .convert:    return L10n.t("is.busy.convert")
+            case .voice:      return L10n.t("is.busy.voice")
+            case .translate:  return L10n.t("is.busy.translate")
+            case .instant:    return L10n.t("is.busy.instant")
+            case .snippet:    return L10n.t("is.busy.snippet")
+            case .plainPaste: return L10n.t("is.busy.paste")
+            case .caseChange: return L10n.t("is.busy.case")
+            case .pasteDictation: return L10n.t("is.busy.pasteLast")
+            }
+        }
+
+        /// Раздел настроек, где эту комбинацию меняют.
+        ///
+        /// ⚠️ Появился 07.09.2026 вместе с восьмым слотом. До него плашка «Одна клавиша на два
+        /// действия» открывала ВСЕГДА раздел переключения (`AppDelegate.warnHotkeyClashOnce`), и это
+        /// было верно ровно для двух слотов из семи: сниппеты, вставку без форматирования и смену
+        /// регистра настраивают в «Автозамене», диктовку и вставку последней диктовки — в «Голосе».
+        /// То есть человек по кнопке из предупреждения попадал не туда, где чинить.
+        var settingsSection: SettingsSection {
+            switch self {
+            case .convert, .instant:                  return .switching
+            case .voice, .pasteDictation:             return .voice
+            case .translate:                          return .translate
+            case .snippet, .plainPaste, .caseChange:  return .snippets
+            }
+        }
+
+        /// Текущая комбинация слота, либо nil — функция выключена или комбинация не назначена.
+        /// Выключенная функция комбинацию НЕ держит: человек вправе отдать её другой.
+        var trigger: (mode: String, keyCode: Int, mods: UInt64)? {
+            let s = AppSettings.shared
+            switch self {
+            case .convert:
+                return (s.hotkeyMode, s.hotkeyKeyCode, s.hotkeyModifiers)
+            case .voice:
+                guard s.voiceEnabled else { return nil }
+                return (s.voiceHotkeyMode, s.voiceHotkeyKeyCode, s.voiceHotkeyModifiers)
+            case .translate:
+                // У перевода своего режима нет, он всегда «клавиша + модификаторы».
+                return ("key", s.translateHotkeyKeyCode, s.translateHotkeyModifiers)
+            case .instant:
+                guard s.instantSwitchEnabled else { return nil }
+                return (s.instantSwitchMode, s.instantSwitchKeyCode, s.instantSwitchMods)
+            case .snippet:
+                guard s.snippetPickKeyCode >= 0 else { return nil }
+                return ("key", s.snippetPickKeyCode, s.snippetPickModifiers)
+            case .plainPaste:
+                guard s.plainPaste else { return nil }
+                return ("key", s.plainPasteKeyCode, s.plainPasteModifiers)
+            case .caseChange:
+                guard s.caseChangeEnabled else { return nil }
+                return ("key", s.caseChangeKeyCode, s.caseChangeModifiers)
+            case .pasteDictation:
+                guard s.pasteDictationEnabled else { return nil }
+                return ("key", s.pasteDictationKeyCode, s.pasteDictationModifiers)
+            }
+        }
+    }
+
+    /// Модификатор → его физические клавиши, ОБЕ СТОРОНЫ. Единственная таблица на приложение.
+    ///
+    /// ⚠️ Копий было две — эта и `EventTap.keyCodeMatchesMask` — и они разошлись (отзыв #204).
+    /// Держим одну: расхождение между «как ловим» и «как проверяем конфликт» не видно ни в одном
+    /// тесте, а наружу выходит как «хоткей не работает и никто не предупредил».
+    /// Fn и ⇪ здесь намеренно нет: они бывают только `modkey`, где сравнивается точный keyCode.
+    static let modifierKeys: [(CGEventFlags, [Int])] = [
+        (.maskShift,     [56, 60]),
+        (.maskAlternate, [58, 61]),
+        (.maskCommand,   [55, 54]),
+        (.maskControl,   [59, 62]),
+    ]
+
+    /// Покрывает ли маска эту физическую клавишу-модификатор (левую ИЛИ правую).
+    static func maskCovers(keyCode: Int, mask: CGEventFlags) -> Bool {
+        for (flag, keys) in modifierKeys where mask.contains(flag) && keys.contains(keyCode) { return true }
+        return false
+    }
+
+    /// Одна ли это физическая клавиша для хоткея «клавиша + модификаторы». Все коды сравниваются
+    /// строго, кроме грейва: `` ` ``/`~` на ANSI это keyCode 50, а на ISO под Esc стоит § с кодом
+    /// 10, и человек жмёт «где ожидает тильду». Поэтому 10 и 50 считаем одной клавишей (research
+    /// 01.07), и хоткей на `` ` `` срабатывает на любой клавиатуре.
+    ///
+    /// ⚠️ ТАБЛИЦА ОДНА НА ПРИЛОЖЕНИЕ, КАК И `modifierKeys` (26.09.2026, задача 244). Раньше пара
+    /// {10, 50} жила только в `EventTap.keyMatches`, а `sameTrigger` сравнивала keyCode строго.
+    /// Итог: ⌥§ и ⌥` в рантайме одна клавиша, а для проверки конфликтов две разные, и на неё можно
+    /// было без единого предупреждения повесить две наши функции. Та же болезнь, что в отзыве
+    /// #204, только на обычной клавише вместо модификатора. Исключение одно, мгновенное
+    /// переключение, и оно разобрано у `graveIsOneKey`.
+    ///
+    /// Без `Set` и без ленивой глобальной таблицы намеренно: функцию зовёт перехватчик на КАЖДОЕ
+    /// нажатие, и там стоить она должна пару сравнений, а не выделение памяти.
+    @inline(__always)
+    static func sameKey(_ a: Int, _ b: Int) -> Bool {
+        if a == b { return true }
+        return (a == 10 || a == 50) && (b == 10 || b == 50)
+    }
+
+    /// Считать ли для этой пары слотов грейв 10 и 50 одной клавишей.
+    ///
+    /// ⚠️ МГНОВЕННОЕ ПЕРЕКЛЮЧЕНИЕ ИСКЛЮЧЕНО, ПОТОМУ ЧТО ЕГО РАНТАЙМ СРАВНИВАЕТ СТРОГО (26.09.2026,
+    /// задача 244, ревью). В `EventTap` его ветка стоит первой и ловит ровно сохранённый keyCode,
+    /// без `keyMatches`, а переводить её на `keyMatches` нельзя: на ISO сочетание «мгновенное ⌥§ +
+    /// диктовка ⌥`» сегодня работает, каждая функция на своей клавише, и диктовка у такого человека
+    /// умерла бы после обновления. Значит, в паре с мгновенным 10 и 50 это РАЗНЫЕ клавиши, и
+    /// проверка обязана думать так же: иначе она показала бы плашку «одна клавиша на два действия»
+    /// там, где работают оба, и не дала бы назначить рабочее сочетание. Для остальных семи слотов
+    /// 10 ≡ 50, как в `keyMatches`: там пара на 10 и 50 значит, что одна функция мертва целиком.
+    static func graveIsOneKey(_ a: Slot, _ b: Slot) -> Bool { a != .instant && b != .instant }
+
+    /// Одна и та же ли это комбинация. Сравнение зависит от режима: у голого модификатора значим
+    /// только keyCode (маска у левого и правого ⌥ одинакова), у 🌐 сравнивать нечего вовсе.
+    /// `graveAlias` — считать ли грейв 10 и 50 одной клавишей, см. `graveIsOneKey`.
+    static func sameTrigger(_ mode: String, _ keyCode: Int, _ mods: UInt64,
+                            as other: (mode: String, keyCode: Int, mods: UInt64),
+                            graveAlias: Bool = true) -> Bool {
+        // ⚠️ ДВОЙНОЙ ТАП РАЗБИРАЕМ ДО СРАВНЕНИЯ РЕЖИМОВ (28.08.2026, отзыв #204). Он единственный
+        // жест, который в рантайме НЕ РАЗЛИЧАЕТ СТОРОНЫ: ловится по маске, а keyCode в настройках у
+        // него декоративный (пресет «2× ⌥» хранит 58, но срабатывает и на 61). Из-за `mode ==
+        // other.mode` первой строкой «двойной ⌥» и «правый ⌥» жили в разных вселенных, и назначить
+        // конверсию поверх диктовки не мешал никто — при том что физически это одна клавиша.
+        if mode == "doubletap" || other.mode == "doubletap" {
+            let (dtMods, rest) = mode == "doubletap"
+                ? (mods, other)
+                : (other.mods, (mode: mode, keyCode: keyCode, mods: mods))
+            let mask = CGEventFlags(rawValue: dtMods)
+            switch rest.mode {
+            // Двойной тап против двойного тапа: значима ТОЛЬКО маска.
+            case "doubletap": return mask == CGEventFlags(rawValue: rest.mods)
+            // Двойной тап против голого модификатора: конфликт, если клавиша входит в маску.
+            case "modkey":    return maskCovers(keyCode: rest.keyCode, mask: mask)
+            // `combo` рекордер собирает только из ДВУХ и более модификаторов (см. `count(peak) >= 2`),
+            // а двойной тап требует одиночного (`solo` в EventTap) — пересечься они не могут.
+            // `key` — жест с обычной клавишей, его прикрывает `otherKeyBetweenTaps`. `globe` — Fn.
+            default:          return false
+            }
+        }
+        // ⚠️ 🌐 ХРАНИТСЯ В ДВУХ ВИДАХ, И ЭТО ОДНА КЛАВИША (26.09.2026, отзыв #299). Мгновенное
+        // переключение пишет её отдельным режимом ("globe", 63, 0), а пресет ручного переключения
+        // «🌐 Globe / Fn» пишет ту же клавишу обычным голым модификатором ("modkey", 63, Fn).
+        // Пока сравнение начиналось с `mode == other.mode`, эта пара считалась разными
+        // комбинациями. В диагностике #299 ровно она: `конверсия=modkey/63/8388608 · мгновенное=
+        // globe/63/0`. Предупреждения не было ни при назначении, ни при запуске, а в рантайме ветка
+        // мгновенного переключения забирает 🌐 раньше конверсии, и конверсия на ней мертва всегда.
+        // Сводим "globe" к modkey/63 с обеих сторон, как это уже делает `shadows()`. Двойной тап
+        // разобран выше, поэтому его ответ «двойной ⌥ × 🌐 → нет» эта строка не трогает.
+        let a = globeAsModkey((mode, keyCode, mods))
+        let b = globeAsModkey(other)
+        guard a.mode == b.mode else { return false }
+        switch a.mode {
+        case "modkey": return a.keyCode == b.keyCode
+        // Грейв 10 ≡ 50 здесь по той же таблице, что в `EventTap.keyMatches` (задача 244), кроме
+        // пар с мгновенным переключением (`graveIsOneKey`).
+        default:
+            let key = graveAlias ? sameKey(a.keyCode, b.keyCode) : a.keyCode == b.keyCode
+            return key && a.mods == b.mods
+        }
+    }
+
+    /// 🌐 как голый модификатор с кодом 63. Маска у "modkey" в сравнении не участвует, поэтому
+    /// какая она тут, неважно.
+    private static func globeAsModkey(_ t: (mode: String, keyCode: Int, mods: UInt64))
+        -> (mode: String, keyCode: Int, mods: UInt64) {
+        t.mode == "globe" ? ("modkey", 63, CGEventFlags.maskSecondaryFn.rawValue) : t
+    }
+
+    /// Занята ли комбинация нашей же функцией. `excluding` — слот, который сейчас настраивают:
+    /// назначить себе то, что и так стоит, должно быть можно.
+    /// Алерт «комбинация занята нашей функцией» для ВЫБОРА ИЗ СПИСКА. В окне записи вместо него
+    /// показывается строка внутри самого окна (`hkrec.warn.ours`): там алерт перекрыл бы запись и
+    /// оборвал её, а из выпадающего списка перекрывать нечего.
+    static func busyAlert(_ what: String) {
+        let a = NSAlert()
+        a.messageText = L10n.t("is.busy.title")
+        a.informativeText = String(format: L10n.t("is.busy.body"), what)
+        a.addButton(withTitle: "OK")
+        a.runModal()
+    }
+
+    static func ourBusy(mode: String, keyCode: Int, mods: UInt64, excluding: Slot) -> String? {
+        for slot in Slot.allCases where slot != excluding {
+            guard let t = slot.trigger else { continue }
+            if sameTrigger(mode, keyCode, mods, as: t,
+                           graveAlias: graveIsOneKey(slot, excluding)) { return slot.name }
+        }
+        return nil
+    }
+
+    /// Пары НАШИХ функций, которые прямо сейчас сидят на одной комбинации.
+    ///
+    /// ⚠️ ЗАЧЕМ ЭТО НУЖНО, ЕСЛИ ЕСТЬ ПРОВЕРКА ПРИ НАЗНАЧЕНИИ (отзыв #134, 13.08.2026). Проверка
+    /// срабатывает в момент выбора, и этого мало. Конфигурация может стать конфликтной ПОЗЖЕ и без
+    /// единого назначения:
+    ///  • функция была выключена, а выключенная комбинацию не держит (см. `Slot.trigger`), поэтому
+    ///    её клавишу спокойно отдали другой функции; потом человек включил её обратно;
+    ///  • настройки достались от версии, где проверки ещё не было, и просто пережили обновления.
+    /// Снаружи это выглядит не как конфликт, а как «переключение тормозит»: одна клавиша на два
+    /// действия заставляет ждать, удержание это или нажатие. Именно так жалобу и прислали.
+    static func activeClashes() -> [(Slot, Slot)] {
+        var out: [(Slot, Slot)] = []
+        let slots = Slot.allCases
+        for (i, a) in slots.enumerated() {
+            guard let ta = a.trigger else { continue }
+            for b in slots.dropFirst(i + 1) {
+                guard let tb = b.trigger else { continue }
+                if sameTrigger(ta.mode, ta.keyCode, ta.mods, as: tb,
+                               graveAlias: graveIsOneKey(a, b)) { out.append((a, b)) }
+            }
+        }
+        return out
+    }
+
+    /// nil — комбинация допустима; иначе текст, чем именно она занята. ТОЛЬКО жёсткие запреты.
+    static func rejection(keyCode: Int, mods: CGEventFlags) -> String? {
+        let onlyCmd = mods == .maskCommand
+        if onlyCmd, let name = cmdCritical[keyCode] { return name }
+        // Одиночный ⌘+любая буква — почти всегда занято приложением; просим добавить ⌥ или ⌃.
+        if onlyCmd { return "⌘ + клавиша" }
+        // ⚠️ Системные сочетания сюда НЕ входят: они мягкие и живут в `verdict` (автор 06.08).
+        // Здесь только то, что не обсуждается.
+        return nil
+    }
+}
+
+
+
+final class HotkeyControl: NSView {
+    private let settings = AppSettings.shared
+    private let pop = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var monitor: Any?
+    /// Что применить, если человек нажмёт «Назначить» в окне записи. Пока nil — назначать нечего.
+    private var pendingApply: (() -> Void)?
+    /// Кандидат набран и ЗАМОРОЖЕН на экране: отпускание клавиш его больше не меняет.
+    private var frozen = false
+    /// Показали отказ, а клавиши ещё ФИЗИЧЕСКИ зажаты — ждём, пока отпустят всё. См. capture().
+    private var awaitingRelease = false
+    /// Предыдущий набор модификаторов — чтобы отличить «отпускает старое» от «начал новое».
+    private var lastMods: CGEventFlags = []
+
+    /// Человек начал набирать заново: модификаторы пошли вверх с нуля.
+    private func shouldRestart(_ mods: CGEventFlags) -> Bool { !mods.isEmpty && lastMods.isEmpty }
+
+    /// Сбросить замороженного кандидата перед новым набором.
+    private func restartIfFrozen() {
+        guard frozen else { return }
+        frozen = false
+        pendingApply = nil
+        resetPeaks()
+    }
+
+    /// Живое отображение, пока клавиши зажаты.
+    private func live(_ parts: [String]) {
+        HotkeyRecorderPanel.shared.render(parts: parts, complete: false)
+    }
+
+    /// Зафиксировать набранное: остаётся на экране, кнопка «Назначить» становится активной.
+    private func freeze(_ parts: [String], warning: String? = nil) {
+        frozen = true
+        HotkeyRecorderPanel.shared.render(parts: parts, complete: true, warning: warning)
+    }
+
+    /// Отказ БЕЗ прерывания записи: показываем причину в самом окне, человек жмёт другое сочетание.
+    private func warnInPanel(_ text: String, parts: [String]) {
+        frozen = false
+        pendingApply = nil
+        resetPeaks()
+        awaitingRelease = true
+        HotkeyRecorderPanel.shared.warn(text, parts: parts)
+    }
+    private var peak: CGEventFlags = []
+    private var peakKey: Int = -1   // keyCode ПЕРВОГО одиночного модификатора (для modkey, напр. левый Option)
+    private func resetPeaks() { peak = []; peakKey = -1 }
+
+    // (label, mode, keyCode, modifiers). Лейбл modkey-пресетов локализуется в presetLabel() на
+    // момент сборки списка (combo/doubletap — символ+англ., как у Apple в RU не переводится).
+    private static let presets: [(String, String, Int, UInt64)] = [
+        ("⌥⇧  Option+Shift",      "combo",  -1, CGEventFlags([.maskAlternate, .maskShift]).rawValue),
+        ("⌃⌥  Control+Option",    "combo",  -1, CGEventFlags([.maskControl, .maskAlternate]).rawValue),
+        ("Right ⌥",  "modkey", 61, CGEventFlags.maskAlternate.rawValue),
+        ("Left ⌥",   "modkey", 58, CGEventFlags.maskAlternate.rawValue),
+        ("Right ⌘", "modkey", 54, CGEventFlags.maskCommand.rawValue),
+        ("Left ⌃",   "modkey", 59, CGEventFlags.maskControl.rawValue),
+        ("2× ⇧  (DoubleShift)",        "doubletap", 56, CGEventFlags.maskShift.rawValue),
+        // 2× ⌥ — просьба из отзыва #113 (08.08.2026): у человека двойной ⇧ конфликтует с Karamba на
+        // удалённом рабочем столе. Движок doubletap ничего про конкретный модификатор не знает
+        // (работает по маске из настроек), а `keyCodeMatchesMask` уже принимает ОБА альта, 58 и 61,
+        // так что вся правка это строчка списка.
+        ("2× ⌥  (DoubleOption)",       "doubletap", 58, CGEventFlags.maskAlternate.rawValue),
+        // 🌐/Fn как хоткей КОНВЕРСИИ (просьба автора 24.07 — «мало ли кому так удобно»). Событие
+        // глотаем в EventTap, поэтому системное действие клавиши не сработает параллельно.
+        ("🌐  Globe / Fn",             "modkey",    63, CGEventFlags.maskSecondaryFn.rawValue),
+        // ⇪ как хоткей КОНВЕРСИИ (отзыв #160 от 21.08.2026 и ещё несколько просьб до него: «капс
+        // практически никогда не нужен, а в Punto на винде так было можно»). Механизм готов и уже
+        // работает для мгновенной смены языка: ремап Caps→LANG1 через hidutil, см. CapsRemap —
+        // проглотить событие тапом нельзя, замок включается НИЖЕ него.
+        // ⚠️ Пока Caps занят конверсией, настоящий капс-замок делается через ⇧+Caps. Это не наша
+        // выдумка, так устроен тот же механизм у мгновенного переключения.
+        ("⇪  Caps Lock",               "modkey",    57, CGEventFlags.maskAlphaShift.rawValue)
+    ]
+    /// Локализованный лейбл пресета (modkey → L10n; остальные — статический символ+англ.).
+    private static func presetLabel(_ p: (String, String, Int, UInt64)) -> String {
+        if p.1 == "modkey" {
+            switch p.2 {
+            case 61: return L10n.t("hk.rOpt"); case 58: return L10n.t("hk.lOpt")
+            case 54: return L10n.t("hk.rCmd"); case 59: return L10n.t("hk.lCtrl")
+            case 57: return "⇪  Caps Lock"
+            default: break
+            }
+        }
+        return p.0
+    }
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 230, height: 26))
+        pop.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pop)
+        NSLayoutConstraint.activate([
+            pop.leadingAnchor.constraint(equalTo: leadingAnchor),
+            pop.trailingAnchor.constraint(equalTo: trailingAnchor),
+            pop.centerYAnchor.constraint(equalTo: centerYAnchor),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 230)
+        ])
+        rebuild()
+        pop.target = self
+        pop.action = #selector(changed)
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+
+    private func matchedPreset() -> Int? {
+        Self.presets.firstIndex { (_, mode, kc, mods) in
+            mode == settings.hotkeyMode && (mode == "combo" ? mods == settings.hotkeyModifiers : kc == settings.hotkeyKeyCode)
+        }
+    }
+
+    private func rebuild() {
+        pop.removeAllItems()
+        pop.addItems(withTitles: Self.presets.map { Self.presetLabel($0) })
+        let custom = matchedPreset() == nil
+        // Своя комбинация — ОТДЕЛЬНЫМ пунктом (без «карандаша»: он читался как часть сочетания,
+        // особенно рядом с ⌃ — баг-репорт). Строка «Назначить свою…» остаётся ВСЕГДА
+        // последней, иначе после назначения своей комбинации непонятно, куда нажать, чтобы сменить.
+        if custom { pop.addItem(withTitle: hotkeyDisplayString()) }
+        pop.addItem(withTitle: L10n.t("hk.custom"))
+        if let idx = matchedPreset() { pop.selectItem(at: idx) }
+        else { pop.selectItem(at: Self.presets.count) }   // свой пункт стоит сразу за пресетами
+    }
+
+    @objc private func changed() {
+        let i = pop.indexOfSelectedItem
+        if i < Self.presets.count {
+            let p = Self.presets[i]
+            // Коллизия с ЛЮБОЙ нашей функцией, а не только с мгновенной сменой языка, как было до
+            // 10.08. Пресеты конверсии и заводская комбинация диктовки пересекаются напрямую:
+            // «Right ⌥» в этом списке и есть дефолт диктовки.
+            if let busy = HotkeyGuard.ourBusy(mode: p.1, keyCode: p.2, mods: p.3, excluding: .convert) {
+                HotkeyGuard.busyAlert(busy); rebuild(); return
+            }
+            // ⚠️ КЛАВИША, У КОТОРОЙ ЕСТЬ СВОЁ СИСТЕМНОЕ ДЕЙСТВИЕ, ОТБИРАЕТСЯ ТОЛЬКО С СОГЛАСИЯ.
+            // Caps Lock и 🌐 мы не проглатываем, а забираем у системы насовсем (hidutil-ремап и
+            // AppleFnUsageType), потому что их собственное действие живёт НИЖЕ нашего тапа. Значит
+            // человек теряет привычное поведение клавиши, и узнать об этом он должен ДО, а не после.
+            // Тот же диалог показывает мгновенное переключение с 24.07; здесь его не было.
+            if let shadowed = InstantSwitchControl.shadows(mode: p.1, keyCode: p.2, mods: p.3) {
+                let a = NSAlert()
+                a.messageText = L10n.t("is.warn.title")
+                a.informativeText = String(format: L10n.t("is.warn.body"), shadowed)
+                a.addButton(withTitle: L10n.t("is.warn.ok"))
+                a.addButton(withTitle: L10n.t("common.cancel"))
+                guard a.runModal() == .alertFirstButtonReturn else { rebuild(); return }
+            }
+            settings.hotkeyMode = p.1
+            settings.hotkeyKeyCode = p.2
+            settings.hotkeyModifiers = p.3
+            settings.hotkeyKeyLabel = ""
+            // Caps живёт через hidutil-ремап, а не через тап: сменили комбинацию — ремап должен
+            // догнать выбор. Зовём БЕЗУСЛОВНО, потому что уход С Caps так же важен, как приход на него.
+            CapsRemap.reconcile()
+            GlobeKey.reconcile()    // 🌐 тоже: её системное действие живёт ниже тапа, см. GlobeKey.wanted
+            rebuild()
+        } else if i == pop.numberOfItems - 1 {
+            startRecording()          // последняя строка — «Назначить свою…» (есть ВСЕГДА)
+        } else {
+            rebuild()                 // выбрали свою уже назначенную комбинацию — менять нечего
+        }
+    }
+
+    private func startRecording() {
+        HotkeyRecording.begin(stop: { [weak self] in self?.stopRecording() }, in: self.window)   // tap не трогает наши хоткеи, пока пишем
+        peak = []; peakKey = -1; pendingApply = nil
+        frozen = false; lastMods = []; awaitingRelease = false   // прошлую запись могли завершить с зажатыми модификаторами
+        pop.item(at: Self.presets.count)?.title = L10n.t("hk.press")
+        pop.synchronizeTitleAndSelectedItem()
+        HotkeyRecorderPanel.shared.show(what: L10n.t("hkrec.what.switch"), over: self.window,
+                                        onCommit: { [weak self] in self?.commitPending() },
+                                        onCancel: { [weak self] in self?.stopRecording() })
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] ev in
+            self?.capture(ev)
+            return nil
+        }
+    }
+    /// Человек нажал «Назначить» — только теперь пишем настройки.
+    private func commitPending() {
+        let apply = pendingApply
+        stopRecording()
+        apply?()
+        rebuild()
+    }
+    private func stopRecording() {
+        HotkeyRecording.end()
+        HotkeyRecorderPanel.shared.hide()
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        pendingApply = nil
+        rebuild()
+    }
+
+    private func capture(_ ev: NSEvent) {
+        HotkeyRecording.noteActivity()   // продлеваем сторожа: человек перебирает варианты, это не простой
+        let mods = cg(ev.modifierFlags)
+        if ev.type == .keyDown {
+            if ev.keyCode == 53 { stopRecording(); return } // Esc
+            restartIfFrozen()
+            guard HotkeyKeys.modifiersSufficient(keyCode: Int(ev.keyCode), mods: mods) else {
+                warnInPanel(HotkeyGuard.needsModifierMessage(),
+                            parts: HotkeyRecorderPanel.parts(mods: mods, keyLabel: KeyLabels.symbol(forKeyCode: Int(ev.keyCode))))
+                return
+            }
+            let verdict = HotkeyGuard.verdict(keyCode: Int(ev.keyCode), mods: mods)
+            if case .blocked(let busy) = verdict {
+                warnInPanel(HotkeyGuard.busyMessage(busy),
+                            parts: HotkeyRecorderPanel.parts(mods: mods, keyLabel: KeyLabels.symbol(forKeyCode: Int(ev.keyCode))))
+                return
+            }
+            let kc = Int(ev.keyCode), label = KeyLabels.symbol(forKeyCode: Int(ev.keyCode))
+            if let busy = HotkeyGuard.ourBusy(mode: "key", keyCode: kc, mods: mods.rawValue, excluding: .convert) {
+                warnInPanel(String(format: L10n.t("hkrec.warn.ours"), busy),
+                            parts: HotkeyRecorderPanel.parts(mods: mods, keyLabel: label))
+                return
+            }
+            pendingApply = { [weak self] in
+                guard let s = self?.settings else { return }
+                s.hotkeyMode = "key"; s.hotkeyKeyCode = kc
+                s.hotkeyModifiers = mods.rawValue; s.hotkeyKeyLabel = label
+                CapsRemap.reconcile()   // см. выбор пресета: уход с Caps так же важен, как приход
+                GlobeKey.reconcile()
+            }
+            // Мягкий конфликт показываем ВМЕСТЕ с кандидатом: кнопка «Назначить» остаётся живой,
+            // человек решает сам (автор 06.08).
+            if case .warn(let who) = verdict {
+                freeze(HotkeyRecorderPanel.parts(mods: mods, keyLabel: label), warning: HotkeyGuard.conflictMessage(who))
+            } else {
+                freeze(HotkeyRecorderPanel.parts(mods: mods, keyLabel: label))
+            }
+        } else {
+            // Пока на экране висит зафиксированный кандидат, ОТПУСКАНИЕ клавиш его не трогает —
+            // иначе человек не успевал донести мышь до «Назначить». Сброс только на новом наборе
+            // (см. shouldRestart): модификаторы пошли вверх с нуля.
+            // ⚠️ Показали отказ, а клавиши всё ещё ФИЗИЧЕСКИ зажаты. Их отпускание по одной приходит
+            // сюда обычным flagsChanged, и накопитель принимает его за НАЧАЛО нового набора: в
+            // кандидат уходит keyCode ОТПУСКАЕМОЙ клавиши с маской от тех, что ещё внизу. Человек
+            // видит на экране «⌃», а записывается левый ⌥ с маской control: сочетание, которое не
+            // сработает никогда, но при этом глотает модификатор у всей системы. Ждём чистого нуля.
+            // (Найдено ревью 28.07 на сценарии «зажал ⌃⌥, нажал T, получил отказ, отпустил по одной».)
+            if awaitingRelease {
+                lastMods = mods
+                if mods.isEmpty { awaitingRelease = false; resetPeaks() }
+                return
+            }
+            if frozen, !shouldRestart(mods) { lastMods = mods; return }
+            restartIfFrozen()
+            lastMods = mods
+            if mods.isEmpty {
+                // Отпустили все модификаторы → предлагаем накопленный пик (записываем по кнопке).
+                if count(peak) >= 2 {
+                    let p = peak
+                    if let busy = HotkeyGuard.ourBusy(mode: "combo", keyCode: -1, mods: p.rawValue, excluding: .convert) {
+                        warnInPanel(String(format: L10n.t("hkrec.warn.ours"), busy),
+                                    parts: HotkeyRecorderPanel.parts(mods: p))
+                        return
+                    }
+                    pendingApply = { [weak self] in
+                        guard let s = self?.settings else { return }
+                        s.hotkeyMode = "combo"          // ⌥⇧ и т.п.
+                        s.hotkeyKeyCode = -1; s.hotkeyModifiers = p.rawValue; s.hotkeyKeyLabel = ""
+                        CapsRemap.reconcile()   // см. выбор пресета: уход с Caps так же важен, как приход
+                        GlobeKey.reconcile()
+                    }
+                    freeze(HotkeyRecorderPanel.parts(mods: p))
+                } else if count(peak) == 1, peakKey >= 0 {
+                    // ОДИН модификатор (напр. левый Option) → modkey: тап по нему = переключение.
+                    // Без этой ветки одиночный модификатор НЕ записывался → запись висела «бесконечно».
+                    let p = peak, pk = peakKey
+                    if let busy = HotkeyGuard.ourBusy(mode: "modkey", keyCode: pk, mods: p.rawValue, excluding: .convert) {
+                        warnInPanel(String(format: L10n.t("hkrec.warn.ours"), busy),
+                                    parts: HotkeyRecorderPanel.parts(mods: p))
+                        return
+                    }
+                    pendingApply = { [weak self] in
+                        guard let s = self?.settings else { return }
+                        s.hotkeyMode = "modkey"
+                        s.hotkeyKeyCode = pk; s.hotkeyModifiers = p.rawValue; s.hotkeyKeyLabel = ""
+                        CapsRemap.reconcile()   // см. выбор пресета: уход с Caps так же важен, как приход
+                        GlobeKey.reconcile()
+                    }
+                    freeze(HotkeyRecorderPanel.parts(mods: p))
+                } else { peak = []; peakKey = -1 }
+            } else {
+                if peak.isEmpty, count(mods) == 1 { peakKey = Int(ev.keyCode) }  // ПЕРВЫЙ одиночный модификатор
+                if count(mods) >= count(peak) { peak = mods }
+                // Живое отображение: человек видит, что уже зажато.
+                live(HotkeyRecorderPanel.parts(mods: mods))
+            }
+        }
+    }
+
+    private func cg(_ f: NSEvent.ModifierFlags) -> CGEventFlags {
+        var m: CGEventFlags = []
+        if f.contains(.option) { m.insert(.maskAlternate) }
+        if f.contains(.shift) { m.insert(.maskShift) }
+        if f.contains(.command) { m.insert(.maskCommand) }
+        if f.contains(.control) { m.insert(.maskControl) }
+        return m
+    }
+    private func count(_ m: CGEventFlags) -> Int {
+        [.maskAlternate, .maskShift, .maskCommand, .maskControl].filter { m.contains($0) }.count
+    }
+}
+
+/// Выпадающий список системных звуков + превью при выборе.
+final class SoundPicker: NSPopUpButton {
+    private let settings = AppSettings.shared
+
+    private var cue: NSSound?   // держим превью, иначе оборвётся
+
+    init() {
+        super.init(frame: .zero, pullsDown: false)
+        // Наш звук — ПЕРВЫМ после «без звука» и по умолчанию (25.07: все звуки в приложении свои,
+        // системный Pop был единственным чужим). Системные оставляем — кому привычнее.
+        addItem(withTitle: L10n.t("sound.none"))
+        addItem(withTitle: L10n.t("sound.speakey"))
+        addItems(withTitles: Self.systemSounds())
+        switch settings.soundName {
+        case "":         selectItem(at: 0)
+        case "speakey":  selectItem(at: 1)
+        default:         selectItem(withTitle: settings.soundName)
+        }
+        target = self
+        action = #selector(changed)
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+
+    @objc private func changed() {
+        let vol = Float(max(0, min(1, settings.soundVolume)))
+        switch indexOfSelectedItem {
+        case 0:
+            settings.soundName = ""
+        case 1:
+            settings.soundName = "speakey"
+            cue?.stop(); cue = Sounds.play(NSSound(data: CueSynth.switchData), volume: Double(vol))
+        default:
+            if let t = titleOfSelectedItem {
+                settings.soundName = t
+                Sounds.play(NSSound(named: t), volume: Double(vol))
+            }
+        }
+    }
+    static func systemSounds() -> [String] {
+        let dir = "/System/Library/Sounds"
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
+        return files.filter { $0.hasSuffix(".aiff") }.map { ($0 as NSString).deletingPathExtension }.sorted()
+    }
+}
+
+/// Выбор звука перевода: «Speakey (наш)» + «Без звука» + системные. Хранится в translateSoundName
+/// ("speakey" / "" / имя системного). При выборе — короткое превью на текущей громкости.
+final class TranslateSoundPicker: NSPopUpButton {
+    private let settings = AppSettings.shared
+    private var preview: NSSound?
+
+    init() {
+        super.init(frame: .zero, pullsDown: false)
+        addItem(withTitle: L10n.t("sound.speakeyTr"))   // index 0 → "speakey"
+        addItem(withTitle: L10n.t("sound.none"))       // index 1 → ""
+        addItems(withTitles: SoundPicker.systemSounds())
+        switch settings.translateSoundName {
+        case "speakey": selectItem(at: 0)
+        case "":        selectItem(at: 1)
+        case let n:     selectItem(withTitle: n)
+        }
+        target = self
+        action = #selector(changed)
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+
+    @objc private func changed() {
+        let vol = Float(max(0, min(1, settings.translateSoundVolume)))
+        switch indexOfSelectedItem {
+        case 0:
+            settings.translateSoundName = "speakey"
+            preview = Sounds.play(NSSound(data: CueSynth.translateData), volume: Double(vol))
+        case 1:
+            settings.translateSoundName = ""
+        default:
+            if let t = titleOfSelectedItem {
+                settings.translateSoundName = t
+                Sounds.play(NSSound(named: t), volume: Double(vol))
+            }
+        }
+    }
+}
+
+/// Хоткей диктовки: пресеты (правый ⌥ / правый ⌘ / ⌥`) + «Свой…» — запись своей
+/// клавиши/модификатора (одиночный модификатор как hold-to-talk, или клавиша+модификаторы).
+final class VoiceHotkeyControl: NSView {
+    private let settings = AppSettings.shared
+    private let pop = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var monitor: Any?
+    /// Что применить, если человек нажмёт «Назначить» в окне записи. Пока nil — назначать нечего.
+    private var pendingApply: (() -> Void)?
+    /// Кандидат набран и ЗАМОРОЖЕН на экране: отпускание клавиш его больше не меняет.
+    private var frozen = false
+    /// Показали отказ, а клавиши ещё ФИЗИЧЕСКИ зажаты — ждём, пока отпустят всё. См. capture().
+    private var awaitingRelease = false
+    /// Предыдущий набор модификаторов — чтобы отличить «отпускает старое» от «начал новое».
+    private var lastMods: CGEventFlags = []
+
+    /// Человек начал набирать заново: модификаторы пошли вверх с нуля.
+    private func shouldRestart(_ mods: CGEventFlags) -> Bool { !mods.isEmpty && lastMods.isEmpty }
+
+    /// Сбросить замороженного кандидата перед новым набором.
+    private func restartIfFrozen() {
+        guard frozen else { return }
+        frozen = false
+        pendingApply = nil
+        resetPeaks()
+    }
+
+    /// Живое отображение, пока клавиши зажаты.
+    private func live(_ parts: [String]) {
+        HotkeyRecorderPanel.shared.render(parts: parts, complete: false)
+    }
+
+    /// Зафиксировать набранное: остаётся на экране, кнопка «Назначить» становится активной.
+    private func freeze(_ parts: [String], warning: String? = nil) {
+        frozen = true
+        HotkeyRecorderPanel.shared.render(parts: parts, complete: true, warning: warning)
+    }
+
+    /// Отказ БЕЗ прерывания записи: показываем причину в самом окне, человек жмёт другое сочетание.
+    private func warnInPanel(_ text: String, parts: [String]) {
+        frozen = false
+        pendingApply = nil
+        resetPeaks()
+        awaitingRelease = true
+        HotkeyRecorderPanel.shared.warn(text, parts: parts)
+    }
+    /// Накопитель, как у HotkeyControl. ДО 29.07 здесь лежала одна пара pendingModKey/pendingModFlag,
+    /// и каждый следующий нажатый модификатор ЗАТИРАЛ предыдущий: зажал ⌥, добавил ⌘ — про ⌥ забыли,
+    /// на отпускании предлагали ⌘ в одиночку. Пользователь видел ровно то, что описал в репорте #21:
+    /// «просто выбирает одну клавишу, которая была», и повторил на 0.3.0 (репорты #44/#45).
+    /// Копим пик и на полном отпускании решаем: ≥2 модификатора → combo, ровно один → modkey.
+    private var peak: CGEventFlags = []
+    private var peakKey: Int = -1   // keyCode ПЕРВОГО одиночного модификатора (для modkey)
+    private func resetPeaks() { peak = []; peakKey = -1 }
+    private func count(_ m: CGEventFlags) -> Int {
+        [.maskAlternate, .maskShift, .maskCommand, .maskControl].filter { m.contains($0) }.count
+    }
+
+    /// Занята ли эта комбинация модификаторов другим нашим хоткеем, живущим в режиме "combo".
+    /// Сравниваем только с такими же комбинациями: modkey и key — другие нажатия, они не конфликтуют.
+    private func comboCollision(_ mods: CGEventFlags) -> String? {
+        HotkeyGuard.ourBusy(mode: "combo", keyCode: -1, mods: mods.rawValue, excluding: .voice)
+    }
+
+    // (label, mode, keyCode, modifiers)
+    private static var presets: [(String, String, Int, UInt64)] {
+        [
+            (L10n.t("voice.hkRopt"),  "modkey", 61, CGEventFlags.maskAlternate.rawValue),
+            (L10n.t("voice.hkRcmd"),  "modkey", 54, CGEventFlags.maskCommand.rawValue),
+            (L10n.t("voice.hkTilde"), "key",    50, CGEventFlags.maskAlternate.rawValue)
+        ]
+    }
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 230, height: 26))
+        pop.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pop)
+        NSLayoutConstraint.activate([
+            pop.leadingAnchor.constraint(equalTo: leadingAnchor),
+            pop.trailingAnchor.constraint(equalTo: trailingAnchor),
+            pop.centerYAnchor.constraint(equalTo: centerYAnchor),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 230)
+        ])
+        rebuild()
+        pop.target = self
+        pop.action = #selector(changed)
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+
+    private func matched() -> Int? {
+        Self.presets.firstIndex { (_, mode, kc, _) in
+            mode == settings.voiceHotkeyMode && kc == settings.voiceHotkeyKeyCode
+        }
+    }
+
+    /// Человекочитаемое текущее назначение (для пункта «Свой…»).
+    private func display() -> String {
+        if settings.voiceHotkeyMode == "modkey" {
+            switch settings.voiceHotkeyKeyCode {
+            case 61: return L10n.t("hk.rOpt"); case 58: return L10n.t("hk.lOpt")
+            case 54: return L10n.t("hk.rCmd"); case 55: return L10n.t("hk.lCmd")
+            case 60: return L10n.t("hk.rShift"); case 56: return L10n.t("hk.lShift")
+            case 62: return L10n.t("hk.rCtrl"); case 59: return L10n.t("hk.lCtrl")
+            default: return L10n.t("hk.key")
+            }
+        }
+        let mods = CGEventFlags(rawValue: settings.voiceHotkeyModifiers)
+        var out = ""
+        if mods.contains(.maskControl) { out += "⌃" }
+        if mods.contains(.maskAlternate) { out += "⌥" }
+        if mods.contains(.maskShift) { out += "⇧" }
+        if mods.contains(.maskCommand) { out += "⌘" }
+        let ks = KeyLabels.symbol(forKeyCode: settings.voiceHotkeyKeyCode)   // подпись по keyCode (`` ` `` ≠ ё)
+        out += ks.isEmpty ? "·" : ks
+        return out
+    }
+
+    private func rebuild() {
+        pop.removeAllItems()
+        pop.addItems(withTitles: Self.presets.map { $0.0 })
+        let custom = matched() == nil
+        // Своя комбинация — ОТДЕЛЬНЫМ пунктом (без «карандаша»: он читался как часть сочетания,
+        // особенно рядом с ⌃ — баг-репорт). Строка «Назначить свою…» остаётся ВСЕГДА
+        // последней, иначе после назначения своей комбинации непонятно, куда нажать, чтобы сменить.
+        if custom { pop.addItem(withTitle: display()) }
+        pop.addItem(withTitle: L10n.t("hk.custom"))
+        if let idx = matched() { pop.selectItem(at: idx) }
+        else { pop.selectItem(at: Self.presets.count) }   // свой пункт стоит сразу за пресетами
+    }
+
+    @objc private func changed() {
+        let i = pop.indexOfSelectedItem
+        if i < Self.presets.count {
+            let p = Self.presets[i]
+            if let busy = HotkeyGuard.ourBusy(mode: p.1, keyCode: p.2, mods: p.3, excluding: .voice) {
+                HotkeyGuard.busyAlert(busy); rebuild(); return
+            }
+            settings.voiceHotkeyMode = p.1
+            settings.voiceHotkeyKeyCode = p.2
+            settings.voiceHotkeyModifiers = p.3
+            settings.voiceHotkeyKeyLabel = ""
+            rebuild()
+        } else if i == pop.numberOfItems - 1 {
+            startRecording()          // последняя строка — «Назначить свою…» (есть ВСЕГДА)
+        } else {
+            rebuild()                 // выбрали свою уже назначенную комбинацию — менять нечего
+        }
+    }
+
+    private func startRecording() {
+        HotkeyRecording.begin(stop: { [weak self] in self?.stopRecording() }, in: self.window)   // tap не трогает наши хоткеи, пока пишем
+        resetPeaks(); pendingApply = nil
+        frozen = false; lastMods = []; awaitingRelease = false   // прошлую запись могли завершить с зажатыми модификаторами
+        pop.item(at: Self.presets.count)?.title = L10n.t("hk.press")
+        pop.synchronizeTitleAndSelectedItem()
+        HotkeyRecorderPanel.shared.show(what: L10n.t("hkrec.what.voice"), over: self.window,
+                                        onCommit: { [weak self] in self?.commitPending() },
+                                        onCancel: { [weak self] in self?.stopRecording() })
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] ev in
+            self?.capture(ev); return nil
+        }
+    }
+    private func commitPending() {
+        let apply = pendingApply
+        stopRecording()
+        apply?()
+        rebuild()
+    }
+    private func stopRecording() {
+        HotkeyRecording.end()
+        HotkeyRecorderPanel.shared.hide()
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        pendingApply = nil
+        rebuild()
+    }
+
+    private func capture(_ ev: NSEvent) {
+        HotkeyRecording.noteActivity()   // продлеваем сторожа: человек перебирает варианты, это не простой
+        if ev.type == .keyDown {
+            if ev.keyCode == 53 { stopRecording(); return }   // Esc — отмена
+            restartIfFrozen()
+            let mods = cg(ev.modifierFlags)
+            guard HotkeyKeys.modifiersSufficient(keyCode: Int(ev.keyCode), mods: mods) else {
+                warnInPanel(HotkeyGuard.needsModifierMessage(),
+                            parts: HotkeyRecorderPanel.parts(mods: mods, keyLabel: KeyLabels.symbol(forKeyCode: Int(ev.keyCode))))
+                return
+            }
+            let verdict = HotkeyGuard.verdict(keyCode: Int(ev.keyCode), mods: mods)
+            if case .blocked(let busy) = verdict {
+                warnInPanel(HotkeyGuard.busyMessage(busy),
+                            parts: HotkeyRecorderPanel.parts(mods: mods, keyLabel: KeyLabels.symbol(forKeyCode: Int(ev.keyCode))))
+                return
+            }
+            let kc = Int(ev.keyCode), label = KeyLabels.symbol(forKeyCode: Int(ev.keyCode))
+            if let busy = HotkeyGuard.ourBusy(mode: "key", keyCode: kc, mods: mods.rawValue, excluding: .voice) {
+                warnInPanel(String(format: L10n.t("hkrec.warn.ours"), busy),
+                            parts: HotkeyRecorderPanel.parts(mods: mods, keyLabel: label))
+                return
+            }
+            pendingApply = { [weak self] in
+                guard let s = self?.settings else { return }
+                s.voiceHotkeyMode = "key"; s.voiceHotkeyKeyCode = kc
+                s.voiceHotkeyModifiers = mods.rawValue; s.voiceHotkeyKeyLabel = label
+            }
+            // Мягкий конфликт показываем ВМЕСТЕ с кандидатом: кнопка «Назначить» остаётся живой,
+            // человек решает сам (автор 06.08).
+            if case .warn(let who) = verdict {
+                freeze(HotkeyRecorderPanel.parts(mods: mods, keyLabel: label), warning: HotkeyGuard.conflictMessage(who))
+            } else {
+                freeze(HotkeyRecorderPanel.parts(mods: mods, keyLabel: label))
+            }
+            return
+        }
+        // flagsChanged: одиночный модификатор = hold-to-talk (modkey).
+        // Замороженный кандидат отпусканием не сбрасываем — иначе не донести мышь до «Назначить».
+        let curMods = cg(ev.modifierFlags)
+        // ⚠️ Показали отказ, а клавиши всё ещё ФИЗИЧЕСКИ зажаты. Их отпускание по одной приходит
+        // сюда обычным flagsChanged, и накопитель принимает его за НАЧАЛО нового набора: в
+        // кандидат уходит keyCode ОТПУСКАЕМОЙ клавиши с маской от тех, что ещё внизу. Человек
+        // видит на экране «⌃», а записывается левый ⌥ с маской control: сочетание, которое не
+        // сработает никогда, но при этом глотает модификатор у всей системы. Ждём чистого нуля.
+        // (Найдено ревью 28.07 на сценарии «зажал ⌃⌥, нажал T, получил отказ, отпустил по одной».)
+        if awaitingRelease {
+            lastMods = curMods
+            if curMods.isEmpty { awaitingRelease = false; resetPeaks() }
+            return
+        }
+        if frozen, !shouldRestart(curMods) { lastMods = curMods; return }
+        restartIfFrozen()
+        lastMods = curMods
+        if curMods.isEmpty {
+            // Отпустили всё → предлагаем накопленный пик.
+            if count(peak) >= 2 {
+                // Комбинация модификаторов, напр. ⌥⌘. В режиме «удерживать» — зажал/разжал,
+                // в «переключать» — тап. Обрабатывается в EventTap, ветка voiceHotkeyMode == "combo".
+                //
+                // Раньше комбинацию сюда было не ввести в принципе, поэтому и столкнуться с чужой
+                // она не могла. Теперь может — а правило проекта «одна комбинация = одна функция»
+                // требует не арбитраж в момент нажатия, а запрет в интерфейсе.
+                if let busy = comboCollision(peak) {
+                    warnInPanel(HotkeyGuard.busyMessage(busy), parts: HotkeyRecorderPanel.parts(mods: peak))
+                    return
+                }
+                let p = peak
+                pendingApply = { [weak self] in
+                    guard let s = self?.settings else { return }
+                    s.voiceHotkeyMode = "combo"
+                    s.voiceHotkeyKeyCode = -1; s.voiceHotkeyModifiers = p.rawValue; s.voiceHotkeyKeyLabel = ""
+                }
+                freeze(HotkeyRecorderPanel.parts(mods: p))
+            } else if count(peak) == 1, peakKey >= 0 {
+                // Один модификатор (напр. правый ⌥) — прежнее поведение hold-to-talk.
+                let p = peak, pk = peakKey
+                if let busy = HotkeyGuard.ourBusy(mode: "modkey", keyCode: pk, mods: p.rawValue, excluding: .voice) {
+                    warnInPanel(String(format: L10n.t("hkrec.warn.ours"), busy),
+                                parts: HotkeyRecorderPanel.parts(mods: p))
+                    return
+                }
+                pendingApply = { [weak self] in
+                    guard let s = self?.settings else { return }
+                    s.voiceHotkeyMode = "modkey"; s.voiceHotkeyKeyCode = pk
+                    s.voiceHotkeyModifiers = p.rawValue; s.voiceHotkeyKeyLabel = ""
+                }
+                freeze(HotkeyRecorderPanel.parts(mods: p))
+            } else { resetPeaks() }
+        } else {
+            if peak.isEmpty, count(curMods) == 1 { peakKey = Int(ev.keyCode) }   // ПЕРВЫЙ одиночный
+            if count(curMods) >= count(peak) { peak = curMods }
+            live(HotkeyRecorderPanel.parts(mods: curMods))
+        }
+    }
+
+    /// keyCode физического модификатора → его CGEventFlags-маска.
+    private static func flagFor(_ kc: Int) -> CGEventFlags {
+        switch kc {
+        case 54, 55: return .maskCommand
+        case 58, 61: return .maskAlternate
+        case 56, 60: return .maskShift
+        case 59, 62: return .maskControl
+        default: return []
+        }
+    }
+    private func cg(_ f: NSEvent.ModifierFlags) -> CGEventFlags {
+        var m: CGEventFlags = []
+        if f.contains(.option) { m.insert(.maskAlternate) }
+        if f.contains(.shift) { m.insert(.maskShift) }
+        if f.contains(.command) { m.insert(.maskCommand) }
+        if f.contains(.control) { m.insert(.maskControl) }
+        return m
+    }
+}
+
+/// Контрол выбора хоткея ПЕРЕВОДА (key + модификаторы, напр. ⌃⌥T). Пресеты + запись своего.
+/// Перевод — это «тап» (не hold), поэтому только режим «key» (клавиша+модификаторы).
+final class TranslateHotkeyControl: NSView {
+    /// Копить нечего: здесь только «клавиша + модификаторы».
+    private func resetPeaks() {}
+    private let settings = AppSettings.shared
+    private let pop = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var monitor: Any?
+    /// Что применить, если человек нажмёт «Назначить» в окне записи. Пока nil — назначать нечего.
+    private var pendingApply: (() -> Void)?
+    /// Кандидат набран и ЗАМОРОЖЕН на экране: отпускание клавиш его больше не меняет.
+    private var frozen = false
+    /// Показали отказ, а клавиши ещё ФИЗИЧЕСКИ зажаты — ждём, пока отпустят всё. См. capture().
+    private var awaitingRelease = false
+    /// Предыдущий набор модификаторов — чтобы отличить «отпускает старое» от «начал новое».
+    private var lastMods: CGEventFlags = []
+
+    /// Человек начал набирать заново: модификаторы пошли вверх с нуля.
+    private func shouldRestart(_ mods: CGEventFlags) -> Bool { !mods.isEmpty && lastMods.isEmpty }
+
+    /// Сбросить замороженного кандидата перед новым набором.
+    private func restartIfFrozen() {
+        guard frozen else { return }
+        frozen = false
+        pendingApply = nil
+        resetPeaks()
+    }
+
+    /// Живое отображение, пока клавиши зажаты.
+    private func live(_ parts: [String]) {
+        HotkeyRecorderPanel.shared.render(parts: parts, complete: false)
+    }
+
+    /// Зафиксировать набранное: остаётся на экране, кнопка «Назначить» становится активной.
+    private func freeze(_ parts: [String], warning: String? = nil) {
+        frozen = true
+        HotkeyRecorderPanel.shared.render(parts: parts, complete: true, warning: warning)
+    }
+
+    /// Отказ БЕЗ прерывания записи: показываем причину в самом окне, человек жмёт другое сочетание.
+    private func warnInPanel(_ text: String, parts: [String]) {
+        frozen = false
+        pendingApply = nil
+        resetPeaks()
+        awaitingRelease = true
+        HotkeyRecorderPanel.shared.warn(text, parts: parts)
+    }
+
+    // (label, keyCode, modifiers)
+    private static let presets: [(String, Int, UInt64)] = [
+        ("⌃⌥T  Control+Option+T", 17, CGEventFlags([.maskControl, .maskAlternate]).rawValue),
+        ("⌥T  Option+T",          17, CGEventFlags.maskAlternate.rawValue),
+        ("⌃⌥E  Control+Option+E", 14, CGEventFlags([.maskControl, .maskAlternate]).rawValue),
+        ("⇧⌘T  Shift+Command+T",  17, CGEventFlags([.maskShift, .maskCommand]).rawValue)
+    ]
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 230, height: 26))
+        pop.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pop)
+        NSLayoutConstraint.activate([
+            pop.leadingAnchor.constraint(equalTo: leadingAnchor),
+            pop.trailingAnchor.constraint(equalTo: trailingAnchor),
+            pop.centerYAnchor.constraint(equalTo: centerYAnchor),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 230)
+        ])
+        rebuild()
+        pop.target = self
+        pop.action = #selector(changed)
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+
+    private func matched() -> Int? {
+        Self.presets.firstIndex { (_, kc, mods) in
+            kc == settings.translateHotkeyKeyCode && mods == settings.translateHotkeyModifiers
+        }
+    }
+    private func display() -> String {
+        let mods = CGEventFlags(rawValue: settings.translateHotkeyModifiers)
+        var out = ""
+        if mods.contains(.maskControl) { out += "⌃" }
+        if mods.contains(.maskAlternate) { out += "⌥" }
+        if mods.contains(.maskShift) { out += "⇧" }
+        if mods.contains(.maskCommand) { out += "⌘" }
+        let ks = KeyLabels.symbol(forKeyCode: settings.translateHotkeyKeyCode)   // подпись по keyCode
+        out += ks.isEmpty ? "·" : ks
+        return out
+    }
+    private func rebuild() {
+        pop.removeAllItems()
+        pop.addItems(withTitles: Self.presets.map { $0.0 })
+        let custom = matched() == nil
+        // Своя комбинация — ОТДЕЛЬНЫМ пунктом (без «карандаша»: он читался как часть сочетания,
+        // особенно рядом с ⌃ — баг-репорт). Строка «Назначить свою…» остаётся ВСЕГДА
+        // последней, иначе после назначения своей комбинации непонятно, куда нажать, чтобы сменить.
+        if custom { pop.addItem(withTitle: display()) }
+        pop.addItem(withTitle: L10n.t("hk.custom"))
+        if let idx = matched() { pop.selectItem(at: idx) }
+        else { pop.selectItem(at: Self.presets.count) }   // свой пункт стоит сразу за пресетами
+    }
+    @objc private func changed() {
+        let i = pop.indexOfSelectedItem
+        if i < Self.presets.count {
+            let p = Self.presets[i]
+            if let busy = HotkeyGuard.ourBusy(mode: "key", keyCode: p.1, mods: p.2, excluding: .translate) {
+                HotkeyGuard.busyAlert(busy); rebuild(); return
+            }
+            settings.translateHotkeyKeyCode = p.1
+            settings.translateHotkeyModifiers = p.2
+            settings.translateHotkeyKeyLabel = "T"
+            if p.1 == 14 { settings.translateHotkeyKeyLabel = "E" }
+            rebuild()
+        } else if i == pop.numberOfItems - 1 {
+            startRecording()          // последняя строка — «Назначить свою…» (есть ВСЕГДА)
+        } else {
+            rebuild()                 // выбрали свою уже назначенную комбинацию — менять нечего
+        }
+    }
+    private func startRecording() {
+        HotkeyRecording.begin(stop: { [weak self] in self?.stopRecording() }, in: self.window)   // tap не трогает наши хоткеи, пока пишем
+        pendingApply = nil
+        frozen = false; lastMods = []; awaitingRelease = false   // прошлую запись могли завершить с зажатыми модификаторами
+        pop.item(at: Self.presets.count)?.title = L10n.t("hk.press")
+        pop.synchronizeTitleAndSelectedItem()
+        HotkeyRecorderPanel.shared.show(what: L10n.t("hkrec.what.translate"), over: self.window,
+                                        onCommit: { [weak self] in self?.commitPending() },
+                                        onCancel: { [weak self] in self?.stopRecording() })
+        // Здесь ловим и flagsChanged — только ради живого показа зажатых модификаторов в окне.
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] ev in
+            self?.capture(ev); return nil
+        }
+    }
+    private func commitPending() {
+        let apply = pendingApply
+        stopRecording()
+        apply?()
+        rebuild()
+    }
+    private func stopRecording() {
+        HotkeyRecording.end()
+        HotkeyRecorderPanel.shared.hide()
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        pendingApply = nil
+        rebuild()
+    }
+    private func capture(_ ev: NSEvent) {
+        HotkeyRecording.noteActivity()   // продлеваем сторожа: человек перебирает варианты, это не простой
+        var m: CGEventFlags = []
+        if ev.modifierFlags.contains(.option) { m.insert(.maskAlternate) }
+        if ev.modifierFlags.contains(.shift) { m.insert(.maskShift) }
+        if ev.modifierFlags.contains(.command) { m.insert(.maskCommand) }
+        if ev.modifierFlags.contains(.control) { m.insert(.maskControl) }
+        if ev.type == .flagsChanged {
+            // ⚠️ Показали отказ, а клавиши всё ещё ФИЗИЧЕСКИ зажаты. Их отпускание по одной приходит
+            // сюда обычным flagsChanged, и накопитель принимает его за НАЧАЛО нового набора: в
+            // кандидат уходит keyCode ОТПУСКАЕМОЙ клавиши с маской от тех, что ещё внизу. Человек
+            // видит на экране «⌃», а записывается левый ⌥ с маской control: сочетание, которое не
+            // сработает никогда, но при этом глотает модификатор у всей системы. Ждём чистого нуля.
+            // (Найдено ревью 28.07 на сценарии «зажал ⌃⌥, нажал T, получил отказ, отпустил по одной».)
+            if awaitingRelease {
+                lastMods = m
+                if m.isEmpty { awaitingRelease = false; resetPeaks() }
+                return
+            }
+            if frozen, !shouldRestart(m) { lastMods = m; return }
+            restartIfFrozen()
+            lastMods = m
+            // ⚠️ Пустой набор НЕ рисуем: иначе отпускание модификаторов затирало бы предупреждение
+            // «комбинация занята системой», и человек получал бы «нажал, ничего не произошло» —
+            // то есть ровно то, ради устранения чего мы и убрали модальный алерт (ревью 28.07).
+            if !m.isEmpty { live(HotkeyRecorderPanel.parts(mods: m)) }
+            return
+        }
+        if ev.keyCode == 53 { stopRecording(); return }   // Esc — отмена
+        restartIfFrozen()
+        guard !m.isEmpty else {                            // нужен хотя бы один модификатор
+            warnInPanel(HotkeyGuard.needsModifierMessage(),
+                        parts: HotkeyRecorderPanel.parts(mods: m, keyLabel: KeyLabels.symbol(forKeyCode: Int(ev.keyCode))))
+            return
+        }
+        let verdict = HotkeyGuard.verdict(keyCode: Int(ev.keyCode), mods: m)
+        if case .blocked(let busy) = verdict {
+                warnInPanel(HotkeyGuard.busyMessage(busy),
+                            parts: HotkeyRecorderPanel.parts(mods: m, keyLabel: KeyLabels.symbol(forKeyCode: Int(ev.keyCode))))
+                return
+            }
+        let kc = Int(ev.keyCode), label = KeyLabels.symbol(forKeyCode: Int(ev.keyCode))
+        if let busy = HotkeyGuard.ourBusy(mode: "key", keyCode: kc, mods: m.rawValue, excluding: .translate) {
+            warnInPanel(String(format: L10n.t("hkrec.warn.ours"), busy),
+                        parts: HotkeyRecorderPanel.parts(mods: m, keyLabel: label))
+            return
+        }
+        pendingApply = { [weak self] in
+            guard let s = self?.settings else { return }
+            s.translateHotkeyKeyCode = kc
+            s.translateHotkeyModifiers = m.rawValue
+            s.translateHotkeyKeyLabel = label
+        }
+        if case .warn(let who) = verdict {
+            freeze(HotkeyRecorderPanel.parts(mods: m, keyLabel: label), warning: HotkeyGuard.conflictMessage(who))
+        } else {
+            freeze(HotkeyRecorderPanel.parts(mods: m, keyLabel: label))
+        }
+    }
+}
+
+/// Выбор комбинации для МГНОВЕННОГО ПЕРЕКЛЮЧЕНИЯ ЯЗЫКА (автор 24.07: «🌐 только на новых маках,
+/// нужна свобода — любая комбинация»). Пресеты + запись своей, как у HotkeyControl.
+///
+/// Три вещи, которых здесь нельзя допустить (требование автора «без глюков и двойных срабатываний»):
+///  1. Пересечение с НАШИМИ хоткеями (конверсия/диктовка/перевод) — отвергаем на этапе выбора;
+///  2. Двойное срабатывание с системой — решается ГЛОТАНИЕМ события в EventTap (проверено 24.07);
+///  3. Молчаливое затенение системной функции — предупреждаем текстом, что именно перестанет
+///     работать (Spotlight на ⌘Space и т.п.), но НЕ запрещаем: свобода за пользователем.
+final class InstantSwitchControl: NSView {
+    private let settings = AppSettings.shared
+    private let pop = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var monitor: Any?
+    /// Что применить, если человек нажмёт «Назначить» в окне записи. Пока nil — назначать нечего.
+    private var pendingApply: (() -> Void)?
+    /// Кандидат набран и ЗАМОРОЖЕН на экране: отпускание клавиш его больше не меняет.
+    private var frozen = false
+    /// Показали отказ, а клавиши ещё ФИЗИЧЕСКИ зажаты — ждём, пока отпустят всё. См. capture().
+    private var awaitingRelease = false
+    /// Предыдущий набор модификаторов — чтобы отличить «отпускает старое» от «начал новое».
+    private var lastMods: CGEventFlags = []
+
+    /// Человек начал набирать заново: модификаторы пошли вверх с нуля.
+    private func shouldRestart(_ mods: CGEventFlags) -> Bool { !mods.isEmpty && lastMods.isEmpty }
+
+    /// Сбросить замороженного кандидата перед новым набором.
+    private func restartIfFrozen() {
+        guard frozen else { return }
+        frozen = false
+        pendingApply = nil
+        resetPeaks()
+    }
+
+    /// Живое отображение, пока клавиши зажаты.
+    private func live(_ parts: [String]) {
+        HotkeyRecorderPanel.shared.render(parts: parts, complete: false)
+    }
+
+    /// Зафиксировать набранное: остаётся на экране, кнопка «Назначить» становится активной.
+    private func freeze(_ parts: [String], warning: String? = nil) {
+        frozen = true
+        HotkeyRecorderPanel.shared.render(parts: parts, complete: true, warning: warning)
+    }
+
+    /// Отказ БЕЗ прерывания записи: показываем причину в самом окне, человек жмёт другое сочетание.
+    private func warnInPanel(_ text: String, parts: [String]) {
+        frozen = false
+        pendingApply = nil
+        resetPeaks()
+        awaitingRelease = true
+        HotkeyRecorderPanel.shared.warn(text, parts: parts)
+    }
+    private var peak: CGEventFlags = []
+    private var peakKey: Int = -1
+    private func resetPeaks() { peak = []; peakKey = -1 }
+    /// Позвать после изменения — раздел настроек перерисует предупреждение под строкой.
+    var onChange: (() -> Void)?
+
+    // (лейбл, режим, keyCode, модификаторы)
+    private static let presets: [(String, String, Int, UInt64)] = [
+        ("🌐  Globe / Fn",        "globe",  63, 0),
+        ("⌘Space",                "key",    49, CGEventFlags.maskCommand.rawValue),
+        ("⌃Space",                "key",    49, CGEventFlags.maskControl.rawValue),
+        ("⇪  Caps Lock",          "modkey", 57, CGEventFlags.maskAlphaShift.rawValue),
+        ("⌥Space",                "key",    49, CGEventFlags.maskAlternate.rawValue),
+        // Одиночный ⌃ добавлен в готовые варианты по просьбе пользователя (04.08.2026). Записать
+        // его своей комбинацией было можно и раньше, но в списке его не было, а подсказка в окне
+        // записи о такой возможности молчала, и человек считал, что одной клавишей нельзя.
+        //
+        // Почему ⌃ безопасен там, где ⇧ запрещён: Shift нажимается перед КАЖДОЙ заглавной буквой,
+        // то есть тысячи раз в день, а одиночный ⌃ на маке сам по себе не делает ничего. Сочетания
+        // вроде ⌃C не заденем: жест требует чистого тапа, без других клавиш между нажатием и
+        // отпусканием.
+        ("Left ⌃",                "modkey", 59, CGEventFlags.maskControl.rawValue),
+        ("Right ⌃",               "modkey", 62, CGEventFlags.maskControl.rawValue),
+    ]
+
+    /// Что системного затеняет эта комбинация — для честного предупреждения.
+    static func shadows(mode: String, keyCode: Int, mods: UInt64) -> String? {
+        let f = CGEventFlags(rawValue: mods)
+        if mode == "key", keyCode == 49, f.contains(.maskCommand) { return L10n.t("is.shadow.spotlight") }
+        if mode == "key", keyCode == 49, f.contains(.maskControl) { return L10n.t("is.shadow.inputSrc") }
+        if mode == "modkey", keyCode == 57 { return L10n.t("is.shadow.caps") }
+        // ⚠️ 🌐 ПРИХОДИТ СЮДА В ДВУХ ВИДАХ. У мгновенного переключения это отдельный режим "globe",
+        // а в списке ручного переключения та же клавиша записана обычным modkey с кодом 63. Пока эта
+        // строка знала только про первый вид, ручное переключение забирало клавишу молча (отзыв
+        // 21.08.2026), хотя её системное действие при этом отключается точно так же.
+        if mode == "globe" || (mode == "modkey" && keyCode == 63) { return L10n.t("is.shadow.globe") }
+        return nil
+    }
+
+    /// Одно и то же ли это нажатие. Сравниваем в первую очередь РЕЖИМ, а не пару (keyCode, mods).
+    ///
+    /// Для «голого модификатора» ключ сравнения — сама клавиша: маска из неё следует, а левый и
+    /// правый ⌥ дают ОДНУ маску при разных keyCode, так что сравнение по маске здесь и слепит
+    /// разные клавиши, и не различает одинаковые.
+    /// Занята ли комбинация нашими же хоткеями. С 10.08 это тонкая обёртка над общим реестром
+    /// (`HotkeyGuard.Slot`): раньше здесь лежал собственный список из трёх функций, и он был
+    /// ЕДИНСТВЕННЫМ местом в приложении, где проверка вообще выполнялась.
+    private func collides(mode: String, keyCode: Int, mods: UInt64) -> String? {
+        HotkeyGuard.ourBusy(mode: mode, keyCode: keyCode, mods: mods, excluding: .instant)
+    }
+
+    init() {
+        super.init(frame: NSRect(x: 0, y: 0, width: 230, height: 26))
+        pop.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(pop)
+        NSLayoutConstraint.activate([
+            pop.leadingAnchor.constraint(equalTo: leadingAnchor),
+            pop.trailingAnchor.constraint(equalTo: trailingAnchor),
+            pop.centerYAnchor.constraint(equalTo: centerYAnchor),
+            widthAnchor.constraint(greaterThanOrEqualToConstant: 230)
+        ])
+        rebuild()
+        pop.target = self
+        pop.action = #selector(changed)
+    }
+    required init?(coder: NSCoder) { fatalError("no xib") }
+
+    private func matchedPreset() -> Int? {
+        Self.presets.firstIndex { (_, mode, kc, mods) in
+            mode == settings.instantSwitchMode && kc == settings.instantSwitchKeyCode
+                && (mode == "globe" || mods == settings.instantSwitchMods)
+        }
+    }
+
+    private func rebuild() {
+        pop.removeAllItems()
+        pop.addItems(withTitles: Self.presets.map { $0.0 })
+        let custom = matchedPreset() == nil
+        // Своя комбинация — ОТДЕЛЬНЫМ пунктом (без «карандаша»: он читался как часть сочетания,
+        // особенно рядом с ⌃ — баг-репорт). Строка «Назначить свою…» остаётся ВСЕГДА
+        // последней, иначе после назначения своей комбинации непонятно, куда нажать, чтобы сменить.
+        if custom { pop.addItem(withTitle: instantSwitchDisplayString()) }
+        pop.addItem(withTitle: L10n.t("hk.custom"))
+        if let idx = matchedPreset() { pop.selectItem(at: idx) }
+        else { pop.selectItem(at: Self.presets.count) }   // свой пункт стоит сразу за пресетами
+    }
+
+    @objc private func changed() {
+        let i = pop.indexOfSelectedItem
+        if i < Self.presets.count {
+            let p = Self.presets[i]
+            apply(mode: p.1, keyCode: p.2, mods: p.3, label: "")
+        } else if i == pop.numberOfItems - 1 {
+            startRecording()          // последняя строка — «Назначить свою…» (есть ВСЕГДА)
+        } else {
+            rebuild()                 // выбрали свою уже назначенную комбинацию — менять нечего
+        }
+    }
+
+    /// Применить комбинацию, если она не конфликтует с нашими хоткеями.
+    private func apply(mode: String, keyCode: Int, mods: UInt64, label: String) {
+        if let busy = collides(mode: mode, keyCode: keyCode, mods: mods) {
+            let a = NSAlert()
+            a.messageText = L10n.t("is.busy.title")
+            a.informativeText = String(format: L10n.t("is.busy.body"), busy)
+            a.addButton(withTitle: "OK")
+            a.runModal()
+            rebuild()          // откатываем выбор на прежний
+            return
+        }
+        settings.instantSwitchMode = mode
+        settings.instantSwitchKeyCode = keyCode
+        settings.instantSwitchMods = mods
+        settings.instantSwitchKeyLabel = label
+        rebuild()
+        onChange?()
+    }
+
+    private func startRecording() {
+        HotkeyRecording.begin(stop: { [weak self] in self?.stopRecording() }, in: self.window)   // tap не трогает наши хоткеи, пока пишем
+        peak = []; peakKey = -1; pendingApply = nil
+        frozen = false; lastMods = []; awaitingRelease = false   // прошлую запись могли завершить с зажатыми модификаторами
+        pop.item(at: Self.presets.count)?.title = L10n.t("hk.press")
+        pop.synchronizeTitleAndSelectedItem()
+        HotkeyRecorderPanel.shared.show(what: L10n.t("hkrec.what.instant"), over: self.window,
+                                        onCommit: { [weak self] in self?.commitPending() },
+                                        onCancel: { [weak self] in self?.stopRecording() })
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { [weak self] ev in
+            self?.capture(ev); return nil
+        }
+    }
+    private func commitPending() {
+        let apply = pendingApply
+        stopRecording()
+        apply?()          // apply(mode:…) сам покажет алерт при коллизии и откатит выбор
+    }
+    private func stopRecording() {
+        HotkeyRecording.end()
+        HotkeyRecorderPanel.shared.hide()
+        if let m = monitor { NSEvent.removeMonitor(m); monitor = nil }
+        pendingApply = nil
+        rebuild()
+    }
+
+    private func capture(_ ev: NSEvent) {
+        HotkeyRecording.noteActivity()   // продлеваем сторожа: человек перебирает варианты, это не простой
+        var mods: CGEventFlags = []
+        let f = ev.modifierFlags
+        if f.contains(.option) { mods.insert(.maskAlternate) }
+        if f.contains(.shift) { mods.insert(.maskShift) }
+        if f.contains(.command) { mods.insert(.maskCommand) }
+        if f.contains(.control) { mods.insert(.maskControl) }
+        if f.contains(.capsLock) { mods.insert(.maskAlphaShift) }
+        if ev.type == .keyDown {
+            if ev.keyCode == 53 { stopRecording(); return }   // Esc — отмена записи
+            restartIfFrozen()
+            guard HotkeyKeys.modifiersSufficient(keyCode: Int(ev.keyCode), mods: mods) else {
+                warnInPanel(HotkeyGuard.needsModifierMessage(),
+                            parts: HotkeyRecorderPanel.parts(mods: mods, keyLabel: KeyLabels.symbol(forKeyCode: Int(ev.keyCode))))
+                return
+            }
+            let verdict = HotkeyGuard.verdict(keyCode: Int(ev.keyCode), mods: mods)
+            if case .blocked(let busy) = verdict {
+                warnInPanel(HotkeyGuard.busyMessage(busy),
+                            parts: HotkeyRecorderPanel.parts(mods: mods, keyLabel: KeyLabels.symbol(forKeyCode: Int(ev.keyCode))))
+                return
+            }
+            let kc = Int(ev.keyCode), label = KeyLabels.symbol(forKeyCode: Int(ev.keyCode))
+            // Занято НАШЕЙ же функцией — говорим об этом прямо в окне записи, не модальным алертом
+            // поверх него: запись продолжается, человек тут же жмёт другое сочетание.
+            if let busy = collides(mode: "key", keyCode: kc, mods: mods.rawValue) {
+                warnInPanel(String(format: L10n.t("hkrec.warn.ours"), busy),
+                            parts: HotkeyRecorderPanel.parts(mods: mods, keyLabel: label))
+                return
+            }
+            pendingApply = { [weak self] in
+                self?.apply(mode: "key", keyCode: kc, mods: mods.rawValue, label: label)
+            }
+            // Мягкий конфликт показываем ВМЕСТЕ с кандидатом: кнопка «Назначить» остаётся живой,
+            // человек решает сам (автор 06.08).
+            if case .warn(let who) = verdict {
+                freeze(HotkeyRecorderPanel.parts(mods: mods, keyLabel: label), warning: HotkeyGuard.conflictMessage(who))
+            } else {
+                freeze(HotkeyRecorderPanel.parts(mods: mods, keyLabel: label))
+            }
+        } else {
+            // ⚠️ Показали отказ, а клавиши всё ещё ФИЗИЧЕСКИ зажаты. Их отпускание по одной приходит
+            // сюда обычным flagsChanged, и накопитель принимает его за НАЧАЛО нового набора: в
+            // кандидат уходит keyCode ОТПУСКАЕМОЙ клавиши с маской от тех, что ещё внизу. Человек
+            // видит на экране «⌃», а записывается левый ⌥ с маской control: сочетание, которое не
+            // сработает никогда, но при этом глотает модификатор у всей системы. Ждём чистого нуля.
+            // (Найдено ревью 28.07 на сценарии «зажал ⌃⌥, нажал T, получил отказ, отпустил по одной».)
+            if awaitingRelease {
+                lastMods = mods
+                if mods.isEmpty { awaitingRelease = false; resetPeaks() }
+                return
+            }
+            if frozen, !shouldRestart(mods) { lastMods = mods; return }
+            restartIfFrozen()
+            lastMods = mods
+            if mods.isEmpty {
+                if peak.rawValue != 0, peakKey >= 0 {
+                    let p = peak, pk = peakKey
+                    // Caps показываем его собственным символом: «⇪» понятнее пустоты.
+                    let shown = pk == 57 ? ["⇪"] : HotkeyRecorderPanel.parts(mods: p)
+                    // ⚠️ SHIFT НЕЛЬЗЯ (разбор 29.07, репорт #46). Shift нажимается перед КАЖДОЙ
+                    // заглавной буквой, то есть тысячи раз в день, и вся защита от ложных
+                    // срабатываний держится на одной улике «между нажатием и отпусканием не было
+                    // обычной клавиши». Стоит этой улике потеряться — а при залипшем Secure Input
+                    // macOS скрывает от нас ровно её, — и язык начинает переключаться после первой
+                    // же заглавной буквы. У человека это выглядело так, что он выключил главную
+                    // функцию продукта, лишь бы печатать. Запрет в интерфейсе надёжнее, чем
+                    // вычищать последствия по одному месту.
+                    if pk == 56 || pk == 60 {
+                        warnInPanel(L10n.t("is.noShift"), parts: shown)
+                        return
+                    }
+                    if let busy = collides(mode: "modkey", keyCode: pk, mods: p.rawValue) {
+                        warnInPanel(String(format: L10n.t("hkrec.warn.ours"), busy), parts: shown)
+                        return
+                    }
+                    pendingApply = { [weak self] in
+                        self?.apply(mode: "modkey", keyCode: pk, mods: p.rawValue, label: "")
+                    }
+                    freeze(shown)
+                } else { peak = []; peakKey = -1 }
+            } else {
+                if peak.isEmpty { peakKey = Int(ev.keyCode) }
+                peak = mods
+                live(HotkeyRecorderPanel.parts(mods: mods))
+            }
+        }
+    }
+}
+
+/// Человекочитаемая запись текущей комбинации мгновенного переключения.
+func instantSwitchDisplayString() -> String {
+    let s = AppSettings.shared
+    switch s.instantSwitchMode {
+    case "globe":  return "🌐"
+    case "modkey": return s.instantSwitchKeyCode == 57 ? "⇪" : modsPlusKey(CGEventFlags(rawValue: s.instantSwitchMods), -1)
+    default:
+        return modsPlusKey(CGEventFlags(rawValue: s.instantSwitchMods), s.instantSwitchKeyCode)
+    }
+}
+
+/// ОКНО НЕ ДОЛЖНО БЫТЬ БОЛЬШЕ ЭКРАНА (отзыв #125, 11.08.2026: «окно обратной связи и „Что нового“
+/// не подстраиваются под размер экрана, строчки не помещаются и увидеть текст целиком нельзя»).
+///
+/// Мы считаем высоту по содержимому (`fittingSize`) и ставим её как есть. На большом мониторе это
+/// незаметно, а на 13-дюймовом ноутбуке с крупным системным шрифтом окно вырастает выше рабочей
+/// области, и нижняя часть уезжает под край экрана — вместе с кнопками. Человек видит обрезанное
+/// окно и не может ничего сделать.
+///
+/// ⚠️ Меряем по `visibleFrame`, а не по `frame`: строку меню и Док окно занять не может, и разница
+/// как раз того порядка, на котором это и ломается.
+extension NSWindow {
+    func clampToScreen(margin: CGFloat = 24) {
+        guard let vis = (screen ?? NSScreen.main)?.visibleFrame else { return }
+        let maxH = vis.height - margin, maxW = vis.width - margin
+        var f = frame
+        guard f.height > maxH || f.width > maxW else { return }
+        f.size.height = min(f.height, maxH)
+        f.size.width = min(f.width, maxW)
+        setFrame(f, display: true)
+        center()
+    }
+}
+
+// MARK: - Переключатель режима настроек в строке заголовка
+
+/// Две вкладки в строке заголовка окна настроек: «Основное» и «Всё».
+///
+/// ⚠️ СВОЯ ОТРИСОВКА, А НЕ `NSSegmentedControl`. автор 17.08: в покое переключатель должен быть
+/// приглушённым, под курсором подсвечиваться. Системный сегментер рисует себя сам и в macOS 26
+/// приезжает в стеклянной капсуле, которую нельзя ни притушить, ни подсветить: единственное, что
+/// ему можно задать снаружи, это `alphaValue` на весь контрол разом, отчего гаснет и выделение.
+/// Здесь три состояния краски (покой, наведение, выбранная половина) и ни одного системного бейзеля.
+final class ModePicker: NSView {
+    private var titles: [String]
+    private let font = NSFont.systemFont(ofSize: 12, weight: .medium)
+
+    /// Смена языка интерфейса: подписи меняются на месте, контрол пересобирать не нужно.
+    func setTitles(_ t: [String]) {
+        guard t.count == titles.count, t != titles else { return }
+        titles = t
+        for (i, l) in labels.enumerated() { l.string = t[i] }
+        invalidateIntrinsicContentSize()
+        frame.size = intrinsicContentSize
+        restyle(animated: false)
+    }
+    private let padX: CGFloat = 12
+    // ⚠️ ВЫСОТА ЭТО КОМПРОМИСС, И ОБЕ ЕГО СТОРОНЫ СТОИТ ЗНАТЬ, ПРЕЖДЕ ЧЕМ ТРОГАТЬ ЧИСЛО.
+    // Строка заголовка 32 pt, кнопки окна стоят в ней с полем 9 pt со всех сторон. Значит контрол,
+    // симметричный им сверху и справа, обязан быть 14 pt высотой, а в 14 pt подпись цепляет края
+    // капсулы. 19 pt (автор 17.08: «процентов на двадцать побольше») дают 6.5 pt сверху при 9.5
+    // справа. Растить дальше можно только за счёт верхнего поля.
+    private let barH: CGFloat = 19
+
+    // ⚠️ КОНТРОЛ СОБРАН ИЗ СЛОЁВ, А НЕ НАРИСОВАН В `draw`. автор 17.08: «чтобы он перетекал слева
+    // направо в стиле современных переключателей macOS». Перетекание это анимация геометрии, а
+    // рисование в `draw` умеет только перерисовать всё разом, в новом положении. Со слоями бегунок
+    // едет сам, а нам остаётся задать ему новый кадр.
+    /// Мягкий ореол ПОД капсулой: размывает то, что проезжает под переключателем.
+    ///
+    /// Идея автора 20.08.2026, после того как полосу размытия на весь заголовок он забраковал:
+    /// «давай по контуру нашего переключателя добавим такой блюр, чтобы слегка под ним свечение
+    /// было, когда под него заходят элементы настроек». Полоса на всё окно была слишком грубым
+    /// инструментом: она трогала и полосу прокрутки, и первую строку. Ореол по форме плашки решает
+    /// ту же задачу ровно там, где она есть.
+    private let halo = CALayer()
+    private let track = CALayer()
+    private let thumb = CALayer()
+    private var labels: [CATextLayer] = []
+
+    var selected = 0 { didSet { if selected != oldValue { restyle(animated: true) } } }
+    var onSelect: ((Int) -> Void)?
+
+    /// Какая половина под курсором. `SPEAKEY_MODEHOVER=0|1` держит наведение принудительно: иначе
+    /// это состояние не попадает ни на один снимок, а показывать его надо.
+    private var hover: Int? = ProcessInfo.processInfo.environment["SPEAKEY_MODEHOVER"].flatMap(Int.init) {
+        didSet { if hover != oldValue { restyle(animated: true) } }
+    }
+    private var hoverPinned: Bool { ProcessInfo.processInfo.environment["SPEAKEY_MODEHOVER"] != nil }
+
+    init(titles: [String]) {
+        self.titles = titles
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = false          // ореол шире капсулы и обязан выходить за её края
+        layer?.addSublayer(halo)
+        layer?.addSublayer(track)
+        track.addSublayer(thumb)
+        for t in titles {
+            let l = CATextLayer()
+            l.string = t
+            l.font = font
+            l.fontSize = font.pointSize
+            l.alignmentMode = .center
+            l.truncationMode = .none
+            labels.append(l)
+            layer?.addSublayer(l)
+        }
+        frame.size = intrinsicContentSize
+    }
+    required init?(coder: NSCoder) { fatalError() }
+
+    private var widths: [CGFloat] {
+        titles.map { ($0 as NSString).size(withAttributes: [.font: font]).width.rounded(.up) + padX * 2 }
+    }
+    private func box(_ i: Int) -> NSRect {
+        NSRect(x: widths.prefix(i).reduce(0, +), y: 0, width: widths[i], height: barH)
+    }
+    override var intrinsicContentSize: NSSize { NSSize(width: widths.reduce(0, +), height: barH) }
+    override var isFlipped: Bool { false }
+
+    // MARK: Краска
+    //
+    // ⚠️ ОДНА СЛИТНАЯ КАПСУЛА, А НЕ ДВЕ КНОПКИ РЯДОМ (автор 17.08). Общая дорожка есть всегда, и
+    // ровно она сообщает, что это ОДНА вещь с двумя положениями, а не два самостоятельных действия.
+    // Скругление половинное, как у сегментных контролов macOS: прямоугольник со скруглением 6-7
+    // читается как кнопка, капсула читается как переключатель.
+    //
+    // ⚠️ ЯРКОСТЬ ДОБАВЛЯТЬ НЕЛЬЗЯ, МОЖНО ТОЛЬКО ОТНИМАТЬ (он же, тогда же). Включённая половина
+    // держит обычную яркость интерфейса, выключенная приглушена. Обратный приём, подсветить
+    // активное, делает из служебного переключателя главный предмет в окне.
+    /// ⚠️ ЦВЕТА СПЛОШНЫЕ, А НЕ ПРОЗРАЧНЫЕ (автор 20.08.2026: «переключатель всё равно остался
+    /// полупрозрачным, неактивный пункт как будто просвечивает; нужно, чтобы прозрачности не было,
+    /// просто был цвет»).
+    ///
+    /// Раньше здесь стоял `labelColor.withAlphaComponent(alpha)`, то есть КРАСКА С ДЫРКОЙ: сквозь
+    /// неё видно всё, что позади. Пока за контролом был ровный фон окна, это выглядело как оттенок
+    /// серого. Как только под титлбаром появилось размытое содержимое, сквозь дорожку и подписи
+    /// полезла картинка, и контрол перестал читаться как предмет.
+    ///
+    /// Тот же вид получается смешиванием: берём подложку и подмешиваем к ней долю `labelColor`.
+    /// Разница яркостей между дорожкой, бегунком и подписями сохраняется до уровня, а прозрачности
+    /// нет вовсе.
+    private func ink(_ alpha: CGFloat, over base: NSColor = .windowBackgroundColor) -> CGColor {
+        var c = base.cgColor
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            c = (base.blended(withFraction: alpha, of: .labelColor) ?? base).cgColor
+        }
+        return c
+    }
+
+    /// Сплошной цвет как `NSColor` — нужен, чтобы подмешивать следующий слой поверх предыдущего:
+    /// бегунок лежит на дорожке, подписи лежат на бегунке и на дорожке.
+    private func inkColor(_ alpha: CGFloat, over base: NSColor = .windowBackgroundColor) -> NSColor {
+        var c = base
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            c = base.blended(withFraction: alpha, of: .labelColor) ?? base
+        }
+        return c
+    }
+
+    /// Геометрия и краска ореола. Зовётся из `restyle`, потому что размер контрола меняется вместе
+    /// с подписями (смена языка интерфейса).
+    ///
+    /// ⚠️ РАЗМЫТИЕ, А НЕ ТЕНЬ. Тень рисует своё пятно поверх фона и на светлой теме выглядит грязью.
+    /// `backgroundFilters` не добавляет ничего от себя: под плашкой просто теряет резкость то, что
+    /// там оказалось. Пока под переключателем пусто, ореола не видно вовсе, и это правильно.
+    ///
+    /// ⚠️ Маска РАДИАЛЬНАЯ, поэтому ореол гаснет во все стороны. Вертикальная, как у прежней полосы,
+    /// оставила бы резкие боковые кромки, а у капсулы кромок быть не должно.
+    private func layoutHalo() {
+        let pad: CGFloat = 7
+        let r = bounds.insetBy(dx: -pad, dy: -pad)
+        halo.frame = r
+        halo.cornerRadius = r.height / 2
+        halo.masksToBounds = true
+        if halo.backgroundFilters == nil || halo.backgroundFilters?.isEmpty == true {
+            if let blur = CIFilter(name: "CIGaussianBlur", parameters: [kCIInputRadiusKey: 5]) {
+                halo.backgroundFilters = [blur]
+            }
+        }
+        // Лёгкий тон тем же цветом, что фон окна: гасит свечение светлых букв, не меняя оттенка.
+        halo.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.45).cgColor
+        let mask = (halo.mask as? CAGradientLayer) ?? CAGradientLayer()
+        mask.type = .radial
+        mask.colors = [NSColor.black.cgColor,
+                       NSColor.black.withAlphaComponent(0.9).cgColor,
+                       NSColor.black.withAlphaComponent(0.45).cgColor,
+                       NSColor.clear.cgColor]
+        mask.locations = [0, 0.55, 0.8, 1]
+        mask.startPoint = CGPoint(x: 0.5, y: 0.5)
+        mask.endPoint = CGPoint(x: 1, y: 1)
+        mask.frame = halo.bounds
+        halo.mask = mask
+    }
+
+    private func restyle(animated: Bool) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(!animated)
+        if animated {
+            CATransaction.setAnimationDuration(0.22)
+            CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        }
+        layoutHalo()
+        track.frame = bounds
+        track.cornerRadius = bounds.height / 2
+        let trackColor = inkColor(0.07)
+        let thumbColor = inkColor(0.13, over: trackColor)
+        track.backgroundColor = trackColor.cgColor
+
+        // ⚠️ БЕГУНОК ВО ВСЮ ВЫСОТУ ДОРОЖКИ, БЕЗ ЗАЗОРА (автор 17.08: «выделение по высоте такое же,
+        // как основная плашка, сейчас оно меньше и смотрится коряво»). Утопленный бегунок это язык
+        // сегментного контрола iOS; в строке заголовка macOS он читался как кнопка внутри кнопки.
+        thumb.frame = box(selected)
+        thumb.cornerRadius = bounds.height / 2
+        thumb.backgroundColor = thumbColor.cgColor
+
+        let scale = window?.backingScaleFactor ?? 2
+        for (i, l) in labels.enumerated() {
+            let b = box(i)
+            let lineH = font.ascender - font.descender
+            l.contentsScale = scale
+            l.frame = NSRect(x: b.minX, y: ((b.height - lineH) / 2).rounded(),
+                             width: b.width, height: lineH.rounded(.up))
+            // Подпись мешаем с ТЕМ, НА ЧЁМ ОНА ЛЕЖИТ: выбранная на бегунке, остальные на дорожке.
+            l.foregroundColor = i == selected ? ink(0.85, over: thumbColor)
+                                              : ink(hover == i ? 0.55 : 0.35, over: trackColor)
+        }
+        CATransaction.commit()
+    }
+
+    override func layout() {
+        super.layout()
+        restyle(animated: false)
+    }
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        restyle(animated: false)
+    }
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        restyle(animated: false)
+    }
+
+    // MARK: Мышь
+
+    /// ⚠️ БЕЗ ЭТОГО ЩЕЛЧОК УХОДИТ В ПЕРЕТАСКИВАНИЕ ОКНА. Всё, что лежит в строке заголовка, macOS по
+    /// умолчанию считает поверхностью для таскания: нажатие не доходит до контрола, а начинает
+    /// двигать окно. Отсюда же `NonDraggableHostingView` в чужих проектах с тем же приёмом.
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    private func index(at p: NSPoint) -> Int? { titles.indices.first { box($0).contains(p) } }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let i = index(at: convert(event.locationInWindow, from: nil)), i != selected else { return }
+        selected = i
+        onSelect?(i)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds,
+                                       options: [.mouseEnteredAndExited, .mouseMoved,
+                                                 .activeInKeyWindow, .inVisibleRect],
+                                       owner: self))
+    }
+    override func mouseMoved(with event: NSEvent) {
+        guard !hoverPinned else { return }
+        hover = index(at: convert(event.locationInWindow, from: nil))
+    }
+    override func mouseEntered(with event: NSEvent) { mouseMoved(with: event) }
+    override func mouseExited(with event: NSEvent) { if !hoverPinned { hover = nil } }
+    override func resetCursorRects() { addCursorRect(bounds, cursor: .pointingHand) }
+}

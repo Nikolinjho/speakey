@@ -8425,8 +8425,8 @@
     "ёжиться"
   ],
   "provenance": {
-    "Sources/Keyboop/Resources/words_en.json": "1d16ce0065f60c0126ec24bf62179780c4203bb485eb1dcaa81e7e6b7385ee98",
-    "Sources/Keyboop/Resources/words_ru.json": "704f45617f2b9aeea99e3abc21b0d2a3e795ab98a95d90292c8b04e7f962c4d2"
+    "Sources/Speakey/Resources/words_en.json": "1d16ce0065f60c0126ec24bf62179780c4203bb485eb1dcaa81e7e6b7385ee98",
+    "Sources/Speakey/Resources/words_ru.json": "704f45617f2b9aeea99e3abc21b0d2a3e795ab98a95d90292c8b04e7f962c4d2"
   },
   "version": 1
 }

@@ -5,7 +5,7 @@ if [ "$#" -gt 1 ] || { [ "$#" -eq 1 ] && [ "$1" != --check-only ]; }; then
   exit 2
 fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TARGET="$ROOT/Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel"
+TARGET="$ROOT/Sources/Speakey/Resources/RightLayout/LayoutClassifier.mlmodel"
 SOURCE_COMMIT=58658d8d4c3b71ed4cfd6b20627196a8145f17f9
 EXPECTED_SHA=5fab7216bce448129fe89e3e5d3fa63896cee8612364a72c631e24034e59f704
 EXPECTED_BYTES=13880886

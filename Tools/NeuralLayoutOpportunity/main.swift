@@ -128,7 +128,7 @@ do {
         try require(first(baseline, nil)?.result == "baseline", "Нет кандидата: baseline сохранён")
         report.semanticChecks = 5
     }
-    let domain = "keyboop-opportunity-" + UUID().uuidString
+    let domain = "speakey-opportunity-" + UUID().uuidString
     let defaults = UserDefaults(suiteName: domain)!
     defer { defaults.removePersistentDomain(forName: domain) }
     let exceptions = ExceptionStore(defaults: defaults)
@@ -137,7 +137,7 @@ do {
     var cache: [String: NeuralLayoutScores] = [:]
     #if MODEL_ENABLED
     if let path = option("--model") {
-        let sha = digest(try data("Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel"))
+        let sha = digest(try data("Sources/Speakey/Resources/RightLayout/LayoutClassifier.mlmodel"))
         let model = try RightLayoutModel(modelURL: URL(fileURLWithPath: path))
         predict = { try model.predict($0) }
         profile = try NeuralLayoutProfile(modelSHA256: sha, enabled: true, minimumScore: 0.95, minimumMargin: 0.50)

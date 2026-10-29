@@ -1,5 +1,0 @@
-PRECHECK: AX=true InputMonitoring=true (nonprompting)
-PASS: OS HID → session → genuine EventTap.handle; own PID, keyDown/255, full 64-bit marker/token; consumed
-2026-10-27 16:08:09.319 Keyboop[12677:5699749] TSM AdjustCapsLockLEDForKeyTransitionHandling - _ISSetPhysicalKeyboardCapsLockLED Inhibit
-FAIL editing: AppKit replacement text/caret mismatch
-SCOPE: synthetic OS transport; explicit NSApplication.sendEvent → NSTextView.keyDown routing in hidden fixture; no activation, physical input, natural focus routing, Engine policy or mailbox proof

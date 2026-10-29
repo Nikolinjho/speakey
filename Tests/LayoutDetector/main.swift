@@ -22,7 +22,7 @@ do {
     let data = try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[2]))
     let cases = try JSONDecoder().decode([DetectorCase].self, from: data)
     guard !cases.isEmpty else { exit(2) }
-    let resourceDirectory = ProcessInfo.processInfo.environment["KEYBOOP_DATA_DIR"] ?? ""
+    let resourceDirectory = ProcessInfo.processInfo.environment["SPEAKEY_DATA_DIR"] ?? ""
     for name in ["words_ru", "words_en", "trigrams_ru", "trigrams_en"] {
         let resource = URL(fileURLWithPath: resourceDirectory).appendingPathComponent("\(name).json")
         let loaded: Bool

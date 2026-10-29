@@ -1,11 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-work="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-diagnostics.XXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/speakey-diagnostics.XXXXXX")"
 trap 'rm -rf "$work"' EXIT
 sources=(Tests/LayoutDiagnostics/TestSupport.swift)
 for name in NeuralLayoutTypes NeuralLayoutPolicy NeuralLayoutEvidence NeuralLayoutEvidenceBuffer LocalBuildPolicy LayoutObservation LayoutDecision LayoutDecisionExplainer LayoutFeedbackTracker LayoutDiagnosticsController KeystrokeBuffer LayoutJournalStore LayoutRuleService LayoutJournalPresenter; do
-    source="Sources/Keyboop/$name.swift"
+    source="Sources/Speakey/$name.swift"
     [ ! -f "$source" ] || sources+=("$source")
 done
 # Файл FooTests.swift объявляет FooTests: DiagnosticSuite, имя набора задаёт сам тип.

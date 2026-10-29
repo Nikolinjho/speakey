@@ -1,2 +1,0 @@
-2026-10-27 17:24:55.948 Keyboop[21135:6040494] Keyboop: LayoutData loaded=true ru-tri=11458 en-tri=8110 ru-w=163283 en-w=59506
-FAIL: Обычный конструктор настроек создаёт окно

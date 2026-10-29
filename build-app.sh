@@ -1,12 +1,12 @@
 #!/bin/bash
-# Собирает Keyboop.app напрямую через swiftc (SwiftPM в этой CLT сломан),
+# Собирает Speakey.app напрямую через swiftc (SwiftPM в этой CLT сломан),
 # кладёт Info.plist (LSUIElement) и подписывает постоянным сертификатом.
 set -e
 cd "$(dirname "$0")"
 PROJECT_ROOT="$(pwd -P)"
 
 # Проверяем сертификат до компиляции и изменения подготовленного бандла.
-bash "$PROJECT_ROOT/scripts/sign-keyboop-app.sh" --check-identity
+bash "$PROJECT_ROOT/scripts/sign-speakey-app.sh" --check-identity
 
 # Ежедневная резервная копия, привязанная к работе, а не к календарю. Сборка — самый честный
 # признак того, что сегодня в проекте что-то менялось: в дни без сборок и терять нечего.
@@ -33,20 +33,20 @@ fi
 # Куда собирать. По умолчанию в рабочую папку, но агент собирает в /tmp: пока автор работает в
 # своей копии по обычному пути, пересборка туда же означала бы гасить приложение у него под руками,
 # а перенос копии в другое место ломает выданные доступы (TCC привязан к пути и подписи).
-APP="${KEYBOOP_BUILD_APP:-Speakey.app}"
+APP="${SPEAKEY_BUILD_APP:-Speakey.app}"
 
 # Local admin tools share the exact process classifier. Source releases may omit Tools/, so keep a
 # minimal equivalent fallback here: v3 wins over the legacy flag it also carries.
-if [ -f Tools/keyboop-process-safety.sh ]; then
-  . Tools/keyboop-process-safety.sh
+if [ -f Tools/speakey-process-safety.sh ]; then
+  . Tools/speakey-process-safety.sh
 else
-  keyboop_canonical_path() {
+  speakey_canonical_path() {
     python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$1"
   }
-  keyboop_build_target_allowed() {
+  speakey_build_target_allowed() {
     local target project base
-    target="$(keyboop_canonical_path "$1")" || return 1
-    project="$(keyboop_canonical_path "$2")" || return 1
+    target="$(speakey_canonical_path "$1")" || return 1
+    project="$(speakey_canonical_path "$2")" || return 1
     base="$(basename "$target")"
     [ "$base" != ".app" ] || return 1
     case "$base" in *.app) ;; *) return 1 ;; esac
@@ -55,7 +55,7 @@ else
       *) return 1 ;;
     esac
   }
-  keyboop_process_executable() {
+  speakey_process_executable() {
     python3 -c '
 import ctypes, os, sys
 lib = ctypes.CDLL("/usr/lib/libproc.dylib")
@@ -66,9 +66,9 @@ if size <= 0:
 print(os.path.realpath(os.fsdecode(buf.value)))
 ' "$1" 2>/dev/null
   }
-  keyboop_candidate_pids() {
+  speakey_candidate_pids() {
     local candidates status
-    if candidates="$(pgrep -x Keyboop 2>/dev/null)"; then
+    if candidates="$(pgrep -x Speakey 2>/dev/null)"; then
       printf '%s\n' "$candidates"
       return 0
     else
@@ -76,12 +76,12 @@ print(os.path.realpath(os.fsdecode(buf.value)))
     fi
     [ "$status" -eq 1 ] || echo "?"
   }
-  keyboop_process_pids() {
+  speakey_process_pids() {
     local executable selector="${2:-any}" pid args kind physical
-    executable="$(keyboop_canonical_path "$1")" || return 1
+    executable="$(speakey_canonical_path "$1")" || return 1
     while IFS= read -r pid; do
       [ -n "$pid" ] || continue
-      physical="$(keyboop_process_executable "$pid" || true)"
+      physical="$(speakey_process_executable "$pid" || true)"
       if [ -z "$physical" ]; then
         [ "$selector" = any ] || [ "$selector" = blocking ] || continue
         echo "$pid"
@@ -103,19 +103,19 @@ print(os.path.realpath(os.fsdecode(buf.value)))
         application:application|persistent:persistent|blocking:application|blocking:persistent|any:*)
           echo "$pid" ;;
       esac
-    done < <(keyboop_candidate_pids)
+    done < <(speakey_candidate_pids)
   }
 fi
-APP_ABSOLUTE="$(keyboop_canonical_path "$APP")"
-if ! keyboop_build_target_allowed "$APP_ABSOLUTE" "$PROJECT_ROOT"; then
-  echo "✗ небезопасный KEYBOOP_BUILD_APP: $APP_ABSOLUTE"
+APP_ABSOLUTE="$(speakey_canonical_path "$APP")"
+if ! speakey_build_target_allowed "$APP_ABSOLUTE" "$PROJECT_ROOT"; then
+  echo "✗ небезопасный SPEAKEY_BUILD_APP: $APP_ABSOLUTE"
   echo "  Разрешён только *.app внутри проекта или системной временной папки."
   exit 2
 fi
 # From this point the checked path and the mutated path are identical. Never return to the raw
-# alias supplied through KEYBOOP_BUILD_APP.
+# alias supplied through SPEAKEY_BUILD_APP.
 APP="$APP_ABSOLUTE"
-EXECUTABLE="$APP_ABSOLUTE/Contents/MacOS/Keyboop"
+EXECUTABLE="$APP_ABSOLUTE/Contents/MacOS/Speakey"
 
 # ⚠️ Пересборка бандла под РАБОТАЮЩИМ из него процессом запрещена: macOS перестаёт доверять
 # клиенту, чей бандл изменился на диске, и coreaudiod МОЛЧА глушит ему микрофон — TCC отвечает
@@ -123,11 +123,11 @@ EXECUTABLE="$APP_ABSOLUTE/Contents/MacOS/Keyboop"
 # Узкий legacy crash-scanner без `--resource-guard-v3` можно отличить по argv и не учитывать. Новый
 # persistent helper принципиально другой: он может жить после GUI, удерживая global lock/receipt и
 # повторяя OFF/restore. Перезаписывать его executable bundle до завершения cleanup нельзя.
-main_pids="$(keyboop_process_pids "$EXECUTABLE" application)"
+main_pids="$(speakey_process_pids "$EXECUTABLE" application)"
 if [ -n "$main_pids" ]; then
-  echo "✗ Keyboop сейчас запущен из $APP_ABSOLUTE — собирать под ним нельзя."
-  # ⚠️ ГАСИМ ПО ПУТИ, А НЕ ПО ИМЕНИ. Здесь стояло `pkill -x Keyboop`, и эта подсказка обошлась
-  # дорого: она гасит ЛЮБОЙ процесс с именем Keyboop, то есть заодно и боевую копию из
+  echo "✗ Speakey сейчас запущен из $APP_ABSOLUTE — собирать под ним нельзя."
+  # ⚠️ ГАСИМ ПО ПУТИ, А НЕ ПО ИМЕНИ. Здесь стояло `pkill -x Speakey`, и эта подсказка обошлась
+  # дорого: она гасит ЛЮБОЙ процесс с именем Speakey, то есть заодно и боевую копию из
   # /Applications, которой человек в этот момент пользуется. У сборочной и у боевой копии общее
   # имя процесса и разные пути — значит и различать их надо путём.
   # И `-f`, а не `-9`: SIGKILL перехватить нельзя, а на выходе мы возвращаем системе роль клавиши
@@ -135,11 +135,11 @@ if [ -n "$main_pids" ]; then
   echo "  Сначала:  pkill -f \"$EXECUTABLE\"        затем собери и:  open \"$APP\""
   exit 1
 fi
-persistent_pids="$(keyboop_process_pids "$EXECUTABLE" persistent)"
+persistent_pids="$(speakey_process_pids "$EXECUTABLE" persistent)"
 if [ -n "$persistent_pids" ]; then
   echo "⏳ persistent resource helper завершает cleanup: $persistent_pids"
   for _ in $(seq 1 40); do
-    persistent_pids="$(keyboop_process_pids "$EXECUTABLE" persistent)"
+    persistent_pids="$(speakey_process_pids "$EXECUTABLE" persistent)"
     [ -z "$persistent_pids" ] && break
     sleep 0.25
   done
@@ -154,7 +154,7 @@ fi
 # one-time initialization function for strings). Ловим на сборке, а не по краш-репорту.
 DUPES=$(python3 - <<'PYEOF'
 import re, collections
-src = open('Sources/Keyboop/L10n.swift', encoding='utf-8').read()
+src = open('Sources/Speakey/L10n.swift', encoding='utf-8').read()
 keys = re.findall(r'^\s*"([^"]+)":\s*\[', src, re.M)
 print(",".join(k for k, c in collections.Counter(keys).items() if c > 1))
 PYEOF
@@ -167,10 +167,10 @@ fi
 
 # Проверяем и компилируем модель до изменения существующего приложения.
 bash scripts/fetch-rightlayout-model.sh --check-only
-RIGHTLAYOUT_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/keyboop-rightlayout-build.XXXXXX")"
+RIGHTLAYOUT_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/speakey-rightlayout-build.XXXXXX")"
 trap 'rm -rf "$RIGHTLAYOUT_STAGE"' EXIT
 swift scripts/compile-rightlayout-model.swift \
-  Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel \
+  Sources/Speakey/Resources/RightLayout/LayoutClassifier.mlmodel \
   "$RIGHTLAYOUT_STAGE/LayoutClassifier.mlmodelc"
 cp Resources/RightLayout/model.json "$RIGHTLAYOUT_STAGE/model.json"
 cp Resources/RightLayout/LICENSE "$RIGHTLAYOUT_STAGE/LICENSE"
@@ -179,7 +179,7 @@ cp Resources/RightLayout/profile.json "$RIGHTLAYOUT_STAGE/profile.json"
 echo "▸ swiftc compile…"
 # Close the bounded-wait race: a GUI may have launched while the old helper was finishing. Perform
 # one final exact-path check immediately before replacing any bundle contents.
-blocking_pids="$(keyboop_process_pids "$EXECUTABLE" blocking)"
+blocking_pids="$(speakey_process_pids "$EXECUTABLE" blocking)"
 if [ -n "$blocking_pids" ]; then
   echo "✗ перед записью bundle снова появился GUI/persistent helper: $blocking_pids"
   echo "  Bundle оставляю без изменений."
@@ -207,13 +207,10 @@ fi
 # FluidAudio (Parakeet/CoreML/ANE) — предсобранная статика, предсобранная статика.
 # Требует macOS 14 (поэтому таргет подняли 13→14).
 FA="vendor/fluidaudio-prebuilt"
-# Sparkle (автообновления): динамический фреймворк. Линкуем + rpath на Contents/Frameworks,
-# куда сам фреймворк копируется ниже (с переподписью вложенных бинарей нашим Developer ID).
-SPARKLE="vendor/sparkle"
-swiftc -O Sources/Keyboop/*.swift \
-  -o "$APP/Contents/MacOS/Keyboop" \
+swiftc -O Sources/Speakey/*.swift \
+  -o "$APP/Contents/MacOS/Speakey" \
   -swift-version 5 -target arm64-apple-macos14.0 \
-  -import-objc-header Sources/Keyboop/whisper-bridging.h \
+  -import-objc-header Sources/Speakey/whisper-bridging.h \
   -I "$WHISPER/include" -I "$WHISPER/ggml/include" \
   -I "$FA/Modules" -I "$FA/include/FastClusterWrapper" -I "$FA/include/MachTaskSelfWrapper" \
   -L "$WHISPER_BUILD/src" -L "$WHISPER_BUILD/ggml/src" \
@@ -222,15 +219,13 @@ swiftc -O Sources/Keyboop/*.swift \
   -lwhisper -lggml -lggml-cpu -lggml-metal -lggml-blas -lggml-base -lc++ \
   -framework AppKit -framework Carbon -framework ServiceManagement -framework ApplicationServices -framework IOKit \
   -framework AVFoundation -framework CoreAudio -framework AudioToolbox -framework Metal -framework MetalKit -framework Accelerate -framework CoreML \
-  -framework SwiftUI -Xlinker -weak_framework -Xlinker Translation \
-  -F "$SPARKLE" -framework Sparkle \
-  -Xlinker -rpath -Xlinker @executable_path/../Frameworks
+  -framework SwiftUI -Xlinker -weak_framework -Xlinker Translation
 
-# ── Universal (Intel): второй проход под x86_64 + lipo. Включается KEYBOOP_UNIVERSAL=1
+# ── Universal (Intel): второй проход под x86_64 + lipo. Включается SPEAKEY_UNIVERSAL=1
 #    (release.sh включает всегда; dev-сборки по умолчанию arm64-only — вдвое быстрее).
 #    x86-срез: whisper из build-x86 (GGML_NATIVE=OFF + AVX2-бейзлайн, БЕЗ Metal — CPU/Accelerate),
 #    БЕЗ FluidAudio (arm64-only статика; Swift-код компилирует Intel-заглушки по #if arch).
-if [ "${KEYBOOP_UNIVERSAL:-}" = "1" ]; then
+if [ "${SPEAKEY_UNIVERSAL:-}" = "1" ]; then
   WX="$WHISPER/build-x86"
   if [ ! -f "$WX/src/libwhisper.a" ]; then
     echo "✗ Нет x86-сборки whisper. Один раз собери:"
@@ -240,40 +235,30 @@ if [ "${KEYBOOP_UNIVERSAL:-}" = "1" ]; then
     exit 1
   fi
   echo "▸ swiftc compile (x86_64 для universal)…"
-  mv "$APP/Contents/MacOS/Keyboop" "$APP/Contents/MacOS/.Keyboop-arm64"
-  swiftc -O Sources/Keyboop/*.swift \
-    -o "$APP/Contents/MacOS/.Keyboop-x86" \
+  mv "$APP/Contents/MacOS/Speakey" "$APP/Contents/MacOS/.Speakey-arm64"
+  swiftc -O Sources/Speakey/*.swift \
+    -o "$APP/Contents/MacOS/.Speakey-x86" \
     -swift-version 5 -target x86_64-apple-macos13.0 \
-    -import-objc-header Sources/Keyboop/whisper-bridging.h \
+    -import-objc-header Sources/Speakey/whisper-bridging.h \
     -I "$WHISPER/include" -I "$WHISPER/ggml/include" \
     -L "$WX/src" -L "$WX/ggml/src" -L "$WX/ggml/src/ggml-blas" \
     -lwhisper -lggml -lggml-cpu -lggml-blas -lggml-base -lc++ \
     -framework AppKit -framework Carbon -framework ServiceManagement -framework ApplicationServices -framework IOKit \
     -framework AVFoundation -framework CoreAudio -framework AudioToolbox -framework Accelerate -framework CoreML \
-    -framework SwiftUI -Xlinker -weak_framework -Xlinker Translation \
-    -F "$SPARKLE" -framework Sparkle \
-    -Xlinker -rpath -Xlinker @executable_path/../Frameworks
-  lipo -create "$APP/Contents/MacOS/.Keyboop-arm64" "$APP/Contents/MacOS/.Keyboop-x86" \
-       -output "$APP/Contents/MacOS/Keyboop"
-  rm -f "$APP/Contents/MacOS/.Keyboop-arm64" "$APP/Contents/MacOS/.Keyboop-x86"
-  echo "  universal: $(lipo -archs "$APP/Contents/MacOS/Keyboop")"
+    -framework SwiftUI -Xlinker -weak_framework -Xlinker Translation
+  lipo -create "$APP/Contents/MacOS/.Speakey-arm64" "$APP/Contents/MacOS/.Speakey-x86" \
+       -output "$APP/Contents/MacOS/Speakey"
+  rm -f "$APP/Contents/MacOS/.Speakey-arm64" "$APP/Contents/MacOS/.Speakey-x86"
+  echo "  universal: $(lipo -archs "$APP/Contents/MacOS/Speakey")"
 fi
 
 # Языковые данные (триграммы/словари) в bundle Resources
-cp Sources/Keyboop/Resources/*.json "$APP/Contents/Resources/" 2>/dev/null || echo "  (нет Resources/*.json — детектор будет без данных)"
-# Знак Keyboop (template) для waveform в строке меню
-cp Sources/Keyboop/Resources/menubar-mark.png "$APP/Contents/Resources/" 2>/dev/null || echo "  (нет menubar-mark.png — значок будет вектором-фолбэком)"
-
-# Анимированный логотип (онбординг-герой). 59 КБ, без звука, h264.
-cp Sources/Keyboop/Resources/keyboop-logo-anim.mp4 "$APP/Contents/Resources/" 2>/dev/null \
-  && echo "  ресурс: keyboop-logo-anim.mp4 (онбординг)" \
-  || echo "  (нет keyboop-logo-anim.mp4 — онбординг покажет статичную иконку)"
-
+cp Sources/Speakey/Resources/*.json "$APP/Contents/Resources/" 2>/dev/null || echo "  (нет Resources/*.json — детектор будет без данных)"
 # Asset Catalog → coral как системный accent (чекбоксы/тумблеры/popup станут оранжевыми).
 if [ -d Resources/Assets.xcassets ]; then
   actool Resources/Assets.xcassets --compile "$APP/Contents/Resources" \
     --platform macosx --minimum-deployment-target 13.0 \
-    --output-partial-info-plist /tmp/keyboop-assets-plist.plist >/dev/null 2>&1 \
+    --output-partial-info-plist /tmp/speakey-assets-plist.plist >/dev/null 2>&1 \
     && echo "  ассеты: AccentColor (coral) скомпилирован" \
     || echo "  ассеты: actool не справился (accent останется системным)"
 fi
@@ -290,22 +275,16 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <dict>
     <key>CFBundleName</key>            <string>Speakey</string>
     <key>CFBundleDisplayName</key>     <string>Speakey</string>
-    <key>CFBundleIdentifier</key>      <string>ru.keyboop.app</string>
+    <key>CFBundleIdentifier</key>      <string>dev.speakey.app</string>
     <key>CFBundleVersion</key>         <string>0.4.10</string>
     <key>CFBundleShortVersionString</key> <string>0.4.10</string>
     <!-- Штамп сборки: подставляется ниже (sed по __BUILD_STAMP__). Логируется при запуске, чтобы по
          логу было ВИДНО, какую именно сборку гоняем. Прецедент 21.07: диагностировали баг по логу
          процесса, стартовавшего на 11 минут РАНЬШЕ пересборки, — то есть по коду без свежих правок. -->
-    <key>KeyboopBuildStamp</key>       <string>__BUILD_STAMP__</string>
-    <key>CFBundleExecutable</key>      <string>Keyboop</string>
+    <key>SpeakeyBuildStamp</key>       <string>__BUILD_STAMP__</string>
+    <key>CFBundleExecutable</key>      <string>Speakey</string>
     <key>CFBundleIconFile</key>        <string>AppIcon</string>
     <key>CFBundlePackageType</key>     <string>APPL</string>
-    <!-- Sparkle по-русски (баг-репорт: «You're up to date» в русском интерфейсе).
-         У приложения НЕТ .lproj-папок (своя L10n) → macOS фиксирует язык процесса = en, и строки
-         Sparkle.framework резолвятся в английский, хотя ru.lproj внутри фреймворка ЕСТЬ. Этот ключ —
-         штатное решение Apple ровно для такого случая: каждый бандл (фреймворк) локализуется
-         независимо от главного. Явный выбор языка в настройках синхронизируется через AppleLanguages
-         (AppDelegate), так что диалоги Sparkle слушаются переключателя в приложении. -->
     <key>CFBundleAllowMixedLocalizations</key> <true/>
     <key>LSMinimumSystemVersion</key>  <string>13.0</string>
     <!-- Пер-архитектурные минимумы (задача «старые системы», 23.07.2026): arm64 требует 14
@@ -333,44 +312,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>NSPrefersDisplaySafeAreaCompatibilityMode</key> <false/>
     <key>NSPrincipalClass</key>        <string>NSApplication</string>
     <key>NSHumanReadableCopyright</key><string>Speakey – free &amp; open source</string>
-    <!-- Sparkle (автообновления). Проверка ВКЛ + фоновое скачивание. SUAutomaticallyUpdate=true
-         включает «тихий» путь, но мы его ПЕРЕХВАТЫВАЕМ делегатом willInstallUpdateOnQuit
-         (UpdaterController) и по умолчанию НЕ ставим молча, а показываем СВОЁ уведомление «Обновить
-         сейчас / Обновлять автоматически». Тихо ставим только если пользователь сам выбрал «авто».
-         Так выполняется требование ревизии (установка с согласия), а тихий режим — opt-in. Профайлинг off. -->
-    <key>SUFeedURL</key>                       <string>https://keyboop.com/appcast.xml</string>
-    <key>SUPublicEDKey</key>                   <string>JHgcY6qatoAU6Tdo02B7mHgfceMyfdPWXqwWQiMESmY=</string>
-    <key>SUEnableAutomaticChecks</key>         <true/>
-    <key>SUAutomaticallyUpdate</key>           <true/>
-    <key>SUEnableSystemProfiling</key>         <false/>
-    <key>SUVerifyUpdateBeforeExtraction</key>  <true/>
-    <key>SURequireSignedFeed</key>             <true/>
-    <!-- Раз в 2 часа. Было раз в сутки, 29.07 стало 6 часов, 30.07 — 2 часа (решение автора).
-         При суточном интервале момент проверки у каждого свой и сдвигается вслед за пробуждением
-         Мака: релиз, выложенный днём, доезжал до части людей только на следующие сутки, и это
-         выглядело как «автообновление не работает».
-         Чем НЕ платим за учащение, по порядку:
-         • Трафик — 12 запросов по 15 КБ в сутки на человека вместо одного. Это меньше, чем одна
-           открытая вкладка делает за минуту.
-         • Батарея — короткий GET, Мак от него не просыпается: Sparkle планирует проверку на время
-           бодрствования, а не будильником.
-         • Назойливость — и это главное, чего можно было бы бояться, но её нет. Найдя апдейт, Sparkle
-           СКАЧИВАЕТ его и зовёт `willInstallUpdateOnQuit`; мы там возвращаем true и паркуем цикл
-           (UpdaterController.swift:189), показав СВОЁ уведомление один раз. Пока человек не решил,
-           дальнейшие проверки ничего не показывают, сколько бы их ни было. То есть интервал влияет
-           только на скорость ПЕРВОГО обнаружения.
-         Ниже часа опускать нельзя: Sparkle поднимет значение до своего минимума. 2 часа с запасом.
-         Персонального значения в user defaults ни у кого нет (проверено: `defaults read ru.keyboop.app
-         SUScheduledCheckInterval` → does not exist), поэтому новая цифра из Info.plist доедет до всех
-         на ближайшем обновлении, а не только до новых установок. -->
-    <key>SUScheduledCheckInterval</key>        <integer>7200</integer>
-    <!-- Spotlight-алиасы: приложение находится по «лунищщз» (keyboop вслепую на RU-раскладке) и по
-         функциональным синонимам. Видимое имя (CFBundleName/DisplayName) НЕ меняется — это отдельное
-         метаполе индекса. macOS-ключ MDItemKeywords (без k-префикса; kMDItemKeywords — iOS). Внутри
-         подписанного Info.plist → переживает codesign + нотаризацию + Sparkle-апдейт.
-         Ref: developer.apple.com/forums/thread/761535 -->
-    <key>MDItemKeywords</key>
-    <string>лунищщз, keyboop, раскладка, punto, switcher</string>
+    <key>MDItemKeywords</key><string>Speakey, раскладка, диктовка, switcher</string>
 </dict>
 </plist>
 PLIST
@@ -381,27 +323,16 @@ PLIST
 BUILD_STAMP="$(date '+%Y-%m-%d %H:%M')"
 sed -i '' "s/__BUILD_STAMP__/$BUILD_STAMP/" "$APP/Contents/Info.plist"
 
-# M4 (фикс инцидента 14.06): dev-сборкам — ОТДЕЛЬНЫЙ bundle id и имя, чтобы они физически НЕ могли
-# перехватить TCC/Accessibility у боевой ru.keyboop.app (две сборки с одним id, но разной подписью →
-# конфликт designated requirement → TCC-запись инвалидируется, доступ слетает). Меняем PlistBuddy'ем
-# ПОСЛЕ heredoc (он single-quoted, переменные не раскрывает) и ДО codesign (иначе порвём seal подписи).
-# Заодно у dev снимаем SUFeedURL — пусть dev-сборка вообще не ходит за боевым appcast.
-if [ "${KEYBOOP_RELEASE:-}" != "1" ]; then
-  /usr/libexec/PlistBuddy -c "Set :SUEnableAutomaticChecks false" "$APP/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Add :KeyboopLocalBuild bool true" "$APP/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier ru.keyboop.app.dev" "$APP/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleName Speakey" "$APP/Contents/Info.plist" 2>/dev/null || true
-  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Speakey" "$APP/Contents/Info.plist" 2>/dev/null || true
-  /usr/libexec/PlistBuddy -c "Delete :SUFeedURL" "$APP/Contents/Info.plist" 2>/dev/null || true
-  /usr/libexec/PlistBuddy -c "Delete :MDItemKeywords" "$APP/Contents/Info.plist" 2>/dev/null || true
-  echo "  dev: bundle id → ru.keyboop.app.dev (TCC изолирован от боевой), SUFeedURL + Spotlight-ключи сняты"
+# Сборки для разработки изолированы собственным доменом настроек.
+if [ "${SPEAKEY_RELEASE:-}" != "1" ]; then
+  /usr/libexec/PlistBuddy -c "Add :SpeakeyLocalBuild bool true" "$APP/Contents/Info.plist"
+  /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier dev.speakey.app.dev" "$APP/Contents/Info.plist"
 fi
 
-# Встраиваем Sparkle.framework до подписи. ditto сохраняет симлинки версий и права.
-mkdir -p "$APP/Contents/Frameworks"
-ditto "$SPARKLE/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
-# Скрипт сохраняет параметры dev/release и XPC entitlements. Любая ошибка останавливает сборку.
-bash "$PROJECT_ROOT/scripts/sign-keyboop-app.sh" "$APP"
+# Уведомления об авторстве и лицензии распространяются вместе с приложением.
+cp LICENSE "$APP/Contents/Resources/LICENSE"
+cp THIRD_PARTY.md "$APP/Contents/Resources/THIRD_PARTY.md"
+bash "$PROJECT_ROOT/scripts/sign-speakey-app.sh" "$APP"
 
 echo "✓ Готово: $APP"
-echo "  Запуск:  open \"$APP\"  (или bash install-local.sh — чистая установка в /Applications)"
+echo "  Запуск: open \"$APP\""

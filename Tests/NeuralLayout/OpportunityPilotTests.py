@@ -11,7 +11,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 class OpportunityPilotTests(unittest.TestCase):
     def test_oracle_and_validation(self):
         """Оракул проверяет замороженные семьи и отрицательные примеры."""
-        with tempfile.TemporaryDirectory(prefix="keyboop-opportunity-tests-") as work:
+        with tempfile.TemporaryDirectory(prefix="speakey-opportunity-tests-") as work:
             output = pathlib.Path(work) / "oracle.json"
             result = subprocess.run(
                 ["bash", "scripts/analyze-neural-opportunities.sh", "--oracle-only", "--self-test", "--output", str(output)],
@@ -35,10 +35,10 @@ class OpportunityPilotTests(unittest.TestCase):
             self.assertEqual(sum(data["wrongPrefixCategories"].values()), data["wrongPrefixes"])
             self.assertEqual(sum(data["controlPrefixCategories"].values()), data["controlPrefixes"])
 
-    @unittest.skipUnless(os.environ.get("KEYBOOP_OPPORTUNITY_MODEL_REPORT"), "Нужен результат небольшого CPU-прогона")
+    @unittest.skipUnless(os.environ.get("SPEAKEY_OPPORTUNITY_MODEL_REPORT"), "Нужен результат небольшого CPU-прогона")
     def test_fixed_model_report(self):
         """Счётчики реальной policy сходятся с числом проверенных префиксов."""
-        data = json.loads(pathlib.Path(os.environ["KEYBOOP_OPPORTUNITY_MODEL_REPORT"]).read_text())
+        data = json.loads(pathlib.Path(os.environ["SPEAKEY_OPPORTUNITY_MODEL_REPORT"]).read_text())
         self.assertEqual(data["mode"], "fixed-model-counterfactual")
         self.assertEqual(data["fixedMinimumScore"], 0.95)
         self.assertEqual(data["fixedMinimumMargin"], 0.50)

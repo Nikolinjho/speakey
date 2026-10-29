@@ -16,26 +16,26 @@ def check(name, command, expected, *, cwd=root, env=None):
         raise SystemExit(f'FAIL: {name}: exit {result.returncode}, ожидался {expected}\n{result.stdout}\n{result.stderr}')
     print(f'PASS: {name}: exit {expected}')
 
-engine = (root / 'Sources/Keyboop/Engine.swift').read_text()
+engine = (root / 'Sources/Speakey/Engine.swift').read_text()
 handler = engine.split('func handleNeuralFixMarker(', 1)[1].split('private func neuralRequest()', 1)[0]
 for forbidden in ['handlePauseFixMarker(', 'lastRealKeyAt', 'AXScreenCheck', 'NSWorkspace', 'RightLayoutRuntimeFactory']:
     if forbidden in handler:
         raise SystemExit(f'FAIL: запрещённый вызов в нейромаркере: {forbidden}')
 print('PASS: Нейромаркер не использует паузный порог, AX и загрузчик модели')
-tap = (root / 'Sources/Keyboop/EventTap.swift').read_text()
+tap = (root / 'Sources/Speakey/EventTap.swift').read_text()
 if tap.index('handleNeuralFixMarker(') > tap.index('handlePauseFixMarker('):
     raise SystemExit('FAIL: нейромаркер должен поглощаться до прежней синтетики')
 print('PASS: Нейромаркер поглощается до паузного маркера')
 
-with tempfile.TemporaryDirectory(prefix='keyboop-baseline-contracts-') as temporary:
+with tempfile.TemporaryDirectory(prefix='speakey-baseline-contracts-') as temporary:
     work = Path(temporary)
     resources = work / 'resources'
     resources.mkdir()
-    for source in (root / 'Sources/Keyboop/Resources').glob('trigrams_*.json'):
+    for source in (root / 'Sources/Speakey/Resources').glob('trigrams_*.json'):
         shutil.copy2(source, resources)
     check('Отсутствующие файлы словарей отклоняются',
           ['bash', 'scripts/test-layout-detector.sh', 'baseline'], 1,
-          env={**os.environ, 'KEYBOOP_DATA_DIR': str(resources)})
+          env={**os.environ, 'SPEAKEY_DATA_DIR': str(resources)})
 
     project = work / 'project'
     (project / 'scripts').mkdir(parents=True)

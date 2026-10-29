@@ -5,12 +5,9 @@
 # Сборка и дистрибутивы (пересобираются)
 .build/
 build/
-Keyboop.app/
-Keyboop_local.app/
-Speakey.app/
+*.app/
 *.dmg
 *.delta
-sparkle-updates/            # 860 МБ старых сборок, и они же лежат на сервере
 
 # Чужой код (вендорится своими скриптами, 322 МБ)
 vendor/
@@ -48,5 +45,5 @@ node_modules/
 !vendor-patches/
 
 # RightLayout: воспроизводимые веса и скомпилированный ресурс
-/Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodel
-/Sources/Keyboop/Resources/RightLayout/LayoutClassifier.mlmodelc/
+/Sources/Speakey/Resources/RightLayout/LayoutClassifier.mlmodel
+/Sources/Speakey/Resources/RightLayout/LayoutClassifier.mlmodelc/
