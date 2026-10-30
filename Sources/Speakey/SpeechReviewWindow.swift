@@ -84,7 +84,7 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
         column.title = L10n.t("review.examples")
         table.addTableColumn(column)
         table.headerView = nil
-        table.rowHeight = 48
+        table.rowHeight = 66
         table.dataSource = self
         table.delegate = self
         table.allowsEmptySelection = true
@@ -180,7 +180,15 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
         date.timeStyle = .short
         let label = NSTextField(wrappingLabelWithString: "\(item.id.uuidString)\n\(date.string(from: item.modified))")
         label.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        return label
+        let badge = NSTextField(labelWithString: item.hasSavedCorrection
+            ? "✓ " + L10n.t("review.badgeSaved") : L10n.t("review.badgePending"))
+        badge.font = .systemFont(ofSize: 11, weight: .medium)
+        badge.textColor = item.hasSavedCorrection ? .systemGreen : .secondaryLabelColor
+        let row = NSStackView(views: [label, badge])
+        row.orientation = .vertical
+        row.alignment = .leading
+        row.spacing = 3
+        return row
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -236,7 +244,14 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
             silence.state = correction.silence ? .on : .off
         }
         status.stringValue = L10n.t(hasCorrection ? "review.saved" : "review.unconfirmed")
+        updateSavedBadge(id: document.snapshot.id, saved: hasCorrection)
         updateControls()
+    }
+
+    private func updateSavedBadge(id: UUID, saved: Bool) {
+        guard let index = items.firstIndex(where: { $0.id == id }) else { return }
+        items[index].hasSavedCorrection = saved
+        table.reloadData(forRowIndexes: IndexSet(integer: index), columnIndexes: IndexSet(integer: 0))
     }
 
     func textDidChange(_ notification: Notification) { markEdited() }
@@ -324,6 +339,7 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
                                                sessionID: sessionID, split: split.selectedItem!.representedObject as! String, silence: isSilence)
         performMutation(successKey: "review.saved") { [store] in try store.save(correction) } completion: { [weak self] in
             self?.hasCorrection = true
+            self?.updateSavedBadge(id: id, saved: true)
         }
     }
 
@@ -331,6 +347,7 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
         guard let id = selectedID, hasCorrection, !busy else { return }
         performMutation(successKey: "review.deleted") { [store] in try store.removeCorrection(id: id) } completion: { [weak self] in
             self?.hasCorrection = false
+            self?.updateSavedBadge(id: id, saved: false)
             self?.reference.string = ""
             self?.edited.string = ""
             self?.session.stringValue = ""

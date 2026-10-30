@@ -5,6 +5,7 @@ import Darwin
 struct SpeechReviewItem {
     let id: UUID
     let modified: Date
+    var hasSavedCorrection = false
 }
 
 struct SpeechReviewCorrection: Codable {
@@ -45,7 +46,11 @@ struct SpeechReviewStore {
     private static let maximumCiphertextBytes = 256 * 1024 * 1024
 
     func list() throws -> [SpeechReviewItem] {
-        try records(in: diagnosticsDirectory).sorted {
+        Self.lock.lock(); defer { Self.lock.unlock() }
+        let correctedIDs = Set(try records(in: correctionsDirectory).map(\.id))
+        return try records(in: diagnosticsDirectory).map { item in
+            SpeechReviewItem(id: item.id, modified: item.modified, hasSavedCorrection: correctedIDs.contains(item.id))
+        }.sorted {
             $0.modified == $1.modified ? $0.id.uuidString < $1.id.uuidString : $0.modified > $1.modified
         }
     }

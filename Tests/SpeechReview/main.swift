@@ -29,6 +29,7 @@ try check(store.load(id: trace.id).correction == nil, "Черновик не п�
 try check(store.audio(id: trace.id).suffix(snapshot.pcmFloat32LE.count) == snapshot.pcmFloat32LE, "WAV сохраняет PCM побайтно")
 let correction = SpeechReviewCorrection(id: trace.id, reference: "секретная расшифровка", editedText: "Отредактированный текст", sessionID: "session-1", split: "dev", silence: false)
 try store.save(correction)
+try check(listing.list().first(where: { $0.id == trace.id })?.hasSavedCorrection == true, "Сохранённая правка видна без расшифровки и доступа к ключу")
 try check(store.load(id: trace.id).correction?.reference == correction.reference, "Подтверждение читается после шифрования")
 let encrypted = try Data(contentsOf: corrections.appendingPathComponent(trace.id.uuidString + ".enc"))
 try check(!String(decoding: encrypted, as: UTF8.self).contains(correction.reference), "Открытый текст не сохраняется")
@@ -85,6 +86,7 @@ try check(store.load(id: second.id).correction != nil, "Эталон с исхо
 try check(store.exportConfirmed(to: root.appendingPathComponent("after-orphan-cleanup")) == 1, "После явной очистки экспорт работает")
 try check(cleanupWithoutKey.removeOrphanCorrections() == 0, "Повторная очистка ничего не удаляет")
 try store.removeCorrection(id: second.id)
+try check(listing.list().first(where: { $0.id == second.id })?.hasSavedCorrection == false, "Удалённая правка больше не помечена сохранённой")
 rejects("Пустой экспорт запрещён") { _ = try store.exportConfirmed(to: root.appendingPathComponent("empty")) }
 let symlink = root.appendingPathComponent("link")
 try FileManager.default.createSymbolicLink(at: symlink, withDestinationURL: diagnostics)

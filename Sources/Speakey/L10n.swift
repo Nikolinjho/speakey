@@ -1161,6 +1161,8 @@ enum L10n {
         "review.refresh": [.ru: "Обновить список", .en: "Refresh list"],
         "review.export": [.ru: "Экспортировать подтверждённые…", .en: "Export confirmed examples…"],
         "review.examples": [.ru: "Примеры", .en: "Examples"],
+        "review.badgeSaved": [.ru: "Правка сохранена", .en: "Correction saved"],
+        "review.badgePending": [.ru: "Без правки", .en: "No correction"],
         "review.play": [.ru: "Воспроизвести / остановить", .en: "Play / stop"],
         "review.raw": [.ru: "Исходный вывод движка (только чтение)", .en: "Raw engine output (read only)"],
         "review.reference": [.ru: "Дословный эталон", .en: "Verbatim reference"],
