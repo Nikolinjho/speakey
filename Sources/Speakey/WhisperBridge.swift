@@ -5,6 +5,7 @@ import Foundation
 /// Reference: vendor/whisper.cpp/include/whisper.h
 final class WhisperBridge {
     private var ctx: OpaquePointer?
+    private let diagnosticModel: String
 
     /// Сколько потоков отдавать whisper. Считается ОДИН раз: значение не меняется в течение сессии,
     /// а sysctl в горячем пути нам ни к чему.
@@ -28,6 +29,7 @@ final class WhisperBridge {
 
     /// Загружает модель ggml-*.bin. Возвращает nil, если файла нет / не та архитектура.
     init?(modelPath: String) {
+        diagnosticModel = URL(fileURLWithPath: modelPath).lastPathComponent
         guard FileManager.default.fileExists(atPath: modelPath) else { return nil }
         var cparams = whisper_context_default_params()
         cparams.use_gpu = true   // Metal на Apple Silicon
@@ -73,7 +75,8 @@ final class WhisperBridge {
 
     /// Транскрибировать аудио. language: "ru" / "en" / "auto".
     /// initialPrompt с примером пунктуации стабилизирует знаки.
-    func transcribe(samples: [Float], language: String) -> String {
+    func transcribe(samples: [Float], language: String, diagnostics: SpeechDiagnosticTrace? = nil) -> String {
+        diagnostics?.record("whisper_start", metadata: ["language": language, "model": diagnosticModel])
         guard let ctx, !samples.isEmpty else { return "" }
 
         var params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY)
@@ -198,6 +201,12 @@ final class WhisperBridge {
             params.carry_initial_prompt = true
         }
 
+        diagnostics?.record("whisper_configuration", text: prompt, metadata: [
+            "promptLanguage": promptLanguage, "threads": String(params.n_threads),
+            "audioContext": String(params.audio_ctx), "temperature": String(params.temperature),
+            "temperatureIncrement": String(params.temperature_inc), "noContext": String(params.no_context),
+            "noSpeechThreshold": String(params.no_speech_thold), "strategy": "greedy"
+        ])
         var out = ""
         // Время самого распознавания в лог: без него «медленно» и «быстро» остаются ощущениями.
         // Секундной точности системного времени в строке лога не хватает — вся расшифровка короткой
@@ -207,6 +216,7 @@ final class WhisperBridge {
             // n_samples = 0, когда мел уже посчитан выше: см. «Порядок вызовов» в начале функции.
             let rc = whisper_full(ctx, params, buf.baseAddress, melReady ? 0 : Int32(buf.count))
             let n = rc == 0 ? whisper_full_n_segments(ctx) : -1
+            diagnostics?.record("whisper_result", metadata: ["returnCode": String(rc), "segments": String(n)])
             guard rc == 0 else {
                 kbLog("whisper: rc=\(rc) segments=\(n) lang=\(language) samples=\(buf.count) за=\(Int((CFAbsoluteTimeGetCurrent() - t0) * 1000))мс")
                 return
@@ -245,7 +255,9 @@ final class WhisperBridge {
         // абзацы, шум, тишина, английский), ни в журнале с 11.07. Поэтому режем только то, чего
         // человек точно не скажет: весь блок фраз целиком или всю фразу словаря. Логика в
         // WhisperPrompt, её проверяет стенд stands/run-whisperecho.sh.
+        diagnostics?.record("whisper_raw", text: out)
         let (result, cut) = WhisperPrompt.stripEcho(out, prompt: prompt)
+        diagnostics?.record("whisper_echo_cleanup", text: result, metadata: ["removedBlocks": String(cut)])
         if cut > 0 { kbLog("whisper: срезано эхо initial_prompt (\(cut) кусков)") }
         return result
     }

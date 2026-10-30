@@ -128,7 +128,8 @@ final class ParakeetEngine {
     /// неразличимости: отзыв #161 от 21.08.2026, где CoreML на каждой диктовке падал по таймауту
     /// («E5RT: Submit Async failed … Encoder_main__Op8_Cast has timed out»), а человек девять часов
     /// видел только крутящееся «Распознаю» и пустоту после него.
-    func transcribe(samples: [Float], language: String) async -> String? {
+    func transcribe(samples: [Float], language: String, diagnostics: SpeechDiagnosticTrace? = nil) async -> String? {
+        diagnostics?.record("parakeet_start", metadata: ["language": language, "melChunkContext": "false"])
         // Проверить запасной путь, не имея сломанной машины под рукой: SPEAKEY_PARAKEET_FAIL=1
         // заставляет движок «отказать». Отказ здесь редкий и зависит от версии macOS, то есть
         // воспроизвести его на своей машине нельзя вовсе, а непроверенный запасной путь это ровно
@@ -144,8 +145,10 @@ final class ParakeetEngine {
             // «auto» и всё незнакомое → nil, то есть фильтр не включаем.
             let lang = Language(rawValue: language)
             let result = try await mgr.transcribe(samples, decoderState: &state, language: lang)
+            diagnostics?.record("parakeet_raw", text: result.text)
             return result.text
         } catch {
+            diagnostics?.record("parakeet_failure")
             kbLog("parakeet: ошибка транскрипции: \(error)")
             return nil
         }
@@ -251,7 +254,7 @@ final class ParakeetEngine {
     func waitForPendingLoad() async {}
     // Сигнатура обязана совпадать с arm64-версией: universal-сборка компилирует ОБЕ ветки,
     // и расхождение уронит именно x86-проход, то есть поддержку Intel.
-    func transcribe(samples: [Float], language: String) async -> String? { nil }
+    func transcribe(samples: [Float], language: String, diagnostics: SpeechDiagnosticTrace? = nil) async -> String? { nil }
     func download(progress: @escaping (Double) -> Void) async -> Bool {
         kbLog("parakeet: недоступен на Intel (нет Neural Engine)"); return false
     }

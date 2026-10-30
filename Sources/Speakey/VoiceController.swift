@@ -299,6 +299,10 @@ final class VoiceController {
         if streamingActive { streamEnd(); return }   // потоковый путь: финализируем стрим
         noteSendGesture()         // правый ⌘ в момент отпускания = «отправить» (задача 124)
         let samples = recorder.stop()
+        let diagnostics = SpeechDiagnostics.begin(samples: samples, configuration: [
+            "requestedEngine": settings.voiceEngine, "requestedWhisperModel": settings.voiceModel,
+            "scope": "batch-dictation", "appVersion": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown"
+        ])
         // Отсчёт «сколько человек ждал»: от отпускания клавиши до текста в поле. Время самого
         // whisper пишет WhisperBridge, но оно отвечает лишь за часть ожидания, а спрашивают всегда
         // про всё ожидание целиком.
@@ -306,6 +310,7 @@ final class VoiceController {
         VoiceGate.set(false)      // ЗАПИСЬ окончена → можно сразу начинать НОВУЮ (транскрипция идёт в фоне)
         playCue(stopSound)    // нисходящее «тук-тук» — запись остановлена (до транскрипции)
         let rms = samples.isEmpty ? 0 : (samples.map { $0 * $0 }.reduce(0, +) / Float(samples.count)).squareRoot()
+        diagnostics?.record("input_statistics", metadata: ["samples": String(samples.count), "rms": String(rms), "minimumRMS": "0.001", "minimumSeconds": "0.3"])
         kbLog("voice: \(samples.count) сэмплов, \(String(format: "%.1f", recorder.duration))с, RMS=\(String(format: "%.4f", rms))")
         // ⚠️ ПОМЕТКА «ТОЛЬКО В ИСТОРИЮ» ОБЯЗАНА СНИМАТЬСЯ НА КАЖДОМ ВЫХОДЕ ОТСЮДА (баг-репорт,
         // 03.08.2026, подтверждён логом трижды).
@@ -331,6 +336,7 @@ final class VoiceController {
 
         // Слишком короткое нажатие (< 0.3 c) — просто отмена, без шума.
         guard recorder.duration >= 0.3 else {
+            SpeechDiagnostics.finish(diagnostics, outcome: "rejected_short")
             dropPendingHistoryOnly()
             kbLog("voice: слишком коротко (\(String(format: "%.2f", recorder.duration))с) — отмена")
             recorder.releaseNow()   // отзыв #114: отброшенный подход не должен держать микрофон тёплым
@@ -338,6 +344,7 @@ final class VoiceController {
         }
         // Тишина (нет сигнала) — не зовём whisper (иначе галлюцинации «Продолжение следует»).
         guard rms > 0.001 else {
+            SpeechDiagnostics.finish(diagnostics, outcome: "rejected_silence")
             dropPendingHistoryOnly()
             kbLog("voice: тишина (RMS \(String(format: "%.4f", rms))) — пропуск (микрофон молчал — мог быть занят другим приложением)")
             recorder.releaseNow()   // то же, что и у слишком короткой: держать микрофон не за чем
@@ -356,7 +363,8 @@ final class VoiceController {
         // ГАРАНТИРОВАННО потерянной: текст распознавался и приходил, но его отбрасывали как поздний.
         // Воспроизводится не на старте (там греет preload), а при смене движка в настройках на ходу.
         let cold = useParakeet ? !ParakeetEngine.shared.ready : (whisper == nil)
-        let gen = beginTranscription(duration: recorder.duration, coldLoad: cold)
+        diagnostics?.record("decode_requested", metadata: ["language": lang, "engine": useParakeet ? "parakeet" : "whisper", "coldLoad": String(cold), "rms": String(rms)])
+        let gen = beginTranscription(duration: recorder.duration, coldLoad: cold, diagnostics: diagnostics)
         refreshIndicator()   // НЕ setState(.processing) напрямую: отменённую диктовку считаем молча
 
         // Диагностика «почему медленно»: сразу видно, на каком движке распознаём и почему НЕ Parakeet
@@ -367,11 +375,12 @@ final class VoiceController {
             Task { [weak self] in
                 guard let self else { return }
                 let ok = await ParakeetEngine.shared.loadIfNeeded()
+                diagnostics?.record("parakeet_load", metadata: ["ready": String(ok)])
                 // Язык передаём и в parakeet (03.08.2026). Раньше не передавали вовсе, и выбор
                 // языка в настройках для этого движка не делал НИЧЕГО. Он и сейчас не выбирает
                 // язык (модель этого не умеет), но включает фильтр по письменности — см. подробный
                 // комментарий в ParakeetEngine.transcribe.
-                let out = ok ? await ParakeetEngine.shared.transcribe(samples: samples, language: lang) : nil
+                let out = ok ? await ParakeetEngine.shared.transcribe(samples: samples, language: lang, diagnostics: diagnostics) : nil
                 var text = out ?? ""
                 kbLog("voice: parakeet(готов=\(ok), язык=\(lang)) → \(out.map { "\($0.count) симв." } ?? "ОТКАЗ")")
                 // ⚠️ ОТКАЗ ДВИЖКА → ДОКАНЧИВАЕМ ЗАПИСЬ ВТОРЫМ ДВИЖКОМ, А НЕ ОТДАЁМ ПУСТОТУ.
@@ -382,6 +391,7 @@ final class VoiceController {
                 // Настройку человека НЕ трогаем: движок остаётся выбранным, подменяем только эту
                 // попытку. Выбор движка это его решение, а не наше.
                 if out == nil {
+                    diagnostics?.record("fallback_requested", metadata: ["engine": "whisper"])
                     // ⚠️ ВТОРАЯ МОДЕЛЬ МОЖЕТ БЫТЬ ПРОСТО НЕ СКАЧАНА, и тогда «подмена» это та же
                     // тишина этажом ниже (замечание автора 21.08). Whisper весит от 466 МБ до 1.6 ГБ,
                     // тянуть их за человека без спроса нельзя: это его трафик и его диск.
@@ -390,7 +400,7 @@ final class VoiceController {
                             self.transcribeQueue.async { [weak self] in
                                 guard let self else { return c.resume(returning: "") }
                                 self.loadModelIfNeeded()
-                                let t = self.whisper?.transcribe(samples: samples, language: lang) ?? ""
+                                let t = self.whisper?.transcribe(samples: samples, language: lang, diagnostics: diagnostics) ?? ""
                                 kbLog("voice: parakeet отказал — доканчиваю whisper'ом, \(t.count) симв.")
                                 c.resume(returning: t)
                             }
@@ -413,8 +423,8 @@ final class VoiceController {
                 // мы уже платили на startRunning, см. AudioRecorder).
                 let clip = VoiceClips.save(samples: samples)
                 await MainActor.run {
-                    guard self.endTranscription(gen) else { clip.map { VoiceClips.delete($0.id) }; return }   // сторож уже бросил — поздний результат в топку
-                    self.deliver(text, historyOnly: self.historyOnlyGens.remove(gen) != nil, audio: clip?.id, wave: clip?.wave)
+                    guard self.endTranscription(gen) else { SpeechDiagnostics.finish(diagnostics, outcome: "late_result_discarded"); clip.map { VoiceClips.delete($0.id) }; return }   // сторож уже бросил — поздний результат в топку
+                    self.deliver(text, historyOnly: self.historyOnlyGens.remove(gen) != nil, audio: clip?.id, wave: clip?.wave, diagnostics: diagnostics)
                     self.refreshIndicator()
                     // Выгрузка после диктовки, если человек её включил. Без настройки это ещё и
                     // заводит таймер простоя для Whisper, если он понадобился как запасной движок:
@@ -428,12 +438,12 @@ final class VoiceController {
         transcribeQueue.async { [weak self] in
             guard let self else { return }
             let modelReady = self.whisper != nil
-            let text = self.whisper?.transcribe(samples: samples, language: lang) ?? ""
+            let text = self.whisper?.transcribe(samples: samples, language: lang, diagnostics: diagnostics) ?? ""
             kbLog("voice: whisper(модель=\(modelReady ? "ок" : "НЕТ"), \(lang)) → \(text.count) симв.")
             let clip = VoiceClips.save(samples: samples)   // фон, не главный поток (см. ветку parakeet)
             DispatchQueue.main.async {
-                guard self.endTranscription(gen) else { clip.map { VoiceClips.delete($0.id) }; return }   // сторож уже бросил — поздний результат в топку
-                self.deliver(text, historyOnly: self.historyOnlyGens.remove(gen) != nil, audio: clip?.id, wave: clip?.wave)
+                guard self.endTranscription(gen) else { SpeechDiagnostics.finish(diagnostics, outcome: "late_result_discarded"); clip.map { VoiceClips.delete($0.id) }; return }   // сторож уже бросил — поздний результат в топку
+                self.deliver(text, historyOnly: self.historyOnlyGens.remove(gen) != nil, audio: clip?.id, wave: clip?.wave, diagnostics: diagnostics)
                 self.refreshIndicator()
                 self.scheduleModelRelease()   // простаиваем → вернём ~1.5 ГБ системе
             }
@@ -444,7 +454,7 @@ final class VoiceController {
     /// не закрывался — пришлось перезагружать Мак). Инференс без таймаута = вечная плашка. По
     /// таймауту задачу БРОСАЕМ: счётчик/индикатор чинятся, поздний результат отбрасывается по
     /// генерации (гвард в completion), пользователю — честный тост вместо вечного «Распознаю».
-    private func beginTranscription(duration: Double, streaming: Bool = false, coldLoad: Bool = false) -> Int {
+    private func beginTranscription(duration: Double, streaming: Bool = false, coldLoad: Bool = false, diagnostics: SpeechDiagnosticTrace? = nil) -> Int {
         transcribing += 1
         transcribeGen += 1
         let gen = transcribeGen
@@ -453,6 +463,8 @@ final class VoiceController {
         if coldLoad { timeout += 60 }                    // +бюджет на холодную загрузку модели с диска
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
             guard let self, self.liveTranscriptions.remove(gen) != nil else { return }
+            diagnostics?.record("watchdog_timeout", metadata: ["timeoutSeconds": String(timeout)])
+            SpeechDiagnostics.finish(diagnostics, outcome: "timeout")
             self.transcribing -= 1
             self.historyOnlyGens.remove(gen)   // иначе пометка «молча» пережила бы саму расшифровку
             kbLog("voice: транскрипция №\(gen) висит >\(Int(timeout))с — бросаю (поздний результат отброшу)")
@@ -812,7 +824,7 @@ final class VoiceController {
     /// Когда закончилась запись. Нужно только для строки «ожидание=…мс» в логе.
     private var stopStamp: CFAbsoluteTime?
 
-    private func deliver(_ text: String, historyOnly: Bool = false, audio: String? = nil, wave: [UInt8]? = nil) {
+    private func deliver(_ text: String, historyOnly: Bool = false, audio: String? = nil, wave: [UInt8]? = nil, diagnostics: SpeechDiagnosticTrace? = nil) {
         // Фразы-призраки Whisper («Субтитры создавал…», «Продолжение следует») — отсекаем ДО всего
         // остального, чтобы они не попали ни в поле, ни в историю, ни в статистику. См. WhisperGhosts.
         //
@@ -820,12 +832,17 @@ final class VoiceController {
         // «кейбуп» уходил бы в историю, в статистику и в «скопировать последнюю диктовку» в сыром
         // виде, и человек, который взял текст из истории, всё равно правил бы его руками — то есть
         // ровно то, ради чего словарь и заведён (задача 126).
-        let clean = VoiceDictionary.shared.apply(
-            WhisperGhosts.clean(text).trimmingCharacters(in: .whitespacesAndNewlines))
+        let ghostClean = WhisperGhosts.clean(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        diagnostics?.record("ghost_cleanup", text: ghostClean)
+        let clean = VoiceDictionary.shared.apply(ghostClean)
+        diagnostics?.record("dictionary", text: clean)
+        var diagnosticOutcome = "empty"
+        defer { SpeechDiagnostics.finish(diagnostics, outcome: diagnosticOutcome) }
         // Диктовку отменили по Escape, но человек попросил её всё-таки сохранять (R37). В поле не
         // пишем ничего: Escape означает «не вставляй». Кладём в историю и говорим об этом тостом,
         // иначе сохранение выглядело бы как то, что программа проигнорировала отмену.
         if historyOnly {
+            diagnosticOutcome = "history_only"
             guard !clean.isEmpty else {
                 audio.map(VoiceClips.delete)   // текста нет — клипу не к чему прикрепляться
                 kbLog("voice: отменённая диктовка пустая — в историю нечего класть"); return
@@ -845,6 +862,7 @@ final class VoiceController {
         // Поле пароля/системный диалог украли фокус (инцидент 23.07.2026): печатать нельзя,
         // но распознанное НЕ теряем — история + честный тост вместо молчаливой пропажи.
         if !SecureInputPolicy.canWrite("диктовка \(clean.count) симв.") {
+            diagnosticOutcome = "secure_input_history_only"
             kbLog("voice: писать нельзя — не печатаю \(clean.count) симв., текст в истории")
             VoiceHistory.shared.add(clean, audio: audio, wave: wave)
             noteVoiceStats(clean)
@@ -876,6 +894,12 @@ final class VoiceController {
         let out = Self.applyOutputOptions(clean) + ((settings.voiceTrailingSpace && !autoEnter) ? " " : "")
         // См. второй post ниже по файлу: время НАЧАЛА вставки нужно получателю, чтобы отличить
         // «человек ещё ничего не печатал» от «человек уже набрал слово, пока мы печатали своё».
+        diagnostics?.record("output_options", text: out, metadata: [
+            "autoEnter": String(autoEnter), "trailingSpace": String(settings.voiceTrailingSpace),
+            "noFinalPeriod": String(settings.voiceNoFinalPeriod), "noCapital": String(settings.voiceNoCapital),
+            "noEmDash": String(settings.voiceNoEmDash), "autoEnterMods": String(settings.voiceAutoEnterMods)
+        ])
+        diagnosticOutcome = "insertion_requested"
         let insertT0 = ProcessInfo.processInfo.systemUptime
         TextReplacer.insert(out, thenReturn: autoEnter,
                             returnMods: CGEventFlags(rawValue: settings.voiceAutoEnterMods)) {
