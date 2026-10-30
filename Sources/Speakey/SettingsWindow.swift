@@ -3422,6 +3422,14 @@ final class DetailVC: NSViewController {
                 buttonRow([histShow, histClear])
             ]),
             group(2),
+            sectionTitle(L10n.t("voice.collectionTitle")),
+            card([
+                switchRow(L10n.t("voice.collection"), L10n.t("voice.collectionSub"), settings.speechCollectionEnabled,
+                          #selector(toggleSpeechCollection), help: L10n.t("voice.collectionHelp"), key: "voice.collection"),
+                hint(L10n.t("voice.collectionRetention")),
+                buttonRow([NSButton(title: L10n.t("voice.collectionDelete"), target: self, action: #selector(deleteSpeechCollection))])
+            ]),
+            group(2),
             hint(L10n.t("voice.foot"))
         ])
         return vstack(views)
@@ -4442,6 +4450,28 @@ final class DetailVC: NSViewController {
     }
     @objc private func toggleVoice(_ s: NSSwitch) { settings.voiceEnabled = (s.state == .on) }
     @objc private func voiceModeChanged(_ s: NSSegmentedControl) { settings.voiceHoldMode = s.selectedSegment == 1 ? "toggle" : "hold" }
+    @objc private func toggleSpeechCollection(_ sender: NSSwitch) {
+        settings.speechCollectionEnabled = sender.state == .on
+    }
+
+    @objc private func deleteSpeechCollection() {
+        let alert = NSAlert()
+        alert.messageText = L10n.t("voice.collectionDelete")
+        alert.informativeText = L10n.t("voice.collectionDeleteConfirm")
+        alert.addButton(withTitle: L10n.t("voice.collectionDelete"))
+        alert.addButton(withTitle: L10n.t("common.cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        SpeechDiagnostics.deleteCollected(policy: settings.speechCollectionPolicy) { [weak self] success in
+            guard let self else { return }
+            if !success {
+                let failure = NSAlert()
+                failure.messageText = L10n.t("voice.collectionDeleteFailed")
+                failure.runModal()
+            }
+            self.reshow()
+        }
+    }
+
     @objc private func toggleVoiceHistory(_ s: NSSwitch) {
         settings.voiceHistoryEnabled = (s.state == .on)
         // Без истории буфер не пишем. Зависимая строка живёт в «Общих» и перестроится при показе

@@ -3,8 +3,52 @@ import CryptoKit
 import Security
 import LocalAuthentication
 
+/// Согласие действует только для текущего поколения. Выключение отзывает незавершённые записи.
+final class SpeechCollectionPolicy {
+    static let preferenceKey = "speechCollectionEnabled"
+    private let defaults: UserDefaults
+    private let environmentEnabled: () -> Bool
+    private let lock = NSLock()
+    private var generation = UUID()
+
+    init(defaults: UserDefaults, environmentEnabled: @escaping () -> Bool = {
+        ProcessInfo.processInfo.environment["SPEAKEY_SPEECH_DIAGNOSTICS"] == "1"
+    }) {
+        self.defaults = defaults
+        self.environmentEnabled = environmentEnabled
+    }
+
+    private var allowed: Bool {
+        defaults.object(forKey: Self.preferenceKey) == nil ? environmentEnabled() : defaults.bool(forKey: Self.preferenceKey)
+    }
+
+    var enabled: Bool {
+        lock.lock(); defer { lock.unlock() }
+        return allowed
+    }
+
+    func setEnabled(_ enabled: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        generation = UUID()
+        defaults.set(enabled, forKey: Self.preferenceKey)
+    }
+
+    func captureGeneration() -> UUID? {
+        lock.lock(); defer { lock.unlock() }
+        return allowed ? generation : nil
+    }
+
+    @discardableResult
+    func performIfCurrent(_ token: UUID, _ action: () throws -> Void) rethrows -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard allowed, token == generation else { return false }
+        try action()
+        return true
+    }
+}
+
 /// Отдельная диагностическая запись: вход движка без потерь и приватные стадии обработки.
-/// Включается только переменной окружения SPEAKEY_SPEECH_DIAGNOSTICS=1 перед запуском.
+/// Сбор включается явно в настройках или переменной окружения до запуска.
 final class SpeechDiagnosticTrace: @unchecked Sendable {
     struct Event: Codable, Sendable {
         let stage: String
@@ -24,6 +68,7 @@ final class SpeechDiagnosticTrace: @unchecked Sendable {
         let outcome: String
     }
     let id = UUID()
+    let collectionGeneration: UUID?
     private let started = ProcessInfo.processInfo.systemUptime
     private let lock = NSLock()
     private let pcm: Data
@@ -31,7 +76,8 @@ final class SpeechDiagnosticTrace: @unchecked Sendable {
     private var events: [Event] = []
     private var finalized = false
 
-    init(samples: [Float], configuration: [String: String]) {
+    init(samples: [Float], configuration: [String: String], collectionGeneration: UUID? = nil) {
+        self.collectionGeneration = collectionGeneration
         self.configuration = configuration
         #if _endian(little)
         pcm = samples.withUnsafeBytes { Data($0) }
@@ -74,7 +120,11 @@ struct SpeechDiagnosticsStore {
     let enabled: Bool
     let keyProvider: () throws -> Data
 
-    func save(_ snapshot: SpeechDiagnosticTrace.Snapshot) throws -> URL? {
+    func save(_ snapshot: SpeechDiagnosticTrace.Snapshot,
+              authorizePublication: (_ publish: () throws -> Void) throws -> Bool = { publish in
+                  try publish()
+                  return true
+              }) throws -> URL? {
         guard enabled else { return nil }
         let key = try validatedKey()
         let plaintext = try JSONEncoder().encode(snapshot)
@@ -90,8 +140,12 @@ struct SpeechDiagnosticsStore {
         defer { try? FileManager.default.removeItem(at: staged) }
         try ciphertext.write(to: staged, options: [.atomic])
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: staged.path)
-        // Hard link публикует целый файл атомарно и отказывает, если UUID уже занят.
-        try FileManager.default.linkItem(at: staged, to: url)
+        // Согласие защищает только публикацию. Keychain, шифрование и запись временного
+        // файла выполняются до блокировки, а очистка старых записей — после неё.
+        guard try authorizePublication({
+            try FileManager.default.linkItem(at: staged, to: url)
+        }) else { return nil }
+        try prune()
         return url
     }
 
@@ -100,6 +154,37 @@ struct SpeechDiagnosticsStore {
         let box = try AES.GCM.SealedBox(combined: Data(contentsOf: url))
         let plaintext = try AES.GCM.open(box, using: key)
         return try JSONDecoder().decode(SpeechDiagnosticTrace.Snapshot.self, from: plaintext)
+    }
+
+    /// Только обычные файлы с каноническим UUID.enc. Симлинки и посторонние имена не трогаем.
+    private func records() throws -> [(url: URL, modified: Date)] {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        let directoryInfo = try directory.resourceValues(forKeys: [.isSymbolicLinkKey, .isDirectoryKey])
+        guard directoryInfo.isDirectory == true, directoryInfo.isSymbolicLink != true else { return [] }
+        return try FileManager.default.contentsOfDirectory(at: directory,
+            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey])
+            .compactMap { url in
+                guard url.pathExtension == "enc", let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent),
+                      id.uuidString == url.deletingPathExtension().lastPathComponent else { return nil }
+                let info = try url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey, .contentModificationDateKey])
+                guard info.isRegularFile == true, info.isSymbolicLink != true,
+                      let modified = info.contentModificationDate else { return nil }
+                return (url, modified)
+            }
+    }
+
+    func prune(now: Date = Date(), maximumRecords: Int = 200, maximumAge: TimeInterval = 7 * 86400) throws {
+        let entries = try records().sorted {
+            $0.modified == $1.modified ? $0.url.lastPathComponent < $1.url.lastPathComponent : $0.modified > $1.modified
+        }
+        for (index, entry) in entries.enumerated() where index >= maximumRecords || now.timeIntervalSince(entry.modified) > maximumAge {
+            try FileManager.default.removeItem(at: entry.url)
+        }
+    }
+
+    /// Удаляет собранные примеры, сохраняя ключ, чужие файлы и внешние экспорты.
+    func deleteRecords() throws {
+        for entry in try records() { try FileManager.default.removeItem(at: entry.url) }
     }
 
     private func validatedKey() throws -> SymmetricKey {
@@ -115,20 +200,38 @@ enum SpeechDiagnostics {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Speakey/speech-diagnostics", isDirectory: true)
     }
-    static var enabled: Bool { ProcessInfo.processInfo.environment["SPEAKEY_SPEECH_DIAGNOSTICS"] == "1" }
+    static var collectionPolicy = SpeechCollectionPolicy(defaults: .standard)
+    static var enabled: Bool { collectionPolicy.enabled }
 
     static func begin(samples: [Float], configuration: [String: String]) -> SpeechDiagnosticTrace? {
-        guard enabled else { return nil }
-        return SpeechDiagnosticTrace(samples: samples, configuration: configuration)
+        guard let generation = collectionPolicy.captureGeneration() else { return nil }
+        return SpeechDiagnosticTrace(samples: samples, configuration: configuration, collectionGeneration: generation)
     }
 
     static func finish(_ trace: SpeechDiagnosticTrace?, outcome: String) {
-        guard let snapshot = trace?.finalize(outcome: outcome) else { return }
+        guard let generation = trace?.collectionGeneration, let snapshot = trace?.finalize(outcome: outcome) else { return }
+        let policy = collectionPolicy
         queue.async {
-            let store = SpeechDiagnosticsStore(directory: directory, enabled: enabled, keyProvider: key)
-            // Ошибки не содержат приватного текста. Диктовка не зависит от записи диагностики.
-            do { _ = try store.save(snapshot) }
-            catch { NSLog("Speakey speech diagnostics: persistence failed (%@)", snapshot.id.uuidString) }
+            do {
+                guard policy.performIfCurrent(generation, {}) else { return }
+                let store = SpeechDiagnosticsStore(directory: directory, enabled: true, keyProvider: key)
+                _ = try store.save(snapshot, authorizePublication: { publish in
+                    try policy.performIfCurrent(generation, publish)
+                })
+            } catch { NSLog("Speakey speech diagnostics: persistence failed") }
+        }
+    }
+
+    static func deleteCollected(policy: SpeechCollectionPolicy, completion: @escaping (Bool) -> Void) {
+        policy.setEnabled(false)
+        // Изолированные настройки предпросмотра не управляют реальным каталогом.
+        guard policy === collectionPolicy else { completion(false); return }
+        queue.async {
+            do {
+                let store = SpeechDiagnosticsStore(directory: directory, enabled: false, keyProvider: key)
+                try store.deleteRecords()
+                DispatchQueue.main.async { completion(true) }
+            } catch { DispatchQueue.main.async { completion(false) } }
         }
     }
 

@@ -3,7 +3,10 @@ import AppKit
 // Явный локальный CLI завершается до AppDelegate, NSApplication, микрофона и настроек.
 if ProcessInfo.processInfo.environment["SPEAKEY_SPEECH_CLI"] == "1" {
     setenv("GGML_METAL_NO_RESIDENCY", "1", 1)
-    exit(SpeechEvaluationCLI.run(arguments: Array(CommandLine.arguments.dropFirst())))
+    Task {
+        exit(await SpeechEvaluationCLI.run(arguments: Array(CommandLine.arguments.dropFirst())))
+    }
+    dispatchMain()
 }
 
 // Проверочный процесс не запускает AppDelegate и не касается пользовательских настроек.

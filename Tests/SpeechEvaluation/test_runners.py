@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import stat
 import sys
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -39,8 +40,12 @@ class RunnerTests(unittest.TestCase):
     def fake(self, mode):
         script = '''#!{python}
 import hashlib,json,os,pathlib,sys,time
-args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
-assert sys.argv[1]=='transcribe'
+words=sys.argv[1:]
+is_qwen=words[:2]==['-m','Tools.SpeechEvaluation.qwen']
+if is_qwen: words=words[2:]
+sys.path.insert(0,os.getcwd())
+args=dict(zip(words[1::2],words[2::2]))
+assert words[0]=='transcribe'
 assert os.environ['SPEAKEY_SPEECH_CLI']=='1'
 assert os.environ.get('SPEAKEY_SPEECH_DIAGNOSTICS')!='1'
 mode={mode!r}
@@ -51,7 +56,8 @@ if mode=='fail':
 model=pathlib.Path(args['--model'])
 audio=pathlib.Path(args['--input'])
 result=dict(hypothesis='Верный текст',raw_hypothesis='Сырой текст',
-    model_sha256=hashlib.sha256(model.read_bytes()).hexdigest(),
+    model_sha256=hashlib.sha256(model.read_bytes()).hexdigest() if model.is_file() else '{digest}',
+    engine='qwen' if is_qwen else 'whisper',
     elapsed_seconds=0.1,model_load_seconds=0.02,language=args['--language'],
     input_wav_sha256=hashlib.sha256(audio.read_bytes()).hexdigest(),sample_count=1600,sample_rate=16000,
     config=dict(prompt_sha256='a'*64,recognition_hint='disabled_explicitly',strategy='greedy',entropyThreshold='2.4',decodeLanguage='ru'))
@@ -66,7 +72,7 @@ if mode=='changed_audio': audio.write_bytes(audio.read_bytes()+b'changed')
 if mode=='missing_config': del result['config']
 pathlib.Path(args['--output']).write_text(json.dumps(result))
 print('СЕКРЕТНЫЙ текст')
-'''.format(python=sys.executable,mode=mode)
+'''.format(python=sys.executable,mode=mode,digest=self.digest)
         self.executable.write_text(script)
         self.executable.chmod(0o700)
 
@@ -148,6 +154,42 @@ print('СЕКРЕТНЫЙ текст')
             return info
         with mock.patch.object(runners,'audio_info',side_effect=read_then_change):
             with self.assertRaises(runners.RunError): self.run_batch()
+        self.assertFalse(self.output.exists())
+
+    def test_хеш_parakeet_соответствует_каноническому_списку_загруженных_файлов(self):
+        model=self.root/'parakeet-tdt-0.6b-v3'
+        model.mkdir()
+        pairs=[]
+        for name in ['Preprocessor.mlmodelc','Encoder.mlmodelc','Decoder.mlmodelc','JointDecisionv3.mlmodelc']:
+            (model/name).mkdir()
+            (model/name/'model.bin').write_bytes(name.encode())
+            pairs.append([name+'/model.bin',hashlib.sha256(name.encode()).hexdigest()])
+        (model/'parakeet_vocab.json').write_bytes(b'{}')
+        pairs.append(['parakeet_vocab.json',hashlib.sha256(b'{}').hexdigest()])
+        expected=hashlib.sha256(json.dumps(sorted(pairs),ensure_ascii=False,separators=(',',':')).encode()).hexdigest()
+        self.assertEqual(runners.model_digest(model,'parakeet'),expected)
+        (model/'unused.txt').write_text('ignored')
+        self.assertEqual(runners.model_digest(model,'parakeet'),expected)
+        (model/'link').symlink_to(model/'unused.txt')
+        with self.assertRaises(runners.RunError): runners.model_digest(model,'parakeet')
+
+    def test_вызывает_qwen_отдельным_локальным_python_модулем(self):
+        from Tools.SpeechEvaluation import qwen
+        model=self.root/'qwen'
+        model.mkdir()
+        self.model=model
+        with mock.patch.object(runners,'model_digest',return_value=self.digest):
+            self.run_batch(engine='qwen')
+        protocol=json.loads((self.output/'run.json').read_text())
+        self.assertEqual(protocol['backend'],'speakey-qwen-cli')
+        self.assertEqual(protocol['backend_code_sha256'],hashlib.sha256(Path(qwen.__file__).read_bytes()).hexdigest())
+
+    def test_прямой_cli_qwen_ошибка_не_содержит_traceback(self):
+        result=subprocess.run([sys.executable,str(Path(runners.__file__).resolve()),str(self.manifest),
+            '--executable',str(self.executable),'--model',str(self.model),'--engine','qwen',
+            '--output',str(self.output)],capture_output=True,text=True)
+        self.assertEqual(result.returncode,1)
+        self.assertNotIn('Traceback',result.stderr)
         self.assertFalse(self.output.exists())
 
     def test_не_выдаёт_пустую_выборку_за_успех(self):

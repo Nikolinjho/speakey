@@ -58,6 +58,12 @@ final class AppSettings {
         set { override = newValue }
     }
     private let d: UserDefaults
+    let speechCollectionPolicy: SpeechCollectionPolicy
+
+    var speechCollectionEnabled: Bool {
+        get { speechCollectionPolicy.enabled }
+        set { speechCollectionPolicy.setEnabled(newValue) }
+    }
 
     var neuralLayoutMode: NeuralLayoutMode {
         get { NeuralLayoutModeSettings.read(d) }
@@ -83,6 +89,9 @@ final class AppSettings {
 
     init(defaults: UserDefaults = .standard) {
         d = defaults
+        speechCollectionPolicy = defaults === UserDefaults.standard
+            ? SpeechDiagnostics.collectionPolicy
+            : SpeechCollectionPolicy(defaults: defaults, environmentEnabled: { false })
         // ⌥⇧ по умолчанию (modifier-only: keyCode = -1).
         let defaultMods = Int(CGEventFlags.maskAlternate.rawValue | CGEventFlags.maskShift.rawValue)
         d.register(defaults: [

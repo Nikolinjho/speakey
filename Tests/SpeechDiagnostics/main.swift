@@ -7,6 +7,22 @@ func require(_ condition: @autoclosure () -> Bool, _ message: String) {
 func rejects(_ action: () throws -> Void) {
     do { try action(); fatalError("Ожидалась ошибка") } catch {}
 }
+let suiteName = "speech-policy-test-" + UUID().uuidString
+let isolatedDefaults = UserDefaults(suiteName: suiteName)!
+defer { isolatedDefaults.removePersistentDomain(forName: suiteName) }
+let policy = SpeechCollectionPolicy(defaults: isolatedDefaults, environmentEnabled: { false })
+SpeechDiagnostics.collectionPolicy = policy
+require(!policy.enabled && policy.captureGeneration() == nil, "Сбор должен быть выключен по умолчанию")
+policy.setEnabled(true)
+let firstConsent = policy.captureGeneration()!
+policy.setEnabled(false)
+require(!policy.performIfCurrent(firstConsent, { fatalError("Запись после выключения") }), "Старое согласие не отозвано")
+policy.setEnabled(true)
+require(!policy.performIfCurrent(firstConsent, { fatalError("Старое согласие после повторного включения") }), "Старая трасса ожила")
+policy.setEnabled(false)
+let envPolicy = SpeechCollectionPolicy(defaults: isolatedDefaults, environmentEnabled: { true })
+require(!envPolicy.enabled, "Явное выключение важнее переменной окружения")
+print("PASS: isolated OFF default, deliberate enable, revoke in-flight consent and no stale re-enable")
 let root = FileManager.default.temporaryDirectory.appendingPathComponent("speech-diagnostics-test-\(UUID())")
 defer { try? FileManager.default.removeItem(at: root) }
 let key = Data(repeating: 42, count: 32)
@@ -86,3 +102,95 @@ DispatchQueue.concurrentPerform(iterations: 100) { _ in
 }
 require(winners == 1, "Конкурентное завершение создало несколько записей")
 print("PASS: timeout retains input, late result cannot overwrite, concurrent finalization is one-shot")
+
+let retentionRoot = root.appendingPathComponent("retention")
+try FileManager.default.createDirectory(at: retentionRoot, withIntermediateDirectories: false)
+let retentionStore = SpeechDiagnosticsStore(directory: retentionRoot, enabled: true, keyProvider: { key })
+let now = Date()
+var retainedCandidates: [URL] = []
+for index in 0..<205 {
+    let candidate = retentionRoot.appendingPathComponent(UUID().uuidString + ".enc")
+    try encrypted.write(to: candidate)
+    try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-Double(index))], ofItemAtPath: candidate.path)
+    retainedCandidates.append(candidate)
+}
+let unrelated = retentionRoot.appendingPathComponent("notes.txt")
+try Data("unrelated".utf8).write(to: unrelated)
+let malformedName = retentionRoot.appendingPathComponent("not-a-uuid.enc")
+try encrypted.write(to: malformedName)
+let linked = retentionRoot.appendingPathComponent(UUID().uuidString + ".enc")
+try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: unrelated)
+let namedDirectory = retentionRoot.appendingPathComponent(UUID().uuidString + ".enc")
+try FileManager.default.createDirectory(at: namedDirectory, withIntermediateDirectories: false)
+try retentionStore.prune(now: now)
+require(retainedCandidates.filter { FileManager.default.fileExists(atPath: $0.path) }.count == 200, "Лимит записей не соблюдён")
+require(FileManager.default.fileExists(atPath: retainedCandidates[0].path), "Удалена новая запись")
+require(!FileManager.default.fileExists(atPath: retainedCandidates[204].path), "Не удалена старая лишняя запись")
+try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-8 * 86400)], ofItemAtPath: retainedCandidates[0].path)
+try retentionStore.prune(now: now)
+require(!FileManager.default.fileExists(atPath: retainedCandidates[0].path), "Запись старше 7 дней осталась")
+try retentionStore.deleteRecords()
+require(!retainedCandidates.contains { FileManager.default.fileExists(atPath: $0.path) }, "Собранные примеры не удалены")
+for url in [unrelated, malformedName, linked, namedDirectory] {
+    require(FileManager.default.fileExists(atPath: url.path), "Удалён посторонний файл, симлинк или каталог")
+}
+print("PASS: retention max200/7days, explicit deletion, unrelated files/symlinks/directories preserved")
+
+let envSuiteName = "speech-policy-env-test-" + UUID().uuidString
+let envDefaults = UserDefaults(suiteName: envSuiteName)!
+defer { envDefaults.removePersistentDomain(forName: envSuiteName) }
+let compatibleEnvironment = SpeechCollectionPolicy(defaults: envDefaults, environmentEnabled: { true })
+require(compatibleEnvironment.enabled, "Утрачена совместимость с явным opt-in окружения")
+compatibleEnvironment.setEnabled(false)
+require(!compatibleEnvironment.enabled, "UI не может выключить opt-in окружения")
+policy.setEnabled(true)
+let inFlight = SpeechDiagnostics.begin(samples: samples, configuration: [:])!
+let inFlightGeneration = inFlight.collectionGeneration!
+policy.setEnabled(false)
+policy.setEnabled(true)
+require(!policy.performIfCurrent(inFlightGeneration, { fatalError("Сохранена отозванная трасса") }), "Runtime сохранил устаревшее согласие")
+policy.setEnabled(false)
+print("PASS: environment compatibility, explicit UI OFF precedence and runtime begin consent revocation")
+
+let blockedRoot = root.appendingPathComponent("blocked-key-provider")
+let providerEntered = DispatchSemaphore(value: 0)
+let releaseProvider = DispatchSemaphore(value: 0)
+let savedFinished = DispatchSemaphore(value: 0)
+let offFinished = DispatchSemaphore(value: 0)
+let blockedStateLock = NSLock()
+var blockedSaveFailed = false
+var blockedSaveResult: URL?
+policy.setEnabled(true)
+let blockedGeneration = policy.captureGeneration()!
+let blockedSnapshot = SpeechDiagnosticTrace(samples: [0.25], configuration: [:]).snapshot(outcome: "test")
+DispatchQueue.global().async {
+    let blockedStore = SpeechDiagnosticsStore(directory: blockedRoot, enabled: true, keyProvider: {
+        providerEntered.signal()
+        releaseProvider.wait()
+        return key
+    })
+    do {
+        let result = try blockedStore.save(blockedSnapshot, authorizePublication: { publish in
+            try policy.performIfCurrent(blockedGeneration, publish)
+        })
+        blockedStateLock.lock(); blockedSaveResult = result; blockedStateLock.unlock()
+    } catch { blockedStateLock.lock(); blockedSaveFailed = true; blockedStateLock.unlock() }
+    savedFinished.signal()
+}
+require(providerEntered.wait(timeout: .now() + 5) == .success, "Синтетический провайдер не запущен")
+DispatchQueue.global().async {
+    policy.setEnabled(false)
+    require(!policy.enabled, "Выключение не применено")
+    offFinished.signal()
+}
+let responsiveOff = offFinished.wait(timeout: .now() + 2) == .success
+releaseProvider.signal()
+require(savedFinished.wait(timeout: .now() + 5) == .success, "Сохранение зависло после освобождения провайдера")
+require(responsiveOff, "Выключение ждёт Keychain или диск")
+blockedStateLock.lock()
+let revokedSaveClean = !blockedSaveFailed && blockedSaveResult == nil
+blockedStateLock.unlock()
+require(revokedSaveClean, "Отозванное согласие опубликовало запись или вызвало ошибку")
+let leftovers = try FileManager.default.contentsOfDirectory(atPath: blockedRoot.path)
+require(leftovers.isEmpty, "После отмены остался финальный или временный файл")
+print("PASS: OFF remains responsive during blocked key provider, revoked publication and temporary-file cleanup")

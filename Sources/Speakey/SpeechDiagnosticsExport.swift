@@ -135,6 +135,7 @@ enum SpeechFloatWAV {
 
 struct SpeechCLIArguments {
     let command: String
+    let engine: String
     let input: URL
     let output: URL
     let model: URL?
@@ -144,20 +145,23 @@ struct SpeechCLIArguments {
         guard let command = arguments.first, ["export", "transcribe"].contains(command), arguments.count % 2 == 1 else {
             throw SpeechDiagnosticsExport.Failure.invalidArguments
         }
-        let allowed: Set<String> = command == "export" ? ["--input", "--output"] : ["--input", "--output", "--model", "--language"]
+        let required: Set<String> = command == "export" ? ["--input", "--output"] : ["--input", "--output", "--model", "--language"]
+        let allowed = command == "export" ? required : required.union(["--engine"])
         var values: [String: String] = [:]
         for index in stride(from: 1, to: arguments.count, by: 2) {
             let name = arguments[index], value = arguments[index + 1]
             guard allowed.contains(name), values[name] == nil, !value.isEmpty else { throw SpeechDiagnosticsExport.Failure.invalidArguments }
             values[name] = value
         }
-        guard values.count == allowed.count, let input = values["--input"], let output = values["--output"] else {
+        guard required.isSubset(of: Set(values.keys)), let input = values["--input"], let output = values["--output"] else {
             throw SpeechDiagnosticsExport.Failure.invalidArguments
         }
         if command == "transcribe", !["ru", "en", "auto"].contains(values["--language"] ?? "") {
             throw SpeechDiagnosticsExport.Failure.invalidArguments
         }
-        return Self(command: command, input: URL(fileURLWithPath: input), output: URL(fileURLWithPath: output),
+        let engine = values["--engine"] ?? "whisper"
+        guard ["whisper", "parakeet"].contains(engine) else { throw SpeechDiagnosticsExport.Failure.invalidArguments }
+        return Self(command: command, engine: engine, input: URL(fileURLWithPath: input), output: URL(fileURLWithPath: output),
                     model: values["--model"].map { URL(fileURLWithPath: $0) }, language: values["--language"])
     }
 }

@@ -72,10 +72,10 @@
       "description": "**Цель:** Встроить подтверждённое улучшение и проверить его на реальном использовании без потери возможности отката.\n\n**Файлы:**\n- `Sources/Speakey/VoiceController.swift`\n- `Sources/Speakey/SettingsWindow.swift`\n- `Sources/Speakey/L10n.swift`\n- `Sources/Speakey/SpeechRecognitionEngine.swift`\n- `Tests/SpeechEvaluation/`\n- `docs/development/speech-quality-verification.md`\n\n**Критерии приёмки:**\n- [ ] Выбранная конфигурация имеет измеримый выигрыш на итоговых и новых записях, либо явно зафиксировано отсутствие оснований для замены.\n- [ ] Проверены рабочий офлайн-режим, отсутствие потерь/дублей при вставке и сохранение настроек/данных.\n\n**Проверка:** Регрессионные тесты, итоговый compare, подписанная проверочная сборка и отдельный журнал физического пилота.\n\n**Шаги:**\n- [ ] После фиксации параметров один раз открыть итоговую отложенную выборку. При пересмотре по её ошибкам создать новую независимую проверку, прежнюю считать выборкой настройки.\n- [ ] Сопоставить результат с исходным Turbo по словам, смысловым ошибкам, терминам, задержке и памяти. Отдельно описать неуспешные группы и статистическую неопределённость.\n- [ ] Встраивать выбранный движок через небольшой общий контракт. На первом этапе можно использовать изолированный локальный процесс, но измерить его запуск, упаковку и офлайн-работу. Не требовать от пользователя Python ради готового приложения.\n- [ ] Проверить реальную запись и вставку, короткие и длинные диктовки, отмену, повторные запросы, переключение языка/микрофона, сон и пробуждение. Поздний результат не должен попасть в другое поле.\n- [ ] Провести пилот нескольких дней с фиксацией исправлений на 1000 слов и времени ожидания. Эти физические сценарии требует выполнить Ника, агент не подменяет их синтетическими тестами.\n- [ ] Подготовить сборку с прежним сертификатом и установщиком с резервной копией. Установка – отдельное действие после обзора результатов. Итоговый отчёт содержит команды, manifest, агрегированные результаты, ограничения и способ возврата к Turbo.\n\n```json:metadata\n{\n  \"files\": [\n    \"Sources/Speakey/VoiceController.swift\",\n    \"Sources/Speakey/SettingsWindow.swift\",\n    \"Sources/Speakey/L10n.swift\",\n    \"Sources/Speakey/SpeechRecognitionEngine.swift\",\n    \"Tests/SpeechEvaluation/\",\n    \"docs/development/speech-quality-verification.md\"\n  ],\n  \"acceptanceCriteria\": [\n    \"Выбранная конфигурация имеет измеримый выигрыш на итоговых и новых записях, либо явно зафиксировано отсутствие оснований для замены.\",\n    \"Проверены рабочий офлайн-режим, отсутствие потерь/дублей при вставке и сохранение настроек/данных.\"\n  ],\n  \"verification\": \"Регрессионные тесты, итоговый compare, подписанная проверочная сборка и отдельный журнал физического пилота.\",\n  \"dependsOn\": [\n    7\n  ]\n}\n```\n"
     }
   ],
-  "lastUpdated": "2026-10-30T16:09:22.387096+03:00",
+  "lastUpdated": "2026-10-30T17:33:45.983076+03:00",
   "execution": {
     "branch": "feat/local-speech-quality",
-    "scope": "diagnostics and evaluation foundations",
+    "scope": "local evaluation adapters, consent controls and confirmed corpus tooling",
     "corpus_available": false,
     "model_benchmark_performed": false,
     "parallel_work": [
@@ -89,28 +89,39 @@
       "CLI evaluating precomputed hypotheses",
       "read-only encrypted diagnostic export with draft manifest",
       "Float32 and integer WAV validation",
-      "isolated local Whisper corpus runner with reproducibility hashes"
+      "isolated local Whisper corpus runner with reproducibility hashes",
+      "UI opt-in diagnostics with generation revocation, max200/7days retention and deletion",
+      "explicit human correction confirmation with atomic private publication",
+      "isolated local Parakeet v3 int8 runner with loaded-component hashes",
+      "optional pinned Qwen3-ASR 1.7B MLX provisioning and offline local runner"
     ],
     "reviews": {
       "metrics": "spec and code quality approved after CER fix",
       "dataset": "spec and code quality approved after leakage and numeric fixes",
-      "diagnostics": "spec and final integration approved"
+      "diagnostics": "spec and final integration approved",
+      "collection_controls": "spec and quality approved after lock responsiveness fix",
+      "runner_and_corrections": "spec and quality approved after atomic publication fix",
+      "parakeet": "spec and quality approved; linked basename contract corrected and actual smoke passed",
+      "qwen": "spec and quality approved after immutable upstream byte pin fix"
     },
     "verification": {
-      "python_evaluation": "56 tests OK",
-      "swift_diagnostics": "5 PASS groups",
+      "python_evaluation": "80 tests OK",
+      "swift_diagnostics": "9 PASS groups",
       "existing_installation": "13 tests OK",
       "existing_signing": "12 tests OK",
       "existing_offline": "6 checks 0 errors",
-      "swift_export": "7 PASS groups",
+      "swift_export": "11 PASS groups",
       "staged_signed_build": "exit 0; strict signature passed",
-      "actual_turbo_smoke": "2 synthetic clips processed; silence hallucination recorded"
+      "actual_turbo_smoke": "2 synthetic clips processed; silence hallucination recorded",
+      "actual_parakeet_smoke": "2 synthetic clips processed; empty silence output",
+      "actual_qwen_smoke": "2 synthetic clips processed; silence false positive recorded"
     },
     "remaining_prerequisites": [
       "user-enabled collection and confirmed personal corpus",
       "complete production configuration replay including dictionary",
-      "alternate model adapters and measured personal baseline",
-      "retention controls"
+      "measured personal baseline and model comparisons",
+      "in-app correction review and verified personalization",
+      "local training feasibility and physical pilot"
     ],
     "real_keychain_tested": false,
     "installed_app_changed": false,
@@ -119,6 +130,22 @@
       "speech_words_correct": true,
       "silence_false_positives": 1,
       "report": "docs/development/speech-replay-smoke.md"
+    },
+    "synthetic_model_comparison": {
+      "samples_per_engine": 2,
+      "engines": [
+        "whisper",
+        "parakeet",
+        "qwen"
+      ],
+      "all_speech_words_correct": true,
+      "silence_false_positives": {
+        "whisper": 1,
+        "parakeet": 0,
+        "qwen": 1
+      },
+      "report": "docs/development/speech-local-models-smoke.md",
+      "personal_quality_measured": false
     }
   }
 }

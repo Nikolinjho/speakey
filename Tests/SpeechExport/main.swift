@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Darwin
 
 // Дубль только транспортного контракта: настоящая модель не загружается.
 final class WhisperBridge {
@@ -17,8 +18,8 @@ final class WhisperBridge {
     }
 }
 
-func check(_ condition: @autoclosure () -> Bool, _ name: String) {
-    if !condition() { fatalError(name) }
+func check(_ condition: Bool, _ name: String) {
+    if !condition { fatalError(name) }
 }
 func rejects(_ name: String, _ body: () throws -> Void) {
     do { try body(); fatalError(name) } catch { }
@@ -68,19 +69,19 @@ try Data("synthetic model, not inference".utf8).write(to: fakeModel)
 let replay = root.appendingPathComponent("replay.json")
 let replayArgs = ["transcribe", "--input", output.appendingPathComponent("audio.wav").path,
                   "--model", fakeModel.path, "--language", "auto", "--output", replay.path]
-check(SpeechEvaluationCLI.run(arguments: replayArgs) == 0, "CLI синтетически вызывает мост")
+check(await SpeechEvaluationCLI.run(arguments: replayArgs) == 0, "CLI синтетически вызывает мост")
 let replayData = try Data(contentsOf: replay)
 let replayDoc = try JSONSerialization.jsonObject(with: replayData) as! [String: Any]
 check(replayDoc["hypothesis"] as? String == "Результат", "Итоговая гипотеза")
 check(replayDoc["raw_hypothesis"] as? String == "Сырой результат", "Сырой вывод отдельно")
 check(replayDoc["model_sha256"] as? String == SHA256.hash(data: Data("synthetic model, not inference".utf8)).map { String(format: "%02x", $0) }.joined(), "Хеш локальной модели")
 check(!String(decoding: replayData, as: UTF8.self).contains("private prompt sentinel"), "Промпт не раскрывается в метаданных")
-check(SpeechEvaluationCLI.run(arguments: replayArgs) == 1 && WhisperBridge.calls == 1, "Существующий вывод отклоняется до распознавания")
+check(await SpeechEvaluationCLI.run(arguments: replayArgs) == 1 && WhisperBridge.calls == 1, "Существующий вывод отклоняется до распознавания")
 WhisperBridge.fail = true
 let failedReplay = root.appendingPathComponent("failed.json")
 var failedArgs = replayArgs
 failedArgs[failedArgs.count - 1] = failedReplay.path
-check(SpeechEvaluationCLI.run(arguments: failedArgs) == 1, "Ошибка whisper не становится пустой гипотезой")
+check(await SpeechEvaluationCLI.run(arguments: failedArgs) == 1, "Ошибка whisper не становится пустой гипотезой")
 check(!FileManager.default.fileExists(atPath: failedReplay.path), "Нет частичного результата при ошибке распознавания")
 print("PASS: synthetic CLI bridge contract, local model hash, raw/final hypotheses, prompt hash privacy and inference failure (stub, not model inference)")
 
@@ -159,7 +160,7 @@ var oversizedArgs = replayArgs
 oversizedArgs[2] = oversizedFile.path
 oversizedArgs[oversizedArgs.count - 1] = root.appendingPathComponent("oversized-result.json").path
 let callsBeforeOversized = WhisperBridge.calls
-check(SpeechEvaluationCLI.run(arguments: oversizedArgs) == 1 && WhisperBridge.calls == callsBeforeOversized,
+check(await SpeechEvaluationCLI.run(arguments: oversizedArgs) == 1 && WhisperBridge.calls == callsBeforeOversized,
       "Большой разреженный WAV отклоняется до загрузки модели и чтения файла")
 check(replayDoc["config_sha256_format"] as? String == "sorted-compact-utf8-v1", "Формат хеша конфигурации")
 print("PASS: bounded WAV file size before read/model load and oversized chunk rejection")
@@ -170,3 +171,102 @@ check(String(decoding: mixedCaseCanonical, as: UTF8.self) == #"{"noContext":"tru
       "Ключи конфигурации сортируются лексикографически с учётом регистра как в Python")
 check(SHA256.hash(data: mixedCaseCanonical).map { String(format: "%02x", $0) }.joined() == "be5c7af108b8fd7c05caf0c8b7739eef0bb8035341030be24b333079812c0d36", "Совпадает с контрольным SHA256 Python json.dumps")
 print("PASS: mixed-case and underscore configuration canonicalization matches Python SHA256")
+
+let parakeetOptions = try SpeechCLIArguments.parse(["transcribe", "--engine", "parakeet", "--input", "a.wav", "--model", "local-dir", "--language", "ru", "--output", "p.json"])
+check(parakeetOptions.engine == "parakeet", "Явный локальный движок Parakeet")
+check(parsed.engine == "whisper", "Старые вызовы по умолчанию используют Whisper")
+rejects("Неизвестный движок") {
+    _ = try SpeechCLIArguments.parse(["transcribe", "--engine", "remote", "--input", "a.wav", "--model", "m", "--language", "ru", "--output", "p.json"])
+}
+
+let parakeetDirectory = root.appendingPathComponent("parakeet-tdt-0.6b-v3")
+try FileManager.default.createDirectory(at: parakeetDirectory, withIntermediateDirectories: false)
+for component in ["Preprocessor.mlmodelc", "Encoder.mlmodelc", "Decoder.mlmodelc", "JointDecisionv3.mlmodelc"] {
+    let bundle = parakeetDirectory.appendingPathComponent(component)
+    try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: false)
+    try Data(component.utf8).write(to: bundle.appendingPathComponent("coremldata.bin"))
+}
+try Data("{}".utf8).write(to: parakeetDirectory.appendingPathComponent("parakeet_vocab.json"))
+let firstManifest = try SpeechParakeetEvaluation.modelManifest(directory: parakeetDirectory)
+try Data("unused".utf8).write(to: parakeetDirectory.appendingPathComponent("unused.txt"))
+check(try SpeechParakeetEvaluation.modelManifest(directory: parakeetDirectory) == firstManifest, "Хеш учитывает только загружаемые компоненты")
+let link = parakeetDirectory.appendingPathComponent("unused-link")
+try FileManager.default.createSymbolicLink(at: link, withDestinationURL: encrypted)
+rejects("Симлинки запрещены даже вне загружаемых компонентов") { _ = try SpeechParakeetEvaluation.modelManifest(directory: parakeetDirectory) }
+try FileManager.default.removeItem(at: link)
+let parakeetReplay = try await SpeechParakeetEvaluation.transcribe(samples: samples, language: "ru", directory: parakeetDirectory, load: { _ in
+    SpeechParakeetEvaluation.Loaded(configuration: ["synthetic": "true"], transcribe: { input, language in
+        check(input.map(\.bitPattern) == samples.map(\.bitPattern), "Parakeet получает точный Float32")
+        check(language == "ru", "Язык передан фильтру письменности")
+        return "Сырой результат Parakeet"
+    })
+})
+check(parakeetReplay.hypothesis == "Сырой результат Parakeet", "Сырой результат без фильтров приложения")
+var mutationRejected = false
+var mutatedDecodeCalled = false
+do {
+    _ = try await SpeechParakeetEvaluation.transcribe(samples: samples, language: "auto", directory: parakeetDirectory, load: { directory in
+        try Data("changed".utf8).write(to: directory.appendingPathComponent("parakeet_vocab.json"))
+        return SpeechParakeetEvaluation.Loaded(configuration: [:], transcribe: { _, _ in
+            mutatedDecodeCalled = true
+            return "wrong"
+        })
+    })
+} catch { mutationRejected = true }
+check(mutationRejected && !mutatedDecodeCalled, "Изменение модели при загрузке останавливает декодирование")
+print("PASS: Parakeet loaded-component manifest, no symlinks, exact audio/language and model mutation rejection (synthetic loader)")
+
+try Data("{}".utf8).write(to: parakeetDirectory.appendingPathComponent("parakeet_vocab.json"))
+let parakeetOutput = root.appendingPathComponent("parakeet-result.json")
+let parakeetArgs = ["transcribe", "--engine", "parakeet", "--input", output.appendingPathComponent("audio.wav").path,
+                   "--model", parakeetDirectory.path, "--language", "auto", "--output", parakeetOutput.path]
+let parakeetStatus = await SpeechEvaluationCLI.run(arguments: parakeetArgs, parakeetLoad: { _ in
+    SpeechParakeetEvaluation.Loaded(configuration: ["melChunkContext": "false"], transcribe: { _, language in
+        check(language == "auto", "CLI сохраняет режим отключённого фильтра")
+        return "Текст локального Parakeet"
+    })
+})
+check(parakeetStatus == 0, "CLI умеет локальный Parakeet без микрофона")
+let parakeetDocument = try JSONSerialization.jsonObject(with: Data(contentsOf: parakeetOutput)) as! [String: Any]
+check(parakeetDocument["engine"] as? String == "parakeet", "Движок записан явно")
+check(parakeetDocument["raw_hypothesis"] as? String == parakeetDocument["hypothesis"] as? String, "Сырой результат без скрытых исправлений")
+check((parakeetDocument["config"] as! [String: String])["prompt_sha256"] == SHA256.hash(data: Data()).map { String(format: "%02x", $0) }.joined(), "У Parakeet нет затравки")
+print("PASS: async Parakeet CLI output/config contract (synthetic loader)")
+
+check(SHA256.hash(data: firstManifest).map { String(format: "%02x", $0) }.joined() == "1f816d3f3dcc89160e48b332b846718195a02848c20c295f82ab8240593328f8", "Манифест модели совпадает с эталоном Python")
+rejects("Иное имя каталога не перенаправляет загрузку к соседней модели") { _ = try SpeechParakeetEvaluation.modelManifest(directory: root) }
+let special = parakeetDirectory.appendingPathComponent("unused.fifo")
+check(mkfifo(special.path, 0o600) == 0, "Создан синтетический FIFO")
+rejects("Специальные файлы запрещены даже вне компонентов") { _ = try SpeechParakeetEvaluation.modelManifest(directory: parakeetDirectory) }
+try FileManager.default.removeItem(at: special)
+let nonASCII = parakeetDirectory.appendingPathComponent("не-ASCII")
+try Data().write(to: nonASCII)
+rejects("Не-ASCII пути не имеют неоднозначного порядка сортировки") { _ = try SpeechParakeetEvaluation.modelManifest(directory: parakeetDirectory) }
+try FileManager.default.removeItem(at: nonASCII)
+var inferenceMutationRejected = false
+do {
+    _ = try await SpeechParakeetEvaluation.transcribe(samples: samples, language: "en", directory: parakeetDirectory, load: { directory in
+        SpeechParakeetEvaluation.Loaded(configuration: [:], transcribe: { _, _ in
+            try Data("changed-during-inference".utf8).write(to: directory.appendingPathComponent("parakeet_vocab.json"))
+            return "unverified"
+        })
+    })
+} catch { inferenceMutationRejected = true }
+check(inferenceMutationRejected, "Изменение модели во время декодирования не публикуется")
+try Data("{}".utf8).write(to: parakeetDirectory.appendingPathComponent("parakeet_vocab.json"))
+var unavailableArgs = parakeetArgs
+unavailableArgs[unavailableArgs.count - 1] = root.appendingPathComponent("unavailable-parakeet.json").path
+let whisperCalls = WhisperBridge.calls
+let unavailableStatus = await SpeechEvaluationCLI.run(arguments: unavailableArgs)
+check(unavailableStatus == 1 && WhisperBridge.calls == whisperCalls, "Недоступный Parakeet не заменяется Whisper")
+check(!FileManager.default.fileExists(atPath: unavailableArgs.last!), "При отказе нет частичного результата")
+let missing = parakeetDirectory.appendingPathComponent("Decoder.mlmodelc/coremldata.bin")
+try FileManager.default.removeItem(at: missing)
+rejects("Неполная модель отклоняется локально") { _ = try SpeechParakeetEvaluation.modelManifest(directory: parakeetDirectory) }
+print("PASS: Python model manifest parity, wrong directory, special/nonASCII files, incomplete model, inference mutation and no fallback")
+check(SpeechParakeetEvaluation.directoryName == "parakeet-tdt-0.6b-v3", "Каталог FluidAudio использует folderName без суффикса coreml")
+
+let obsoleteDirectory = root.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml")
+try FileManager.default.createDirectory(at: obsoleteDirectory, withIntermediateDirectories: false)
+rejects("Имя репозитория не подменяет реальный folderName загрузчика") { _ = try SpeechParakeetEvaluation.modelManifest(directory: obsoleteDirectory) }
+print("PASS: linked FluidAudio cache basename contract and obsolete repo-name rejection")
