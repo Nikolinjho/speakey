@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import sys
+import struct
 import tempfile
 import unittest
 import wave
@@ -43,6 +44,26 @@ class DatasetTests(unittest.TestCase):
 
     def test_принимает_подтвержденную_тишину(self):
         self.assertEqual(len(self.validate([self.row(reference='', kind='silence')])), 1)
+
+    def test_принимает_float32_экспорт_и_находит_его_дубли(self):
+        row = self.row()
+        payload = struct.pack('<ff', -0.0, 0.5)
+        fmt = struct.pack('<HHIIHH', 3, 1, 16000, 64000, 4, 32)
+        body = b'WAVEfmt ' + struct.pack('<I', len(fmt)) + fmt
+        body += b'data' + struct.pack('<I', len(payload)) + payload
+        (self.root / row['audio']).write_bytes(b'RIFF' + struct.pack('<I', len(body)) + body)
+        result = self.validate([row])
+        self.assertEqual(result[0]['duration_seconds'], 2 / 16000)
+        second = dict(row, id='two', reference='Другой текст', session_id='second', split='test')
+        with self.assertRaisesRegex(dataset.ValidationError, 'Утечка audio'):
+            self.validate([row, second])
+
+    def test_ошибка_аудио_не_раскрывает_путь(self):
+        row = self.row(audio='private-secret-name.wav')
+        with self.assertRaises(dataset.ValidationError) as caught:
+            self.validate([row])
+        self.assertNotIn(row['audio'], str(caught.exception))
+        self.assertNotIn(str(self.root), str(caught.exception))
 
     def test_отклоняет_неподтвержденную_расшифровку(self):
         with self.assertRaisesRegex(dataset.ValidationError, 'reference_confirmed'):

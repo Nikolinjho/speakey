@@ -134,27 +134,36 @@ enum SpeechDiagnostics {
 
     /// Ключ диагностики не связан с историей. Ошибка доступа никогда не перевыпускает ключ.
     /// Запрос запрещает диалог и не меняет глобальные настройки Security.framework.
-    private static func key() throws -> Data {
+    private static func keyQuery() -> [String: Any] {
         let context = LAContext()
         context.interactionNotAllowed = true
-        let query: [String: Any] = [
+        return [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: (Bundle.main.bundleIdentifier ?? "dev.speakey.app") + ".speechdiagnostics",
             kSecAttrAccount as String: "diagnostics-aes256",
             kSecUseAuthenticationContext as String: context
         ]
-        func read() throws -> Data? {
-            var request = query
-            request[kSecReturnData as String] = true
-            request[kSecMatchLimit as String] = kSecMatchLimitOne
-            var item: CFTypeRef?
-            let status = SecItemCopyMatching(request as CFDictionary, &item)
-            if status == errSecItemNotFound { return nil }
-            guard status == errSecSuccess else { throw SpeechDiagnosticsStore.Failure.keychain(status) }
-            guard let data = item as? Data, data.count == 32 else { throw SpeechDiagnosticsStore.Failure.invalidKey }
-            return data
-        }
-        return try SpeechDiagnosticsKey.resolve(read: read, create: { generated in
+    }
+
+    private static func readExistingKey() throws -> Data? {
+        var request = keyQuery()
+        request[kSecReturnData as String] = true
+        request[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(request as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else { throw SpeechDiagnosticsStore.Failure.keychain(status) }
+        guard let data = item as? Data, data.count == 32 else { throw SpeechDiagnosticsStore.Failure.invalidKey }
+        return data
+    }
+
+    static func existingKeyForExport() throws -> Data {
+        try SpeechDiagnosticsKey.requireExisting(read: readExistingKey)
+    }
+
+    private static func key() throws -> Data {
+        let query = keyQuery()
+        return try SpeechDiagnosticsKey.resolve(read: readExistingKey, create: { generated in
             var add = query
             add[kSecValueData as String] = generated
             add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
@@ -173,6 +182,12 @@ enum SpeechDiagnostics {
 
 /// Жизненный цикл ключа отделён от Keychain API для проверок без доступа к связке.
 enum SpeechDiagnosticsKey {
+    static func requireExisting(read: () throws -> Data?) throws -> Data {
+        guard let data = try read() else { throw SpeechDiagnosticsStore.Failure.missingExistingKey }
+        guard data.count == 32 else { throw SpeechDiagnosticsStore.Failure.invalidKey }
+        return data
+    }
+
     static func resolve(read: () throws -> Data?, create: (Data) throws -> Bool,
                         hasRecords: () throws -> Bool) throws -> Data {
         if let existing = try read() {

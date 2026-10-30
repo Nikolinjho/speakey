@@ -72,7 +72,7 @@
       "description": "**Цель:** Встроить подтверждённое улучшение и проверить его на реальном использовании без потери возможности отката.\n\n**Файлы:**\n- `Sources/Speakey/VoiceController.swift`\n- `Sources/Speakey/SettingsWindow.swift`\n- `Sources/Speakey/L10n.swift`\n- `Sources/Speakey/SpeechRecognitionEngine.swift`\n- `Tests/SpeechEvaluation/`\n- `docs/development/speech-quality-verification.md`\n\n**Критерии приёмки:**\n- [ ] Выбранная конфигурация имеет измеримый выигрыш на итоговых и новых записях, либо явно зафиксировано отсутствие оснований для замены.\n- [ ] Проверены рабочий офлайн-режим, отсутствие потерь/дублей при вставке и сохранение настроек/данных.\n\n**Проверка:** Регрессионные тесты, итоговый compare, подписанная проверочная сборка и отдельный журнал физического пилота.\n\n**Шаги:**\n- [ ] После фиксации параметров один раз открыть итоговую отложенную выборку. При пересмотре по её ошибкам создать новую независимую проверку, прежнюю считать выборкой настройки.\n- [ ] Сопоставить результат с исходным Turbo по словам, смысловым ошибкам, терминам, задержке и памяти. Отдельно описать неуспешные группы и статистическую неопределённость.\n- [ ] Встраивать выбранный движок через небольшой общий контракт. На первом этапе можно использовать изолированный локальный процесс, но измерить его запуск, упаковку и офлайн-работу. Не требовать от пользователя Python ради готового приложения.\n- [ ] Проверить реальную запись и вставку, короткие и длинные диктовки, отмену, повторные запросы, переключение языка/микрофона, сон и пробуждение. Поздний результат не должен попасть в другое поле.\n- [ ] Провести пилот нескольких дней с фиксацией исправлений на 1000 слов и времени ожидания. Эти физические сценарии требует выполнить Ника, агент не подменяет их синтетическими тестами.\n- [ ] Подготовить сборку с прежним сертификатом и установщиком с резервной копией. Установка – отдельное действие после обзора результатов. Итоговый отчёт содержит команды, manifest, агрегированные результаты, ограничения и способ возврата к Turbo.\n\n```json:metadata\n{\n  \"files\": [\n    \"Sources/Speakey/VoiceController.swift\",\n    \"Sources/Speakey/SettingsWindow.swift\",\n    \"Sources/Speakey/L10n.swift\",\n    \"Sources/Speakey/SpeechRecognitionEngine.swift\",\n    \"Tests/SpeechEvaluation/\",\n    \"docs/development/speech-quality-verification.md\"\n  ],\n  \"acceptanceCriteria\": [\n    \"Выбранная конфигурация имеет измеримый выигрыш на итоговых и новых записях, либо явно зафиксировано отсутствие оснований для замены.\",\n    \"Проверены рабочий офлайн-режим, отсутствие потерь/дублей при вставке и сохранение настроек/данных.\"\n  ],\n  \"verification\": \"Регрессионные тесты, итоговый compare, подписанная проверочная сборка и отдельный журнал физического пилота.\",\n  \"dependsOn\": [\n    7\n  ]\n}\n```\n"
     }
   ],
-  "lastUpdated": "2026-10-30T15:48:51.522633+03:00",
+  "lastUpdated": "2026-10-30T16:09:22.387096+03:00",
   "execution": {
     "branch": "feat/local-speech-quality",
     "scope": "diagnostics and evaluation foundations",
@@ -86,7 +86,10 @@
     "implemented": [
       "batch-only encrypted opt-in input/stage tracing and watchdog evidence",
       "stdlib lexical metrics and dataset validator",
-      "CLI evaluating precomputed hypotheses"
+      "CLI evaluating precomputed hypotheses",
+      "read-only encrypted diagnostic export with draft manifest",
+      "Float32 and integer WAV validation",
+      "isolated local Whisper corpus runner with reproducibility hashes"
     ],
     "reviews": {
       "metrics": "spec and code quality approved after CER fix",
@@ -94,19 +97,28 @@
       "diagnostics": "spec and final integration approved"
     },
     "verification": {
-      "python_evaluation": "33 tests OK",
+      "python_evaluation": "56 tests OK",
       "swift_diagnostics": "5 PASS groups",
       "existing_installation": "13 tests OK",
       "existing_signing": "12 tests OK",
-      "existing_offline": "6 checks 0 errors"
+      "existing_offline": "6 checks 0 errors",
+      "swift_export": "7 PASS groups",
+      "staged_signed_build": "exit 0; strict signature passed",
+      "actual_turbo_smoke": "2 synthetic clips processed; silence hallucination recorded"
     },
     "remaining_prerequisites": [
-      "export/replay bridge",
-      "complete reproducibility manifest",
-      "user-enabled collection and confirmed corpus",
-      "model runner adapters and measured baseline"
+      "user-enabled collection and confirmed personal corpus",
+      "complete production configuration replay including dictionary",
+      "alternate model adapters and measured personal baseline",
+      "retention controls"
     ],
     "real_keychain_tested": false,
-    "installed_app_changed": false
+    "installed_app_changed": false,
+    "synthetic_turbo_smoke": {
+      "samples": 2,
+      "speech_words_correct": true,
+      "silence_false_positives": 1,
+      "report": "docs/development/speech-replay-smoke.md"
+    }
   }
 }

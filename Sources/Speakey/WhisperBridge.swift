@@ -6,6 +6,7 @@ import Foundation
 final class WhisperBridge {
     private var ctx: OpaquePointer?
     private let diagnosticModel: String
+    private let recognitionHint: () -> String?
 
     /// Сколько потоков отдавать whisper. Считается ОДИН раз: значение не меняется в течение сессии,
     /// а sysctl в горячем пути нам ни к чему.
@@ -28,7 +29,8 @@ final class WhisperBridge {
     }()
 
     /// Загружает модель ggml-*.bin. Возвращает nil, если файла нет / не та архитектура.
-    init?(modelPath: String) {
+    init?(modelPath: String, recognitionHint: @escaping () -> String? = { VoiceDictionary.shared.recognitionHint() }) {
+        self.recognitionHint = recognitionHint
         diagnosticModel = URL(fileURLWithPath: modelPath).lastPathComponent
         guard FileManager.default.fileExists(atPath: modelPath) else { return nil }
         var cparams = whisper_context_default_params()
@@ -193,7 +195,7 @@ final class WhisperBridge {
         // Какая затравка в «Авто», разобрано выше и у `punctuationPrompt`. Пустая строка значит
         // «без затравки» (уверенно определён третий язык): пустой указатель и пустая подсказка для
         // whisper разные вещи, поэтому проверку оставляем.
-        let prompt = Self.punctuationPrompt(for: promptLanguage)
+        let prompt = punctuationPrompt(for: promptLanguage)
         let promptC = prompt.isEmpty ? nil : strdup(prompt)
         defer { if let promptC { free(promptC) } }
         if let promptC {
@@ -205,7 +207,11 @@ final class WhisperBridge {
             "promptLanguage": promptLanguage, "threads": String(params.n_threads),
             "audioContext": String(params.audio_ctx), "temperature": String(params.temperature),
             "temperatureIncrement": String(params.temperature_inc), "noContext": String(params.no_context),
-            "noSpeechThreshold": String(params.no_speech_thold), "strategy": "greedy"
+            "noSpeechThreshold": String(params.no_speech_thold), "strategy": "greedy",
+            "entropyThreshold": String(params.entropy_thold), "logProbabilityThreshold": String(params.logprob_thold),
+            "translate": String(params.translate), "singleSegment": String(params.single_segment),
+            "suppressBlank": String(params.suppress_blank), "noTimestamps": String(params.no_timestamps),
+            "carryInitialPrompt": String(params.carry_initial_prompt), "decodeLanguage": decodeLanguage
         ])
         var out = ""
         // Время самого распознавания в лог: без него «медленно» и «быстро» остаются ощущениями.
@@ -302,7 +308,7 @@ final class WhisperBridge {
     /// для неуверенного определения. Замер 25.09.2026 по «ё» и знакам: FLEURS 100 «ё» 15 из 15 и
     /// запятые F1 91.7 и там и там, WER 3.34% против 3.50%, то есть в пределах шума. Подробности
     /// и цена на живых обрывках записаны в transcribe.
-    private static func punctuationPrompt(for language: String) -> String {
+    private func punctuationPrompt(for language: String) -> String {
         guard let (head, tail) = WhisperPrompt.blocks(for: language) else { return "" }
 
         // СЛОВАРЬ ДИКТОВКИ ДОБИРАЕТ ОСТАТОК ОКНА (задача 143). Смысл: не только править вывод, но и
@@ -313,12 +319,12 @@ final class WhisperBridge {
         // исследование 11.07: промпт должен оставаться НАТУРАЛЬНЫМ текстом, «мешок» коротких токенов
         // — самый ненадёжный случай и умеет искажать соседние слова.
         var dict = ""
-        if let words = VoiceDictionary.shared.recognitionHint() {
+        if let words = recognitionHint() {
             // В лог — только СКОЛЬКО слов подмешали, и один раз на смену состава. Сами слова это
             // содержимое, которое человек завёл сам, а лог уезжает к нам с отзывом (принцип №2).
             let count = words.split(separator: ",").count
-            if lastHintCount != count {
-                lastHintCount = count
+            if Self.lastHintCount != count {
+                Self.lastHintCount = count
                 kbLog("voice: в подсказку распознавания подмешано \(count) слов из словаря диктовки")
             }
             dict = language == "en" ? " Words that often come up: \(words)." : " Часто встречаются слова: \(words)."

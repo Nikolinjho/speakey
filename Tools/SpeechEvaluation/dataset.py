@@ -1,14 +1,14 @@
 """Проверка локального корпуса без вывода содержимого расшифровок."""
 
-import hashlib
 import json
 import math
 from pathlib import Path
-import wave
 
 try:
+    from .audio import AudioError, audio_info
     from .metrics import normalize
 except ImportError:
+    from audio import AudioError, audio_info
     from metrics import normalize
 
 
@@ -60,19 +60,10 @@ def _near_duplicate(left, right):
 
 def _audio_info(path):
     try:
-        with wave.open(str(path), 'rb') as audio:
-            if (audio.getnchannels() != 1 or audio.getframerate() != 16000
-                    or audio.getcomptype() != 'NONE' or audio.getsampwidth() not in (1, 2, 3, 4)):
-                raise ValidationError('Требуется mono PCM WAV 16000 Hz')
-            frame_count = audio.getnframes()
-            if frame_count <= 0:
-                raise ValidationError('Аудио пустое')
-            pcm = audio.readframes(frame_count)
-            if len(pcm) != frame_count * audio.getsampwidth():
-                raise ValidationError('Аудио обрезано')
-            return frame_count / 16000, hashlib.sha256(pcm).hexdigest()
-    except (OSError, wave.Error, EOFError):
-        raise ValidationError('Не удалось прочитать PCM WAV') from None
+        info = audio_info(path)
+        return info['duration_seconds'], info['pcm_sha256']
+    except AudioError as error:
+        raise ValidationError(str(error)) from None
 
 
 def validate_manifest(path):
