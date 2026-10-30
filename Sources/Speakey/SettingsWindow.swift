@@ -1029,6 +1029,7 @@ final class DetailVC: NSViewController {
     /// Кнопки «Скачать» по id модели. Как и метки выше, ПЕРЕрегистрируются при каждой сборке
     /// раздела — иначе обработчик прогресса держал бы ссылку на кнопку, которой уже нет.
     private var voiceModelButton: [String: NSButton] = [:]
+    private var speechReviewWC: SpeechReviewWindowController?
     private var historyWC: VoiceHistoryWindowController?
     private let docView = FlippedView()
     private let column = FlippedView()           // колонка контента с ограниченной шириной
@@ -3427,7 +3428,8 @@ final class DetailVC: NSViewController {
                 switchRow(L10n.t("voice.collection"), L10n.t("voice.collectionSub"), settings.speechCollectionEnabled,
                           #selector(toggleSpeechCollection), help: L10n.t("voice.collectionHelp"), key: "voice.collection"),
                 hint(L10n.t("voice.collectionRetention")),
-                buttonRow([NSButton(title: L10n.t("voice.collectionDelete"), target: self, action: #selector(deleteSpeechCollection))])
+                buttonRow([NSButton(title: L10n.t("review.open"), target: self, action: #selector(openSpeechReview)),
+                           NSButton(title: L10n.t("voice.collectionDelete"), target: self, action: #selector(deleteSpeechCollection))])
             ]),
             group(2),
             hint(L10n.t("voice.foot"))
@@ -4450,6 +4452,12 @@ final class DetailVC: NSViewController {
     }
     @objc private func toggleVoice(_ s: NSSwitch) { settings.voiceEnabled = (s.state == .on) }
     @objc private func voiceModeChanged(_ s: NSSegmentedControl) { settings.voiceHoldMode = s.selectedSegment == 1 ? "toggle" : "hold" }
+    @objc private func openSpeechReview() {
+        guard settings.speechCollectionPolicy === SpeechDiagnostics.collectionPolicy else { return }
+        if speechReviewWC == nil { speechReviewWC = SpeechReviewWindowController(store: SpeechDiagnostics.reviewStore()) }
+        speechReviewWC?.open()
+    }
+
     @objc private func toggleSpeechCollection(_ sender: NSSwitch) {
         settings.speechCollectionEnabled = sender.state == .on
     }
@@ -4461,6 +4469,7 @@ final class DetailVC: NSViewController {
         alert.addButton(withTitle: L10n.t("voice.collectionDelete"))
         alert.addButton(withTitle: L10n.t("common.cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
+        speechReviewWC?.close()
         SpeechDiagnostics.deleteCollected(policy: settings.speechCollectionPolicy) { [weak self] success in
             guard let self else { return }
             if !success {

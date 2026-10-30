@@ -200,6 +200,8 @@ enum SpeechDiagnostics {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Speakey/speech-diagnostics", isDirectory: true)
     }
+    static let reviewLock = NSRecursiveLock()
+    static var reviewDirectory: URL { directory }
     static var collectionPolicy = SpeechCollectionPolicy(defaults: .standard)
     static var enabled: Bool { collectionPolicy.enabled }
 
@@ -227,9 +229,15 @@ enum SpeechDiagnostics {
         // Изолированные настройки предпросмотра не управляют реальным каталогом.
         guard policy === collectionPolicy else { completion(false); return }
         queue.async {
+            reviewLock.lock()
+            defer { reviewLock.unlock() }
             do {
                 let store = SpeechDiagnosticsStore(directory: directory, enabled: false, keyProvider: key)
                 try store.deleteRecords()
+                let corrections = SpeechDiagnosticsStore(
+                    directory: directory.deletingLastPathComponent().appendingPathComponent("speech-corrections", isDirectory: true),
+                    enabled: false, keyProvider: key)
+                try corrections.deleteRecords()
                 DispatchQueue.main.async { completion(true) }
             } catch { DispatchQueue.main.async { completion(false) } }
         }
