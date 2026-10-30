@@ -72,7 +72,7 @@
       "description": "**Цель:** Встроить подтверждённое улучшение и проверить его на реальном использовании без потери возможности отката.\n\n**Файлы:**\n- `Sources/Speakey/VoiceController.swift`\n- `Sources/Speakey/SettingsWindow.swift`\n- `Sources/Speakey/L10n.swift`\n- `Sources/Speakey/SpeechRecognitionEngine.swift`\n- `Tests/SpeechEvaluation/`\n- `docs/development/speech-quality-verification.md`\n\n**Критерии приёмки:**\n- [ ] Выбранная конфигурация имеет измеримый выигрыш на итоговых и новых записях, либо явно зафиксировано отсутствие оснований для замены.\n- [ ] Проверены рабочий офлайн-режим, отсутствие потерь/дублей при вставке и сохранение настроек/данных.\n\n**Проверка:** Регрессионные тесты, итоговый compare, подписанная проверочная сборка и отдельный журнал физического пилота.\n\n**Шаги:**\n- [ ] После фиксации параметров один раз открыть итоговую отложенную выборку. При пересмотре по её ошибкам создать новую независимую проверку, прежнюю считать выборкой настройки.\n- [ ] Сопоставить результат с исходным Turbo по словам, смысловым ошибкам, терминам, задержке и памяти. Отдельно описать неуспешные группы и статистическую неопределённость.\n- [ ] Встраивать выбранный движок через небольшой общий контракт. На первом этапе можно использовать изолированный локальный процесс, но измерить его запуск, упаковку и офлайн-работу. Не требовать от пользователя Python ради готового приложения.\n- [ ] Проверить реальную запись и вставку, короткие и длинные диктовки, отмену, повторные запросы, переключение языка/микрофона, сон и пробуждение. Поздний результат не должен попасть в другое поле.\n- [ ] Провести пилот нескольких дней с фиксацией исправлений на 1000 слов и времени ожидания. Эти физические сценарии требует выполнить Ника, агент не подменяет их синтетическими тестами.\n- [ ] Подготовить сборку с прежним сертификатом и установщиком с резервной копией. Установка – отдельное действие после обзора результатов. Итоговый отчёт содержит команды, manifest, агрегированные результаты, ограничения и способ возврата к Turbo.\n\n```json:metadata\n{\n  \"files\": [\n    \"Sources/Speakey/VoiceController.swift\",\n    \"Sources/Speakey/SettingsWindow.swift\",\n    \"Sources/Speakey/L10n.swift\",\n    \"Sources/Speakey/SpeechRecognitionEngine.swift\",\n    \"Tests/SpeechEvaluation/\",\n    \"docs/development/speech-quality-verification.md\"\n  ],\n  \"acceptanceCriteria\": [\n    \"Выбранная конфигурация имеет измеримый выигрыш на итоговых и новых записях, либо явно зафиксировано отсутствие оснований для замены.\",\n    \"Проверены рабочий офлайн-режим, отсутствие потерь/дублей при вставке и сохранение настроек/данных.\"\n  ],\n  \"verification\": \"Регрессионные тесты, итоговый compare, подписанная проверочная сборка и отдельный журнал физического пилота.\",\n  \"dependsOn\": [\n    7\n  ]\n}\n```\n"
     }
   ],
-  "lastUpdated": "2026-10-30T17:48:32.678716+03:00",
+  "lastUpdated": "2026-10-30T23:13:38.154034+03:00",
   "execution": {
     "branch": "feat/local-speech-quality",
     "scope": "local evaluation adapters, consent controls and confirmed corpus tooling",
@@ -119,7 +119,8 @@
       "actual_turbo_smoke": "2 synthetic clips processed; silence hallucination recorded",
       "actual_parakeet_smoke": "2 synthetic clips processed; empty silence output",
       "actual_qwen_smoke": "2 synthetic clips processed; silence false positive recorded",
-      "swift_review": "PASS synthetic encrypted correction, path, split, orphan and export checks; Python speech and silence manifests valid"
+      "swift_review": "PASS synthetic encrypted correction, path, split, orphan and export checks; Python speech and silence manifests valid",
+      "fresh_pre_master": "80 Python tests OK; microphone, review, diagnostics, export scripts exit0"
     },
     "remaining_prerequisites": [
       "user-enabled collection and confirmed personal corpus",
@@ -129,7 +130,7 @@
       "physical review UI pilot and verified personalization"
     ],
     "real_keychain_tested": false,
-    "installed_app_changed": false,
+    "installed_app_changed": true,
     "synthetic_turbo_smoke": {
       "samples": 2,
       "speech_words_correct": true,
@@ -152,6 +153,9 @@
       "report": "docs/development/speech-local-models-smoke.md",
       "personal_quality_measured": false
     },
-    "review_ui_physical_pilot_performed": false
+    "review_ui_physical_pilot_performed": false,
+    "installed_code_commit": "923b38b",
+    "installed_app": "/Applications/Speakey.app",
+    "microphone_switch_user_confirmed": true
   }
 }
