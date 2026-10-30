@@ -3387,6 +3387,10 @@ final class DetailVC: NSViewController {
             switchRow(L10n.t("voice.unloadAfter"), unloadSub, settings.voiceUnloadAfterDictation,
                       #selector(toggleUnloadAfterDictation), help: L10n.t("voice.unloadAfterHelp"), key: "voice.unloadAfter"),
         ]))
+        let collectionRetention = NSStackView(views: [hint(L10n.t("voice.collectionRetention"))])
+        collectionRetention.orientation = .vertical
+        collectionRetention.alignment = .width
+        collectionRetention.edgeInsets = NSEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
         views.append(contentsOf: [
             group(6),
             sectionTitle(L10n.t("voice.grpDuck")),
@@ -3427,7 +3431,7 @@ final class DetailVC: NSViewController {
             card([
                 switchRow(L10n.t("voice.collection"), L10n.t("voice.collectionSub"), settings.speechCollectionEnabled,
                           #selector(toggleSpeechCollection), help: L10n.t("voice.collectionHelp"), key: "voice.collection"),
-                hint(L10n.t("voice.collectionRetention")),
+                collectionRetention,
                 buttonRow([NSButton(title: L10n.t("review.open"), target: self, action: #selector(openSpeechReview)),
                            NSButton(title: L10n.t("voice.collectionDelete"), target: self, action: #selector(deleteSpeechCollection))])
             ]),
