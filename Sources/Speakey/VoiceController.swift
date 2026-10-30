@@ -219,6 +219,7 @@ final class VoiceController {
         guard settings.voiceEnabled else { return }
         if starting { kbLog("voice: begin пропущен — старт уже идёт"); return }
         if recorder.isRecording { kbLog("voice: begin пропущен — запись уже идёт"); return }
+        MicrophoneMonitor.shared.stop()
         VoiceGate.set(true)            // СИНХРОННО: намерение записывать — toggle сразу видит активность
         starting = true
         abortStart = false

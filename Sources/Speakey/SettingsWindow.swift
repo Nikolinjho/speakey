@@ -305,6 +305,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         // CLAUDE.md про `SPEAKEY_OPEN_SETTINGS`.
         let simple = showingSimple
         if simple {
+            detail.stopMicrophoneCheck()
             // ⚠️ КАДР, А НЕ contentLayoutRect (ревью 17.08): восстановление идёт через setContent,
             // а он при `.fullSizeContentView` ставит ровно это число кадром. contentLayoutRect на
             // высоту заголовка ниже кадра, и каждый цикл «Основное → Всё» съедал у Pro-окна 32 pt,
@@ -709,6 +710,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         }
     }
     func windowWillClose(_ notification: Notification) {
+        detail.stopMicrophoneCheck()
         detail.saveAll()
         // Высоту подробных сохраняем и здесь: `windowDidEndLiveResize` не приходит, если размер
         // меняли не мышью (зум, Системные события, менеджер окон), а привычка человека к своей
@@ -1025,6 +1027,7 @@ final class DetailVC: NSViewController {
     private var wordInput: NSTextField?
     /// Строка исхода под полем: добавлено / уже было / уже бережём / не сработает (P3.5).
     private weak var wordOutcome: NSTextField?
+    private var microphoneCheckBusy = false
     private var voiceModelStatus: [String: NSTextField] = [:]
     /// Кнопки «Скачать» по id модели. Как и метки выше, ПЕРЕрегистрируются при каждой сборке
     /// раздела — иначе обработчик прогресса держал бы ссылку на кнопку, которой уже нет.
@@ -1315,6 +1318,7 @@ final class DetailVC: NSViewController {
     }
 
     func show(_ section: SettingsSection) {
+        if section != .voice { stopMicrophoneCheck() }
         showingRoot = false
         currentSection = section
         contentStack?.removeFromSuperview()
@@ -1328,6 +1332,12 @@ final class DetailVC: NSViewController {
             stack.bottomAnchor.constraint(lessThanOrEqualTo: column.bottomAnchor),
             stack.widthAnchor.constraint(equalTo: column.widthAnchor)   // явная ширина (stack.w был 0)
         ])
+        if section == .voice, canCheckMicrophone {
+            MicrophoneMonitor.shared.onStateChanged = { [weak self] _ in
+                self?.refreshMicrophoneCheck()
+            }
+            refreshMicrophoneCheck()
+        }
         view.needsLayout = true
     }
 
@@ -1405,6 +1415,7 @@ final class DetailVC: NSViewController {
     /// та же высота, тот же слот кнопки «i», те же подсказки. Разница только в отборе и в том, что
     /// бокового меню нет.
     func showRoot() {
+        stopMicrophoneCheck()
         showingRoot = true
         contentStack?.removeFromSuperview()
         guard let stack = buildSimpleRoot() as? NSStackView else { return }
@@ -3270,6 +3281,7 @@ final class DetailVC: NSViewController {
             // B. Всё про устройство ввода в одном месте: выбор, прогрев и его окно, системный уровень.
             card([
                 controlRow(L10n.t("voice.mic"), micSelectorControl(), key: "voice.mic"),
+                microphoneCheckRow(),
                 switchRow(L10n.t("voice.warm"), L10n.t("voice.warmSub"), settings.voiceWarmWindow, #selector(toggleWarmWindow),
                           help: L10n.t("voice.warmHelp"), key: "voice.warm"),
                 makeWarmBox(),
@@ -4605,6 +4617,93 @@ final class DetailVC: NSViewController {
     }
     // MARK: - G: Mic selector
 
+    private var canCheckMicrophone: Bool {
+        settings.speechCollectionPolicy === SpeechDiagnostics.collectionPolicy
+    }
+
+    func stopMicrophoneCheck() {
+        guard canCheckMicrophone else { return }
+        microphoneCheckBusy = false
+        MicrophoneMonitor.shared.stop()
+        refreshMicrophoneCheck()
+    }
+
+    private var microphoneCheckButtonTitle: String {
+        guard canCheckMicrophone else { return L10n.t("voice.micCheckStart") }
+        switch MicrophoneMonitor.shared.state {
+        case .starting: return L10n.t("voice.micCheckCancel")
+        case .running: return L10n.t("voice.micCheckStop")
+        case .stopped, .failed: return L10n.t("voice.micCheckStart")
+        }
+    }
+
+    private var microphoneCheckSubtitle: String {
+        var text = L10n.t("voice.micCheckSub")
+        if microphoneCheckBusy {
+            text += "\n" + L10n.t("voice.micCheckBusy")
+        } else if canCheckMicrophone, MicrophoneMonitor.shared.state == .failed {
+            text += "\n" + L10n.t("voice.micCheckFailed")
+        }
+        return text
+    }
+
+    private func microphoneCheckRow() -> NSView {
+        let button = NSButton(title: microphoneCheckButtonTitle, target: self,
+                              action: #selector(toggleMicrophoneCheck))
+        button.bezelStyle = .rounded
+        button.identifier = NSUserInterfaceItemIdentifier("voice.micCheck.button")
+        let row = controlRow(L10n.t("voice.micCheck"), button, enabled: canCheckMicrophone,
+                             subtitle: microphoneCheckSubtitle, key: "voice.micCheck", wraps: true)
+        if let subtitle = microphoneCheckView(in: row, matching: { $0 is WrappingLabel }) {
+            subtitle.identifier = NSUserInterfaceItemIdentifier("voice.micCheck.subtitle")
+        }
+        return row
+    }
+
+    private func microphoneCheckView(in root: NSView, matching predicate: (NSView) -> Bool) -> NSView? {
+        if predicate(root) { return root }
+        for child in root.subviews {
+            if let match = microphoneCheckView(in: child, matching: predicate) { return match }
+        }
+        return nil
+    }
+
+    private func refreshMicrophoneCheck() {
+        guard !showingRoot, currentSection == .voice, let stack = contentStack else { return }
+        if let button = microphoneCheckView(in: stack, matching: {
+            $0.identifier?.rawValue == "voice.micCheck.button"
+        }) as? NSButton {
+            button.title = microphoneCheckButtonTitle
+        }
+        if let subtitle = microphoneCheckView(in: stack, matching: {
+            $0.identifier?.rawValue == "voice.micCheck.subtitle"
+        }) as? NSTextField {
+            subtitle.stringValue = microphoneCheckSubtitle
+            subtitle.toolTip = microphoneCheckSubtitle
+            subtitle.invalidateIntrinsicContentSize()
+        }
+        view.needsLayout = true
+    }
+
+    @objc private func toggleMicrophoneCheck() {
+        guard canCheckMicrophone, !showingRoot, currentSection == .voice else { return }
+        switch MicrophoneMonitor.shared.state {
+        case .starting, .running:
+            stopMicrophoneCheck()
+        case .stopped, .failed:
+            guard !VoiceGate.isActive else {
+                microphoneCheckBusy = true
+                refreshMicrophoneCheck()
+                return
+            }
+            microphoneCheckBusy = false
+            MicrophoneMonitor.shared.onStateChanged = { [weak self] _ in
+                self?.refreshMicrophoneCheck()
+            }
+            MicrophoneMonitor.shared.start(inputUID: settings.voiceMicUID)
+        }
+    }
+
     private func micSelectorControl() -> NSView {
         let pop = NSPopUpButton()
         pop.addItem(withTitle: L10n.t("voice.micSystem"))
@@ -4627,6 +4726,7 @@ final class DetailVC: NSViewController {
         return pop
     }
     @objc private func micSelectorChanged(_ s: NSPopUpButton) {
+        stopMicrophoneCheck()
         settings.voiceMicUID = (s.selectedItem?.representedObject as? String) ?? ""
     }
     /// Ссылка-раскрывашка вместо кнопки. Кнопка читалась как действие («скачать», «применить») и
