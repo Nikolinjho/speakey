@@ -24,6 +24,7 @@ final class MicrophoneMonitor {
 
     static let shared = MicrophoneMonitor()
     private(set) var state: State = .stopped
+    private(set) var isRequested = false
     var onStateChanged: ((State) -> Void)?
     private(set) var status: MicrophoneMonitorStatus?
     var onStatusChanged: ((MicrophoneMonitorStatus?) -> Void)?
@@ -51,6 +52,7 @@ final class MicrophoneMonitor {
     func start(inputUID: String) {
         dispatchPrecondition(condition: .onQueue(.main))
         stop()
+        isRequested = true
         let token = UUID()
         generation = token
         setState(.starting)
@@ -82,10 +84,17 @@ final class MicrophoneMonitor {
 
     func stop() {
         dispatchPrecondition(condition: .onQueue(.main))
+        isRequested = false
         generation = UUID()
         preview.stop()
         setStatus(nil)
         setState(.stopped)
+    }
+
+    func selectInput(inputUID: String) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        guard isRequested else { return }
+        start(inputUID: inputUID)
     }
 
     private func fail() {

@@ -4636,7 +4636,9 @@ final class DetailVC: NSViewController {
         switch MicrophoneMonitor.shared.state {
         case .starting: return L10n.t("voice.micCheckCancel")
         case .running: return L10n.t("voice.micCheckStop")
-        case .stopped, .failed: return L10n.t("voice.micCheckStart")
+        case .stopped: return L10n.t("voice.micCheckStart")
+        case .failed:
+            return L10n.t(MicrophoneMonitor.shared.isRequested ? "voice.micCheckStop" : "voice.micCheckStart")
         }
     }
 
@@ -4715,24 +4717,23 @@ final class DetailVC: NSViewController {
 
     @objc private func toggleMicrophoneCheck() {
         guard canCheckMicrophone, !showingRoot, currentSection == .voice else { return }
-        switch MicrophoneMonitor.shared.state {
-        case .starting, .running:
+        if MicrophoneMonitor.shared.isRequested {
             stopMicrophoneCheck()
-        case .stopped, .failed:
-            guard !VoiceGate.isActive else {
-                microphoneCheckBusy = true
-                refreshMicrophoneCheck()
-                return
-            }
-            microphoneCheckBusy = false
-            MicrophoneMonitor.shared.onStateChanged = { [weak self] _ in
-                self?.refreshMicrophoneCheck()
-            }
-            MicrophoneMonitor.shared.onStatusChanged = { [weak self] _ in
-                self?.refreshMicrophoneCheck()
-            }
-            MicrophoneMonitor.shared.start(inputUID: settings.voiceMicUID)
+            return
         }
+        guard !VoiceGate.isActive else {
+            microphoneCheckBusy = true
+            refreshMicrophoneCheck()
+            return
+        }
+        microphoneCheckBusy = false
+        MicrophoneMonitor.shared.onStateChanged = { [weak self] _ in
+            self?.refreshMicrophoneCheck()
+        }
+        MicrophoneMonitor.shared.onStatusChanged = { [weak self] _ in
+            self?.refreshMicrophoneCheck()
+        }
+        MicrophoneMonitor.shared.start(inputUID: settings.voiceMicUID)
     }
 
     private func micSelectorControl() -> NSView {
@@ -4757,8 +4758,12 @@ final class DetailVC: NSViewController {
         return pop
     }
     @objc private func micSelectorChanged(_ s: NSPopUpButton) {
-        stopMicrophoneCheck()
-        settings.voiceMicUID = (s.selectedItem?.representedObject as? String) ?? ""
+        let uid = (s.selectedItem?.representedObject as? String) ?? ""
+        settings.voiceMicUID = uid
+        guard canCheckMicrophone else { return }
+        microphoneCheckBusy = false
+        MicrophoneMonitor.shared.selectInput(inputUID: uid)
+        refreshMicrophoneCheck()
     }
     /// Ссылка-раскрывашка вместо кнопки. Кнопка читалась как действие («скачать», «применить») и
     /// массивной плашкой перетягивала внимание с двух рекомендованных моделей, хотя всё, что она

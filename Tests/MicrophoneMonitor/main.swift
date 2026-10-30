@@ -36,6 +36,8 @@ check(monitor.state == .stopped && permissions.isEmpty, "Проверка вык
 monitor.start(inputUID: "usb")
 check(monitor.state == .starting && preview.inputs.isEmpty, "До разрешения микрофон не открывается")
 monitor.stop()
+monitor.selectInput(inputUID: "other")
+check(permissions.count == 1 && !monitor.isRequested, "Выбор после отмены разрешения не создаёт новый запрос")
 permissions.removeFirst()(true)
 check(monitor.state == .stopped && preview.inputs.isEmpty, "Отмена запрещает позднее разрешение")
 monitor.start(inputUID: "usb")
@@ -91,4 +93,45 @@ reentrant.onStateChanged = { state in
 }
 reentrant.start(inputUID: "usb")
 check(reentrantRequests == 0 && reentrant.state == .stopped, "Остановка из наблюдателя отменяет запрос разрешения")
-print("PASS: отмена разрешения, поздний запуск, выбранный вход, ошибки и остановка")
+
+let selectionPreview = PreviewStub()
+var selectionPermissions = 0
+let selectionMonitor = MicrophoneMonitor(preview: selectionPreview, requestPermission: {
+    selectionPermissions += 1
+    $0(true)
+})
+selectionMonitor.selectInput(inputUID: "A")
+check(selectionPermissions == 0, "Выбор микрофона не запускает выключенную проверку")
+selectionMonitor.start(inputUID: "A")
+selectionPreview.completions.removeFirst()(true)
+selectionMonitor.selectInput(inputUID: "missing")
+selectionPreview.completions.removeFirst()(false)
+check(selectionMonitor.state == .failed && selectionMonitor.isRequested, "Ошибка входа сохраняет намерение проверять микрофон")
+selectionMonitor.selectInput(inputUID: "A")
+selectionPreview.completions.removeFirst()(true)
+check(selectionMonitor.state == .running && selectionPreview.inputs.last == "A", "Возврат рабочего входа возобновляет включённую проверку")
+
+selectionMonitor.selectInput(inputUID: "B")
+let staleCompletion = selectionPreview.completions.removeFirst()
+let staleFailure = selectionPreview.onFailure
+let staleStatus = selectionPreview.onStatusChanged
+selectionMonitor.selectInput(inputUID: "A")
+staleCompletion(true)
+staleFailure?()
+staleStatus?(measured)
+check(selectionMonitor.state == .starting && selectionMonitor.status == nil && !selectionPreview.playing,
+      "События предыдущего выбора не изменяют новый запуск")
+selectionPreview.completions.removeFirst()(true)
+check(selectionMonitor.state == .running && selectionPreview.inputs.last == "A", "При быстром выборе запускается последний вход")
+selectionMonitor.stop()
+let stoppedPermissions = selectionPermissions
+selectionMonitor.selectInput(inputUID: "B")
+check(selectionPermissions == stoppedPermissions && selectionMonitor.state == .stopped && !selectionMonitor.isRequested, "После остановки выбор не включает проверку")
+
+selectionMonitor.start(inputUID: "missing")
+selectionPreview.completions.removeFirst()(false)
+selectionMonitor.stop()
+let failedPermissions = selectionPermissions
+selectionMonitor.selectInput(inputUID: "A")
+check(selectionPermissions == failedPermissions && selectionMonitor.state == .stopped && !selectionMonitor.isRequested, "Остановка после ошибки отменяет возобновление")
+print("PASS: отмена разрешения, поздний запуск, уровень сигнала, смена входа, ошибки и остановка")

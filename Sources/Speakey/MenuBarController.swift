@@ -836,10 +836,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     @objc private func selectMic(_ s: NSMenuItem) {
         if let uid = s.representedObject as? String {
-            if settings.speechCollectionPolicy === SpeechDiagnostics.collectionPolicy {
-                MicrophoneMonitor.shared.stop()
-            }
             settings.voiceMicUID = uid
+            if settings.speechCollectionPolicy === SpeechDiagnostics.collectionPolicy {
+                MicrophoneMonitor.shared.selectInput(inputUID: uid)
+            }
             buildMenu()
         }
     }
