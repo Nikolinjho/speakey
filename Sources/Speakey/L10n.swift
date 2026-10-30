@@ -986,6 +986,8 @@ enum L10n {
         "voice.micCheckStart": [.ru: "Проверить микрофон", .en: "Test microphone"],
         "voice.micCheckCancel": [.ru: "Отменить проверку", .en: "Cancel test"],
         "voice.micCheckStop": [.ru: "Остановить проверку", .en: "Stop test"],
+        "voice.micCheckLevel": [.ru: "Уровень входящего звука", .en: "Input audio level"],
+        "voice.micCheckNoConnection": [.ru: "Соединение с микрофоном не активно. Остановите проверку и выберите доступный вход.", .en: "The microphone connection is inactive. Stop the test and select an available input."],
         "voice.micCheckSub": [.ru: "Слышно себя в реальном времени. Наденьте наушники, чтобы избежать эха. Звук не сохраняется.",
                               .en: "Hear yourself live. Use headphones to avoid echo. Audio is not saved."],
         "voice.micCheckBusy": [.ru: "Сначала завершите диктовку, затем запустите проверку.",

@@ -1336,6 +1336,9 @@ final class DetailVC: NSViewController {
             MicrophoneMonitor.shared.onStateChanged = { [weak self] _ in
                 self?.refreshMicrophoneCheck()
             }
+            MicrophoneMonitor.shared.onStatusChanged = { [weak self] _ in
+                self?.refreshMicrophoneCheck()
+            }
             refreshMicrophoneCheck()
         }
         view.needsLayout = true
@@ -4643,6 +4646,9 @@ final class DetailVC: NSViewController {
             text += "\n" + L10n.t("voice.micCheckBusy")
         } else if canCheckMicrophone, MicrophoneMonitor.shared.state == .failed {
             text += "\n" + L10n.t("voice.micCheckFailed")
+        } else if canCheckMicrophone, MicrophoneMonitor.shared.state == .running,
+                  let status = MicrophoneMonitor.shared.status, !status.connectionActive {
+            text += "\n" + L10n.t("voice.micCheckNoConnection")
         }
         return text
     }
@@ -4651,8 +4657,25 @@ final class DetailVC: NSViewController {
         let button = NSButton(title: microphoneCheckButtonTitle, target: self,
                               action: #selector(toggleMicrophoneCheck))
         button.bezelStyle = .rounded
+        button.controlSize = .small
+        button.font = .systemFont(ofSize: 12)
         button.identifier = NSUserInterfaceItemIdentifier("voice.micCheck.button")
-        let row = controlRow(L10n.t("voice.micCheck"), button, enabled: canCheckMicrophone,
+        let level = NSLevelIndicator()
+        level.levelIndicatorStyle = .continuousCapacity
+        level.minValue = 0
+        level.maxValue = 1
+        level.warningValue = 1
+        level.criticalValue = 1
+        level.isEditable = false
+        level.identifier = NSUserInterfaceItemIdentifier("voice.micCheck.level")
+        level.setAccessibilityLabel(L10n.t("voice.micCheckLevel"))
+        level.toolTip = L10n.t("voice.micCheckLevel")
+        level.widthAnchor.constraint(equalToConstant: 140).isActive = true
+        let controls = NSStackView(views: [button, level])
+        controls.orientation = .vertical
+        controls.alignment = .leading
+        controls.spacing = 6
+        let row = controlRow(L10n.t("voice.micCheck"), controls, enabled: canCheckMicrophone,
                              subtitle: microphoneCheckSubtitle, key: "voice.micCheck", wraps: true)
         if let subtitle = microphoneCheckView(in: row, matching: { $0 is WrappingLabel }) {
             subtitle.identifier = NSUserInterfaceItemIdentifier("voice.micCheck.subtitle")
@@ -4682,6 +4705,11 @@ final class DetailVC: NSViewController {
             subtitle.toolTip = microphoneCheckSubtitle
             subtitle.invalidateIntrinsicContentSize()
         }
+        if let level = microphoneCheckView(in: stack, matching: {
+            $0.identifier?.rawValue == "voice.micCheck.level"
+        }) as? NSLevelIndicator {
+            level.doubleValue = canCheckMicrophone ? Double(MicrophoneMonitor.shared.status?.inputLevel ?? 0) : 0
+        }
         view.needsLayout = true
     }
 
@@ -4698,6 +4726,9 @@ final class DetailVC: NSViewController {
             }
             microphoneCheckBusy = false
             MicrophoneMonitor.shared.onStateChanged = { [weak self] _ in
+                self?.refreshMicrophoneCheck()
+            }
+            MicrophoneMonitor.shared.onStatusChanged = { [weak self] _ in
                 self?.refreshMicrophoneCheck()
             }
             MicrophoneMonitor.shared.start(inputUID: settings.voiceMicUID)

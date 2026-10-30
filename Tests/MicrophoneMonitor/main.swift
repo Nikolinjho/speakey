@@ -6,6 +6,7 @@ enum AudioDevices {
 
 final class PreviewStub: MicrophoneMonitorPreview {
     var onFailure: (() -> Void)?
+    var onStatusChanged: ((MicrophoneMonitorStatus) -> Void)?
     var completions: [(Bool) -> Void] = []
     var inputs: [String] = []
     var playing = false
@@ -20,6 +21,13 @@ final class PreviewStub: MicrophoneMonitorPreview {
 func check(_ value: @autoclosure () -> Bool, _ message: String) {
     guard value() else { fatalError(message) }
 }
+
+check(MicrophoneMonitorStatus.normalizedInputLevel(averagePower: -60) == 0, "Нижняя граница шкалы — -60 дБ")
+check(MicrophoneMonitorStatus.normalizedInputLevel(averagePower: -30) == 0.5, "Середина шкалы — -30 дБ")
+check(MicrophoneMonitorStatus.normalizedInputLevel(averagePower: 6) == 1, "Перегрузка ограничена единицей")
+check(MicrophoneMonitorStatus.normalizedInputLevel(averagePower: -160) == 0, "Тишина ограничена нулём")
+check(MicrophoneMonitorStatus.normalizedInputLevel(averagePower: .nan) == 0, "Некорректный уровень даёт ноль")
+check(MicrophoneMonitorStatus.normalizedInputLevel(averagePower: .infinity) == 0, "Бесконечный уровень даёт ноль")
 
 let preview = PreviewStub()
 var permissions: [(Bool) -> Void] = []
@@ -47,8 +55,18 @@ monitor.start(inputUID: "usb")
 permissions.removeFirst()(true)
 preview.completions.removeFirst()(true)
 check(monitor.state == .running && preview.playing, "Звук включается после подтверждённого запуска")
+check(monitor.status == nil, "Запуск не утверждает наличие сигнала")
+let measured = MicrophoneMonitorStatus(connectionActive: true, inputLevel: 0.5)
+var statuses: [MicrophoneMonitorStatus?] = []
+monitor.onStatusChanged = { statuses.append($0) }
+let oldStatus = preview.onStatusChanged
+oldStatus?(measured)
+check(monitor.status == measured && statuses.last! == measured, "Состояние соединения и уровень передаются интерфейсу")
 preview.onFailure?()
 check(monitor.state == .failed && !preview.playing, "Ошибка сессии выключает звук")
+check(monitor.status == nil && statuses.last! == nil, "Ошибка очищает уровень")
+oldStatus?(measured)
+check(monitor.status == nil, "Поздний уровень после ошибки игнорируется")
 monitor.stop()
 check(monitor.state == .stopped && !preview.playing, "Остановка выключает проверку")
 monitor.start(inputUID: "old")
@@ -59,7 +77,13 @@ check(monitor.state == .starting, "Старый отказ не отменяет
 permissions.removeFirst()(true)
 preview.completions.removeFirst()(true)
 check(monitor.state == .running && preview.inputs.last == "new", "Новый запуск использует новый выбор")
+oldStatus?(measured)
+check(monitor.status == nil, "Уровень предыдущего запуска игнорируется")
+preview.onStatusChanged?(measured)
 monitor.stop()
+check(monitor.status == nil, "Остановка очищает уровень")
+preview.onStatusChanged?(measured)
+check(monitor.status == nil, "Поздний уровень после остановки игнорируется")
 var reentrantRequests = 0
 let reentrant = MicrophoneMonitor(preview: PreviewStub(), requestPermission: { _ in reentrantRequests += 1 })
 reentrant.onStateChanged = { state in
