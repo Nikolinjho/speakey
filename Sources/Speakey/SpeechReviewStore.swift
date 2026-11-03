@@ -4,7 +4,7 @@ import Darwin
 
 struct SpeechReviewItem {
     let id: UUID
-    let modified: Date
+    let createdAt: Date
     var hasSavedCorrection = false
 }
 
@@ -15,11 +15,13 @@ struct SpeechReviewCorrection: Codable {
     let sessionID: String
     let split: String
     let silence: Bool
+    var createdAt: Date? = nil
 }
 
 struct SpeechReviewDocument {
     let snapshot: SpeechDiagnosticTrace.Snapshot
     let correction: SpeechReviewCorrection?
+    let createdAt: Date
 }
 
 /// Эталоны подтверждаются человеком и хранятся отдельно от диагностики и истории.
@@ -31,7 +33,7 @@ struct SpeechReviewStore {
             case .unsafePath: return "Симлинки и небезопасные пути запрещены."
             case .invalidFile: return "Диагностический файл повреждён или превышает допустимый размер."
             case .invalidTrace: return "Неподдерживаемая схема или формат аудио диагностики."
-            case .invalidCorrection: return "Укажите эталон, сессию и выборку. Пустой эталон допустим только для тишины."
+            case .invalidCorrection: return "Для речи нужен дословный эталон. Пустой эталон допустим только для тишины."
             case .conflictingSplit: return "Все записи одной сессии должны принадлежать одной выборке."
             case .missingTrace: return "Исходная диагностика подтверждённой записи удалена."
             case .emptyExport: return "Нет подтверждённых записей для экспорта."
@@ -49,19 +51,37 @@ struct SpeechReviewStore {
         Self.lock.lock(); defer { Self.lock.unlock() }
         let correctedIDs = Set(try records(in: correctionsDirectory).map(\.id))
         return try records(in: diagnosticsDirectory).map { item in
-            SpeechReviewItem(id: item.id, modified: item.modified, hasSavedCorrection: correctedIDs.contains(item.id))
+            SpeechReviewItem(id: item.id, createdAt: item.createdAt, hasSavedCorrection: correctedIDs.contains(item.id))
         }.sorted {
-            $0.modified == $1.modified ? $0.id.uuidString < $1.id.uuidString : $0.modified > $1.modified
+            $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt
         }
     }
 
     func load(id: UUID) throws -> SpeechReviewDocument {
+        Self.lock.lock(); defer { Self.lock.unlock() }
         let snapshot = try readTrace(id: id).snapshot
-        return SpeechReviewDocument(snapshot: snapshot, correction: try readCorrection(id: id))
+        let correction = try readCorrection(id: id)
+        return SpeechReviewDocument(snapshot: snapshot, correction: correction,
+                                    createdAt: try correction?.createdAt ?? creationDate(file(id, in: diagnosticsDirectory)))
     }
 
     func audio(id: UUID) throws -> Data {
         try SpeechFloatWAV.encode(pcm: readTrace(id: id).snapshot.pcmFloat32LE)
+    }
+
+    func saveConfirmed(id: UUID, reference: String, editedText: String, silence: Bool) throws {
+        Self.lock.lock(); defer { Self.lock.unlock() }
+        let document = try load(id: id)
+        let date = DateFormatter()
+        date.locale = Locale(identifier: "en_US_POSIX")
+        date.calendar = Calendar(identifier: .gregorian)
+        date.timeZone = TimeZone(secondsFromGMT: 3 * 3600)
+        date.dateFormat = "yyyy-MM-dd"
+        let sessionID = document.correction?.sessionID ?? "recorded-" + date.string(from: document.createdAt)
+        let split = document.correction?.split ?? "dev"
+        try save(SpeechReviewCorrection(id: id, reference: reference, editedText: editedText,
+                                       sessionID: sessionID, split: split, silence: silence,
+                                       createdAt: document.createdAt))
     }
 
     func save(_ correction: SpeechReviewCorrection) throws {
@@ -133,6 +153,10 @@ struct SpeechReviewStore {
             sessions[correction.sessionID] = correction.split
             guard exists(file(item.id, in: diagnosticsDirectory)) else { throw Failure.missingTrace }
             let source = try readTrace(id: item.id)
+            let createdAt = try correction.createdAt ?? creationDate(file(item.id, in: diagnosticsDirectory))
+            let date = ISO8601DateFormatter()
+            date.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            date.timeZone = TimeZone(secondsFromGMT: 3 * 3600)
             let audioName = item.id.uuidString + ".wav"
             let wav = try SpeechFloatWAV.encode(pcm: source.snapshot.pcmFloat32LE)
             try SpeechDiagnosticsExport.writeNew(wav, to: output.appendingPathComponent(audioName))
@@ -140,6 +164,7 @@ struct SpeechReviewStore {
                 "id": item.id.uuidString, "audio": audioName, "reference": correction.reference,
                 "reference_confirmed": true, "edited_text": correction.editedText,
                 "session_id": correction.sessionID, "split": correction.split, "silence": correction.silence,
+                "created_at": date.string(from: createdAt),
                 "language": source.snapshot.configuration["language"] ?? "auto",
                 "kind": correction.silence ? "silence" : "speech",
                 "duration_seconds": Double(source.snapshot.pcmFloat32LE.count / 4) / 16000,
@@ -203,10 +228,15 @@ struct SpeechReviewStore {
             let name = url.deletingPathExtension().lastPathComponent
             guard url.pathExtension == "enc", let id = UUID(uuidString: name), id.uuidString == name else { return nil }
             try regularFile(url)
-            let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-            guard let date = attributes[.modificationDate] as? Date else { throw Failure.invalidFile }
-            return SpeechReviewItem(id: id, modified: date)
+            return SpeechReviewItem(id: id, createdAt: try creationDate(url))
         }
+    }
+
+    private func creationDate(_ url: URL) throws -> Date {
+        try regularFile(url)
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let date = attributes[.creationDate] as? Date else { throw Failure.invalidFile }
+        return date
     }
 
     private func exists(_ url: URL) -> Bool {

@@ -611,7 +611,9 @@ final class VoiceIndicator {
         p.isOpaque = false
         p.hasShadow = true
         p.ignoresMouseEvents = true
-        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+        // Закреплённая на всех столах панель может остаться вне активного Space.
+        // Каждый показ переносит её туда, где сейчас идёт диктовка, без активации приложения.
+        p.collectionBehavior = [.moveToActiveSpace, .stationary, .ignoresCycle, .fullScreenAuxiliary]
 
         let v = PassThroughEffectView(frame: p.contentView!.bounds)
         v.autoresizingMask = [.width, .height]

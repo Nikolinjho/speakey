@@ -6,15 +6,14 @@ private final class SpeechReviewForm: NSStackView {
 }
 
 /// Окно открывает приватные данные только по явному действию пользователя.
-final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate, NSTextFieldDelegate {
+final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, NSTableViewDataSource, NSTableViewDelegate, NSTextViewDelegate {
     private let store: SpeechReviewStore
     private let worker = DispatchQueue(label: "dev.speakey.speech-review", qos: .userInitiated)
     private let table = NSTableView()
     private let raw = NSTextView()
     private let reference = NSTextView()
     private let edited = NSTextView()
-    private let session = NSTextField(string: "")
-    private let split = NSPopUpButton()
+    private let createdAt = NSTextField(labelWithString: "")
     private let silence = NSButton(checkboxWithTitle: L10n.t("review.silence"), target: nil, action: nil)
     private let status = NSTextField(wrappingLabelWithString: "")
     private var playButton: NSButton!
@@ -101,25 +100,15 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
         formScroll.documentView = form
         form.translatesAutoresizingMaskIntoConstraints = false
         body.addArrangedSubview(formScroll)
+        createdAt.textColor = .secondaryLabelColor
+        form.addArrangedSubview(createdAt)
         playButton = button("review.play", #selector(playAudio))
         form.addArrangedSubview(playButton)
         addEditor(raw, key: "review.raw", height: 95, editable: false, to: form)
         addEditor(reference, key: "review.reference", height: 110, editable: true, to: form)
         addEditor(edited, key: "review.edited", height: 75, editable: true, to: form)
-        session.delegate = self
-        split.target = self
-        split.action = #selector(markEdited)
         silence.target = self
         silence.action = #selector(markEdited)
-        session.placeholderString = L10n.t("review.sessionPlaceholder")
-        form.addArrangedSubview(NSTextField(labelWithString: L10n.t("review.session")))
-        form.addArrangedSubview(session)
-        split.addItem(withTitle: L10n.t("review.chooseSplit"))
-        for value in ["train", "dev", "test"] {
-            split.addItem(withTitle: L10n.t("review.split." + value))
-            split.lastItem?.representedObject = value
-        }
-        form.addArrangedSubview(split)
         form.addArrangedSubview(silence)
         saveButton = button("review.save", #selector(saveConfirmed))
         deleteButton = button("review.delete", #selector(deleteCorrection))
@@ -139,8 +128,7 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
             form.widthAnchor.constraint(equalTo: formScroll.contentView.widthAnchor),
             form.topAnchor.constraint(equalTo: formScroll.contentView.topAnchor),
             form.leadingAnchor.constraint(equalTo: formScroll.contentView.leadingAnchor),
-            status.widthAnchor.constraint(equalTo: help.widthAnchor),
-            session.widthAnchor.constraint(equalTo: form.widthAnchor)
+            status.widthAnchor.constraint(equalTo: help.widthAnchor)
         ])
         body.setContentHuggingPriority(.defaultLow, for: .vertical)
         body.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -174,11 +162,7 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
 
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         let item = items[row]
-        let date = DateFormatter()
-        date.timeZone = TimeZone(secondsFromGMT: 3 * 3600)
-        date.dateStyle = .short
-        date.timeStyle = .short
-        let label = NSTextField(wrappingLabelWithString: "\(item.id.uuidString)\n\(date.string(from: item.modified))")
+        let label = NSTextField(wrappingLabelWithString: "\(creationDateText(item.createdAt))\n\(item.id.uuidString)")
         label.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
         let badge = NSTextField(labelWithString: item.hasSavedCorrection
             ? "✓ " + L10n.t("review.badgeSaved") : L10n.t("review.badgePending"))
@@ -189,6 +173,14 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
         row.alignment = .leading
         row.spacing = 3
         return row
+    }
+
+    private func creationDateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 3 * 3600)
+        formatter.dateFormat = "dd.MM.yyyy HH:mm:ss 'MSK'"
+        return formatter.string(from: date)
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -219,14 +211,14 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
         raw.string = ""
         reference.string = ""
         edited.string = ""
-        session.stringValue = ""
-        split.selectItem(at: 0)
+        createdAt.stringValue = ""
         silence.state = .off
         updateControls()
     }
 
     private func display(_ document: SpeechReviewDocument) {
         hasDocument = true
+        createdAt.stringValue = String(format: L10n.t("review.createdAt"), creationDateText(document.createdAt))
         let events = document.snapshot.events.filter { $0.stage == "whisper_raw" || $0.stage == "parakeet_raw" }
         raw.string = events.map { event in
             let engine = event.stage == "whisper_raw" ? "Whisper" : "Parakeet"
@@ -237,10 +229,6 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
             hasCorrection = true
             reference.string = correction.reference
             edited.string = correction.editedText
-            session.stringValue = correction.sessionID
-            if let item = split.itemArray.first(where: { $0.representedObject as? String == correction.split }) {
-                split.select(item)
-            }
             silence.state = correction.silence ? .on : .off
         }
         status.stringValue = L10n.t(hasCorrection ? "review.saved" : "review.unconfirmed")
@@ -255,8 +243,6 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
     }
 
     func textDidChange(_ notification: Notification) { markEdited() }
-
-    func controlTextDidChange(_ notification: Notification) { markEdited() }
 
     @objc private func markEdited() {
         guard hasDocument, !busy else { return }
@@ -273,8 +259,6 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
         table.isEnabled = !busy
         reference.isEditable = hasDocument && !busy
         edited.isEditable = hasDocument && !busy
-        session.isEnabled = hasDocument && !busy
-        split.isEnabled = hasDocument && !busy
         silence.isEnabled = hasDocument && !busy
     }
 
@@ -327,17 +311,16 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
 
     @objc private func saveConfirmed() {
         guard let id = selectedID, hasDocument, !busy else { return }
-        let sessionID = session.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let text = reference.string
         let isSilence = silence.state == .on
-        guard !sessionID.isEmpty, split.indexOfSelectedItem > 0,
-              isSilence ? text.isEmpty : !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        guard isSilence ? text.isEmpty : !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             status.stringValue = L10n.t("review.validation")
             return
         }
-        let correction = SpeechReviewCorrection(id: id, reference: text, editedText: edited.string,
-                                               sessionID: sessionID, split: split.selectedItem!.representedObject as! String, silence: isSilence)
-        performMutation(successKey: "review.saved") { [store] in try store.save(correction) } completion: { [weak self] in
+        let editedText = edited.string
+        performMutation(successKey: "review.saved") { [store] in
+            try store.saveConfirmed(id: id, reference: text, editedText: editedText, silence: isSilence)
+        } completion: { [weak self] in
             self?.hasCorrection = true
             self?.updateSavedBadge(id: id, saved: true)
         }
@@ -350,8 +333,6 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
             self?.updateSavedBadge(id: id, saved: false)
             self?.reference.string = ""
             self?.edited.string = ""
-            self?.session.stringValue = ""
-            self?.split.selectItem(at: 0)
             self?.silence.state = .off
         }
     }

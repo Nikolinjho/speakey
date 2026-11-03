@@ -2,6 +2,62 @@ import Foundation
 import CryptoKit
 import Darwin
 
+func checkCreationOrder(root: URL, key: Data) throws {
+    let diagnostics = root.appendingPathComponent("dated-diagnostics")
+    let store = SpeechReviewStore(diagnosticsDirectory: diagnostics,
+                                 correctionsDirectory: root.appendingPathComponent("dated-corrections"), keyProvider: { key })
+    let writer = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { key })
+    let first = SpeechDiagnosticTrace(samples: [0.25], configuration: [:])
+    let second = SpeechDiagnosticTrace(samples: [0.5], configuration: [:])
+    let firstURL = try writer.save(first.snapshot(outcome: "ok"))!
+    let secondURL = try writer.save(second.snapshot(outcome: "ok"))!
+    let recent = Date()
+    try FileManager.default.setAttributes([.creationDate: recent.addingTimeInterval(-120), .modificationDate: recent], ofItemAtPath: firstURL.path)
+    try FileManager.default.setAttributes([.creationDate: recent.addingTimeInterval(-60), .modificationDate: recent.addingTimeInterval(-30)], ofItemAtPath: secondURL.path)
+    try check(store.list().map(\.id) == [second.id, first.id], "Порядок записей зависит от времени создания, а не изменения файла")
+}
+
+func checkAutomaticReview(root: URL, key: Data) throws {
+    let diagnostics = root.appendingPathComponent("automatic-diagnostics")
+    let corrections = root.appendingPathComponent("automatic-corrections")
+    let store = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })
+    let writer = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { key })
+    let trace = SpeechDiagnosticTrace(samples: [0.25], configuration: [:])
+    let source = try writer.save(trace.snapshot(outcome: "ok"))!
+    let created = ISO8601DateFormatter().date(from: "2026-11-01T00:30:00+03:00")!
+    try FileManager.default.setAttributes([.creationDate: created, .modificationDate: Date()], ofItemAtPath: source.path)
+    try store.saveConfirmed(id: trace.id, reference: "проверенная фраза", editedText: "", silence: false)
+    let document = try store.load(id: trace.id)
+    try check(document.createdAt == created, "Сохраняется время создания исходной записи")
+    try check(document.correction?.sessionID == "recorded-2026-11-01", "Автоматическая группа учитывает границу дня MSK")
+    try check(document.correction?.split == "dev", "Новые примеры готовы для настройки без ручного выбора")
+    try check(document.correction?.createdAt == created, "Дата сохранена внутри зашифрованной правки")
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(60)], ofItemAtPath: source.path)
+    try store.saveConfirmed(id: trace.id, reference: "уточнённая фраза", editedText: "Уточнённая фраза.", silence: false)
+    try check(store.load(id: trace.id).createdAt == created, "Повторное исправление не меняет время создания записи")
+    let output = root.appendingPathComponent("automatic-export")
+    try check(store.exportConfirmed(to: output) == 1, "Автоматическое подтверждение экспортируется")
+    let row = try JSONSerialization.jsonObject(with: Data(contentsOf: output.appendingPathComponent("manifest.jsonl"))) as! [String: Any]
+    try check(row["created_at"] as? String == "2026-11-01T00:30:00.000+03:00", "Экспорт сохраняет время создания с часовым поясом")
+    try check(row["session_id"] as? String == "recorded-2026-11-01", "Экспорт группирует по дню создания записи")
+    rejects("Пустой эталон по-прежнему требует явного подтверждения тишины") {
+        try store.saveConfirmed(id: trace.id, reference: "", editedText: "", silence: false)
+    }
+    try store.saveConfirmed(id: trace.id, reference: "", editedText: "", silence: true)
+    try check(store.load(id: trace.id).correction?.silence == true, "Тишина сохраняется без сессии и назначения")
+
+    let legacy: [String: Any] = ["id": trace.id.uuidString, "reference": "старый эталон", "editedText": "",
+                               "sessionID": "old-session", "split": "test", "silence": false]
+    let sealed = try AES.GCM.seal(JSONSerialization.data(withJSONObject: legacy), using: SymmetricKey(data: key)).combined!
+    try sealed.write(to: corrections.appendingPathComponent(trace.id.uuidString + ".enc"))
+    try check(store.load(id: trace.id).correction?.reference == "старый эталон", "Правки без нового поля даты продолжают открываться")
+    try store.saveConfirmed(id: trace.id, reference: "обновлённый эталон", editedText: "", silence: false)
+    let updated = try store.load(id: trace.id).correction!
+    try check(updated.sessionID == "old-session" && updated.split == "test", "Ручная группировка прежних правок сохраняется")
+    try check(updated.createdAt == created, "При пересохранении старой правки дата берётся из исходной записи")
+    print("PASS: автоматическая дата, группы MSK, сохранение без ручной разметки, совместимость старых правок")
+}
+
 func check(_ value: @autoclosure () throws -> Bool, _ message: String) throws {
     guard try value() else { fatalError(message) }
 }
@@ -15,6 +71,8 @@ let root = URL(fileURLWithPath: String(cString: physicalParent)).appendingPathCo
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 defer { if CommandLine.arguments.count == 1 { try? FileManager.default.removeItem(at: root) } }
 let key = Data(repeating: 7, count: 32)
+try checkCreationOrder(root: root, key: key)
+try checkAutomaticReview(root: root, key: key)
 let diagnostics = root.appendingPathComponent("diagnostics")
 let corrections = root.appendingPathComponent("corrections")
 let store = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })

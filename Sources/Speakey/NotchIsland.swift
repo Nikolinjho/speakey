@@ -189,7 +189,7 @@ final class NotchIsland {
         // клики нельзя. Теперь на ней есть кнопки, поэтому сквозным остаётся ВСЁ, кроме них —
         // за это отвечает hitTest контейнера ниже.
         panel.ignoresMouseEvents = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+        panel.collectionBehavior = [.moveToActiveSpace, .stationary, .ignoresCycle, .fullScreenAuxiliary]
 
         let root = PassThroughView(frame: panel.contentView!.bounds)
         root.autoresizingMask = [.width, .height]
