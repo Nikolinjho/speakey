@@ -43,6 +43,12 @@ enum LayoutJournalPreviewCheck {
             NotificationCenter.default.post(name: NSControl.textDidChangeNotification, object: field)
         }
         func rowCount() -> Int { allViews().filter { $0 is NSButton && $0.accessibilityIdentifier().hasPrefix("journal.case.") == true }.count }
+        func capture(_ name: String) {
+            guard let directory = ProcessInfo.processInfo.environment["SPEAKEY_JOURNAL_RULE_ARTIFACTS"],
+                  let index = SettingsSection.sidebarCases.firstIndex(of: .layoutJournal) else { return }
+            let appearance: NSAppearance.Name = ProcessInfo.processInfo.environment["SPEAKEY_JOURNAL_PREVIEW_LIGHT"] == "1" ? .aqua : .darkAqua
+            window.dumpFullWindow(section: index, to: directory + "/" + name + ".png", appearance: appearance, selectSection: false)
+        }
         await settle()
         try check("Локальная сборка запрещает апдейтер", !LocalBuildPolicy.updatesAllowed)
         let decisions = await snapshot()
@@ -146,18 +152,26 @@ enum LayoutJournalPreviewCheck {
         try check("Подтверждение не меняет детектор", LayoutDetector.decide(word: "ghbdtn", exceptions: .shared) == .convert(toCyrillic: true))
         try edit("ghbdt")
         try check("Несохранённое ожидание выключает применение", !(try control("journal.apply.keep", NSButton.self)).isEnabled)
+        try check("При изменении ожидания видна причина недоступности", !(try control("journal.ruleEditNotice", NSTextField.self)).isHidden)
         try edit("ghbdtn")
+        try check("Возврат сохранённого ожидания убирает подсказку", try control("journal.ruleEditNotice", NSTextField.self).isHidden)
         try click("journal.confirm")
         await settle()
+        capture("available")
         try click("journal.apply.keep")
         await settle()
         let applied = await snapshot()
         try check("Отдельная кнопка создаёт активную квитанцию", applied.rules.contains { $0.sourceCaseID == item.id && $0.status == .active })
         try check("Настоящий детектор сохраняет ghbdtn", LayoutDetector.decide(word: "ghbdtn", exceptions: .shared) == .keep)
         try check("Активное правило блокирует правку", !(try control("journal.expected", NSTextField.self)).isEnabled && !(try control("journal.confirm", NSButton.self)).isEnabled)
-        try click("journal.remove")
+        try check("Карточка показывает действующее правило", try control("journal.case.ruleStatus", NSTextField.self).stringValue == L10n.journal("ruleApplied"))
+        await settle()
+        try check("Подтверждение правила сохраняется при обновлении", try control("journal.case.ruleStatus", NSTextField.self).stringValue == L10n.journal("ruleApplied"))
+        capture("active")
+        try click("journal.removeInlineRule")
         await settle()
         try check("Удаление возвращает настоящий детектор", LayoutDetector.decide(word: "ghbdtn", exceptions: .shared) == .convert(toCyrillic: true))
+        try check("Удаление в карточке возвращает применение правила", (try control("journal.apply.keep", NSButton.self)).isEnabled && !allViews().contains { $0.accessibilityIdentifier() == "journal.case.ruleStatus" })
         try click("journal.confirm")
         await settle()
         try click("journal.apply.keep")

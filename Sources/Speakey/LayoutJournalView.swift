@@ -40,6 +40,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     private var appIDs: [String] = []
     private var expectedField: NSTextField?
     private var ruleButtons: [(NSButton, LayoutRuleAction, LayoutCase)] = []
+    private var ruleEditNotice: NSTextField?
 
     init(runtime: LayoutDiagnosticsRuntime) {
         self.runtime = runtime
@@ -114,7 +115,9 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         guard let field = obj.object as? NSTextField, field === expectedField else { return }
         for (button, action, item) in ruleButtons {
             button.isEnabled = !busy && field.stringValue == item.expected && runtime.canApply(item, action: action)
+            styleRuleButton(button)
         }
+        ruleEditNotice?.isHidden = ruleButtons.first.map { field.stringValue == $0.2.expected } ?? true
     }
     func controlTextDidEndEditing(_ obj: Notification) {
         runtime.journalEditing = false
@@ -149,7 +152,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     private func render() {
         guard !runtime.journalEditing else { pendingRefresh = true; return }
         for view in body.arrangedSubviews { body.removeArrangedSubview(view); view.removeFromSuperview() }
-        expectedField = nil; ruleButtons.removeAll()
+        expectedField = nil; ruleButtons.removeAll(); ruleEditNotice = nil
         let decisions = stream.selectedSegment == 0
         caseFilters.isHidden = decisions; decisionFilters.isHidden = !decisions
         if decisions { renderDecisions() }
@@ -257,7 +260,8 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     }
 
     private func detail(_ item: LayoutCase) -> [NSView] {
-        let locked = snapshot.rules.contains { $0.sourceCaseID == item.id && $0.status != .removed }
+        let receipt = snapshot.rules.first { $0.sourceCaseID == item.id && $0.status != .removed }
+        let locked = receipt != nil
         let field = input(item.expected, placeholder: "expected", id: "journal.expected"); expectedField = field
         field.isEnabled = !locked && !busy
         let confirm = button("confirm", id: "journal.confirm") { [weak self, weak field] in self?.review(item, expected: field?.stringValue ?? item.expected, status: .confirmed) }
@@ -273,7 +277,19 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
             saved.textColor = item.status == .confirmed ? .systemGreen : .systemRed
             result.append(saved)
         }
-        if locked { result.append(label("locked", secondary: true)) }
+        if let receipt {
+            let state = label(receipt.status == .active ? "ruleApplied" : receipt.status.rawValue)
+            state.font = .systemFont(ofSize: 13, weight: .semibold)
+            state.textColor = receipt.status == .active ? .systemGreen : .secondaryLabelColor
+            state.setAccessibilityIdentifier("journal.case.ruleStatus")
+            let remove = button("remove", id: "journal.removeInlineRule") { [weak self] in
+                self?.operate { done in self?.runtime.rules.remove(id: receipt.id, completion: done) }
+            }
+            remove.isEnabled = runtime.rulesReady && !busy && receipt.status != .pending
+            result += [row([state, remove]),
+                       text(receipt.typed == receipt.expected ? receipt.typed + " · " + L10n.journal("keep") : receipt.typed + " → " + receipt.expected),
+                       label("global", secondary: true), label("locked", secondary: true)]
+        }
         let formatter = DateFormatter(); formatter.timeZone = TimeZone(secondsFromGMT: 3 * 3600); formatter.dateFormat = "dd.MM.yyyy HH:mm:ss 'MSK'"
         for evidence in item.evidence.suffix(5) {
             let o = evidence.observation
@@ -281,7 +297,12 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
             result.append(text("\(formatter.string(from: evidence.createdAt)) · \(L10n.journal("source")): \(evidence.source.rawValue)\n\(L10n.journal("decision")): \(o.reason.rawValue) · \(o.path.rawValue) · \(o.submission.rawValue)", secondary: true))
         }
         result.append(text(formatter.string(from: item.firstSeen) + " — " + formatter.string(from: item.lastSeen), secondary: true))
+        if locked { return result }
         result += [label("global", secondary: true)]
+        let editNotice = label("saveExpectedFirst", secondary: true)
+        editNotice.setAccessibilityIdentifier("journal.ruleEditNotice")
+        editNotice.isHidden = true; ruleEditNotice = editNotice
+        result.append(editNotice)
         if !locked && !runtime.canApply(item, action: .keep) && !runtime.canApply(item, action: .force) {
             let hint: String
             if item.status != .confirmed { hint = "confirmFirst" }
@@ -297,9 +318,21 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
                 self.operate { done in self.runtime.rules.apply(caseID: item.id, action: action) { done($0.map { _ in () }) } }
             }
             apply.isEnabled = !locked && !busy && runtime.canApply(item, action: action)
+            apply.image = NSImage(systemSymbolName: action == .keep ? "hand.raised.fill" : "arrow.left.arrow.right", accessibilityDescription: nil)
+            apply.imagePosition = .imageLeading
+            apply.font = .systemFont(ofSize: 13, weight: .semibold)
+            apply.controlSize = .large
+            styleRuleButton(apply)
             ruleButtons.append((apply, action, item)); result.append(apply)
+            if (runtime.canApply(item, action: .keep) || runtime.canApply(item, action: .force)) && !apply.isEnabled && !busy {
+                result.append(label(action == .keep ? "keepRequiresOriginal" : "forceRequiresPair", secondary: true))
+            }
         }
         return result
+    }
+    private func styleRuleButton(_ button: NSButton) {
+        button.bezelColor = button.isEnabled ? .controlAccentColor : nil
+        button.contentTintColor = button.isEnabled ? .white : nil
     }
     private func review(_ item: LayoutCase, expected: String, status: LayoutReviewStatus) {
         window?.makeFirstResponder(nil)
