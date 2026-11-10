@@ -4,6 +4,8 @@
 сниппеты и история ввода. Замены печатаются напрямую, без подмены буфера обмена.
 Распознавание речи работает на Mac через Whisper или Parakeet.
 
+[Готовая сборка Speakey 0.4.11 для Apple Silicon](https://github.com/Nikolinjho/speakey/releases/tag/v0.4.11-speakey.1).
+
 ## Сборка
 
 Apple Silicon: macOS 14+. Intel: macOS 13+, только Whisper.
