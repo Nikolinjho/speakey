@@ -55,19 +55,19 @@ struct LayoutJournalPresenter {
         var dictionaryMatch: LayoutDictionaryMatch?
     }
 
-    func observations(_ observations: [LayoutObservation], filter: ObservationFilter) -> [LayoutObservation] {
+    func observations(_ observations: [LayoutObservation], filter: ObservationFilter, sort: Sort = .recent) -> [LayoutObservation] {
         observations.filter {
             (filter.bundleID == nil || $0.bundleID == filter.bundleID) &&
             (filter.action == nil || $0.action == filter.action) &&
             (filter.reason == nil || $0.reason == filter.reason) &&
             (filter.dictionaryMatch == nil || ($0.dictionaryMatch ?? .unavailable) == filter.dictionaryMatch)
         }.sorted {
-            if $0.recordedAt != $1.recordedAt { return $0.recordedAt > $1.recordedAt }
+            if $0.recordedAt != $1.recordedAt { return sort == .oldest ? $0.recordedAt < $1.recordedAt : $0.recordedAt > $1.recordedAt }
             return $0.id.uuidString < $1.id.uuidString
         }
     }
 
-    enum Sort { case repeats, recent }
+    enum Sort { case repeats, recent, oldest }
     enum Action: Equatable { case review, keep, force }
 
     func rows(cases: [LayoutCase], filter: Filter, sort: Sort) -> [LayoutCase] {
@@ -77,7 +77,7 @@ struct LayoutJournalPresenter {
             (filter.status == nil || $0.status == filter.status)
         }.sorted {
             if sort == .repeats, $0.count != $1.count { return $0.count > $1.count }
-            if $0.lastSeen != $1.lastSeen { return $0.lastSeen > $1.lastSeen }
+            if $0.lastSeen != $1.lastSeen { return sort == .oldest ? $0.lastSeen < $1.lastSeen : $0.lastSeen > $1.lastSeen }
             return $0.id.uuidString < $1.id.uuidString
         }
     }

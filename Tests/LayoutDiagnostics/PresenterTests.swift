@@ -73,6 +73,10 @@ enum PresenterTests: DiagnosticSuite {
         var older = observation; older.recordedAt = Date(timeIntervalSince1970: 1)
         var latest = observation; latest.id = UUID(); latest.recordedAt = Date(timeIntervalSince1970: 2); latest.bundleID = "other"; latest.dictionaryMatch = .neither
         tests.check("Решения по умолчанию показывают свежие первыми", presenter.observations([older, latest], filter: .init()).map(\.id) == [latest.id, older.id])
+        tests.check("Решения можно показать от старых к новым", presenter.observations([latest, older], filter: .init(), sort: .oldest).map(\.id) == [older.id, latest.id])
+        a.lastSeen = Date(timeIntervalSince1970: 3); b.lastSeen = Date(timeIntervalSince1970: 1)
+        tests.check("Свежая ошибка выше частой", presenter.rows(cases: [b, a], filter: .init(), sort: .recent).map(\.id) == [a.id, b.id])
+        tests.check("Ошибки можно показать от старых к новым", presenter.rows(cases: [a, b], filter: .init(), sort: .oldest).map(\.id) == [b.id, a.id])
         tests.check("Решения фильтруются по приложению и словарю", presenter.observations([older, latest], filter: .init(bundleID: "other", dictionaryMatch: .neither)).map(\.id) == [latest.id])
         tests.check("Решения фильтруются по причине и действию", presenter.observations([older, latest], filter: .init(action: .blocked, reason: .appDisabled)).isEmpty)
         a.count = b.count; a.lastSeen = b.lastSeen

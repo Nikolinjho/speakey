@@ -31,6 +31,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
     private let app = NSPopUpButton()
     private let status = NSPopUpButton()
     private let sort = NSPopUpButton()
+    private let decisionSort = NSPopUpButton()
     private let stream = NSSegmentedControl()
     private let decisionAction = NSPopUpButton()
     private let decisionReason = NSPopUpButton()
@@ -63,9 +64,11 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         addArrangedSubview(tools)
         for (popup, titles, id) in [(kind, ["allKinds","missedConversion","unwantedConversion"], "kind"),
                                      (status, ["allStatuses","candidate","confirmed","rejected","resolved"], "status"),
-                                     (sort, ["repeats","recent"], "sort")] {
+                                     (sort, ["repeats","recent","oldest"], "sort"),
+                                     (decisionSort, ["recent","oldest"], "decisionSort")] {
             popup.addItems(withTitles: titles.map(L10n.journal)); configure(popup, id: id)
         }
+        sort.selectItem(at: 1)
         app.addItem(withTitle: L10n.journal("allApps")); configure(app, id: "app")
         app.widthAnchor.constraint(lessThanOrEqualToConstant: 150).isActive = true
         stream.segmentCount = 2
@@ -83,11 +86,12 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         for (popup, id) in [(decisionAction, "action"), (decisionReason, "reason"), (dictionary, "dictionary")] { configure(popup, id: id) }
         decisionFilters.orientation = .vertical; decisionFilters.alignment = .leading; decisionFilters.spacing = 8
         decisionFilters.addArrangedSubview(row([decisionAction, decisionReason]))
-        decisionFilters.addArrangedSubview(dictionary)
+        decisionFilters.addArrangedSubview(row([dictionary, decisionSort]))
         addArrangedSubview(decisionFilters)
         kind.widthAnchor.constraint(equalToConstant: 200).isActive = true
         status.widthAnchor.constraint(equalToConstant: 200).isActive = true
         sort.widthAnchor.constraint(equalToConstant: 180).isActive = true
+        decisionSort.widthAnchor.constraint(equalToConstant: 180).isActive = true
         message.textColor = .secondaryLabelColor; message.font = .systemFont(ofSize: 12)
         addArrangedSubview(message)
         reviewNotice.font = .systemFont(ofSize: 12, weight: .medium)
@@ -158,7 +162,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
         if decisions { renderDecisions() }
         else {
             let filter = LayoutJournalPresenter.Filter(kind: kind.indexOfSelectedItem == 0 ? nil : (kind.indexOfSelectedItem == 1 ? .missedConversion : .unwantedConversion), bundleID: app.indexOfSelectedItem > 0 ? appIDs[app.indexOfSelectedItem - 1] : nil, status: [nil, .candidate, .confirmed, .rejected, .resolved][status.indexOfSelectedItem])
-            let cases = presenter.rows(cases: snapshot.cases, filter: filter, sort: sort.indexOfSelectedItem == 0 ? .repeats : .recent)
+            let cases = presenter.rows(cases: snapshot.cases, filter: filter, sort: [LayoutJournalPresenter.Sort.repeats, .recent, .oldest][sort.indexOfSelectedItem])
             if cases.isEmpty { body.addArrangedSubview(label("empty", secondary: true)) }
             for item in cases.prefix(page * 30) {
                 let select = JournalButton("\(item.typed)  →  \(item.produced ?? "—")  →  \(item.expected)", id: "journal.case.\(item.id)") { [weak self] in
@@ -197,7 +201,7 @@ final class LayoutJournalView: NSStackView, NSTextFieldDelegate {
             action: decisionAction.indexOfSelectedItem > 0 ? LayoutAction.allCases[decisionAction.indexOfSelectedItem - 1] : nil,
             reason: decisionReason.indexOfSelectedItem > 0 ? LayoutReason.allCases[decisionReason.indexOfSelectedItem - 1] : nil,
             dictionaryMatch: dictionary.indexOfSelectedItem > 0 ? LayoutDictionaryMatch.allCases[dictionary.indexOfSelectedItem - 1] : nil)
-        let observations = presenter.observations(snapshot.observations, filter: filter)
+        let observations = presenter.observations(snapshot.observations, filter: filter, sort: decisionSort.indexOfSelectedItem == 0 ? .recent : .oldest)
         body.addArrangedSubview(label("decisionsHelp", secondary: true))
         if observations.isEmpty { body.addArrangedSubview(label("emptyDecisions", secondary: true)) }
         let formatter = DateFormatter(); formatter.timeZone = TimeZone(secondsFromGMT: 3 * 3600)

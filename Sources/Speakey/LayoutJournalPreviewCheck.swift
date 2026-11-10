@@ -61,6 +61,14 @@ enum LayoutJournalPreviewCheck {
             allViews().filter { $0.accessibilityIdentifier().hasPrefix("journal.observation.") == true && $0 is NSButton }.count
         }
         try check("По умолчанию видны четыре сохранённых решения", stream.selectedSegment == 0 && decisions.observations.count == 4 && observationRows() == 4)
+        func rowIDs(_ prefix: String) -> [String] {
+            allViews().filter { $0 is NSButton && $0.accessibilityIdentifier().hasPrefix(prefix) }.map { $0.accessibilityIdentifier() }
+        }
+        let newestDecisions = rowIDs("journal.observation.")
+        try check("Решения по умолчанию отсортированы от новых", try control("journal.filter.decisionSort", NSPopUpButton.self).indexOfSelectedItem == 0 && newestDecisions == LayoutJournalPresenter().observations(decisions.observations, filter: .init()).map { "journal.observation.\($0.id)" })
+        try select("journal.filter.decisionSort", 1)
+        try check("Переключатель меняет порядок решений на старые первыми", rowIDs("journal.observation.") == LayoutJournalPresenter().observations(decisions.observations, filter: .init(), sort: .oldest).map { "journal.observation.\($0.id)" })
+        try select("journal.filter.decisionSort", 0)
         try select("journal.filter.dictionary", LayoutDictionaryMatch.allCases.firstIndex(of: .neither)! + 1)
         try check("Настоящий фильтр словаря показывает жжжж без совпадений", observationRows() == 1 && decisions.observations.contains { $0.typed == "жжжж" && $0.alternative == ";;;;" && $0.dictionaryMatch == .neither })
         try select("journal.filter.dictionary", 0)
@@ -108,6 +116,11 @@ enum LayoutJournalPreviewCheck {
         }
         try check("Исходные пять кандидатов без активных правил", initial.cases.count == 5 && initial.rules.isEmpty && initial.cases.allSatisfy { $0.status == .candidate })
         try check("Видны пять настоящих строк", rowCount() == 5)
+        try check("Ошибки по умолчанию отсортированы от новых", try control("journal.filter.sort", NSPopUpButton.self).indexOfSelectedItem == 1 && rowIDs("journal.case.") == LayoutJournalPresenter().rows(cases: initial.cases, filter: .init(), sort: .recent).map { "journal.case.\($0.id)" })
+        try select("journal.filter.sort", 2)
+        try check("Переключатель меняет порядок ошибок на старые первыми", rowIDs("journal.case.") == LayoutJournalPresenter().rows(cases: initial.cases, filter: .init(), sort: .oldest).map { "journal.case.\($0.id)" })
+        try select("journal.filter.sort", 0)
+        try check("Ошибки сохраняют сортировку по повторам", rowIDs("journal.case.") == LayoutJournalPresenter().rows(cases: initial.cases, filter: .init(), sort: .repeats).map { "journal.case.\($0.id)" })
         try select("journal.filter.kind", 2)
         try check("Фильтр вида оставляет одну строку", rowCount() == 1)
         try select("journal.filter.kind", 0)
