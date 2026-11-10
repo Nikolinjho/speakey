@@ -64,6 +64,24 @@ func check(_ value: @autoclosure () throws -> Bool, _ message: String) throws {
 func rejects(_ message: String, _ action: () throws -> Void) {
     do { try action(); fatalError(message) } catch { }
 }
+func checkConfirmedRetention(root: URL, key: Data) throws {
+    let folder = root.appendingPathComponent("confirmed-retention")
+    let diagnostics = folder.appendingPathComponent("speech-diagnostics")
+    let corrections = folder.appendingPathComponent("speech-corrections")
+    let writer = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { key })
+    let review = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })
+    let trace = SpeechDiagnosticTrace(samples: [0.125, -0.25], configuration: [:])
+    let audio = try writer.save(trace.snapshot(outcome: "ok"))!
+    try review.saveConfirmed(id: trace.id, reference: "проверенный звук", editedText: "", silence: false)
+    try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-30 * 86400)], ofItemAtPath: audio.path)
+    let reopened = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { fatalError("Очистка не читает ключ") })
+    try reopened.prune(maximumRecords: 0)
+    try reopened.deleteRecords()
+    try check(review.load(id: trace.id).correction?.reference == "проверенный звук", "Подтверждение переживает очистку и повторное открытие")
+    try check(review.audio(id: trace.id).suffix(8) == trace.snapshot(outcome: "ok").pcmFloat32LE, "Подтверждённое аудио после очистки совпадает побайтно")
+    try check(review.exportConfirmed(to: folder.appendingPathComponent("export")) == 1, "Старое подтверждённое аудио остаётся доступно для экспорта")
+    print("PASS: подтверждение и исходный звук сохраняются после срока, нулевого лимита и очистки")
+}
 let requested = CommandLine.arguments.count > 1 ? URL(fileURLWithPath: CommandLine.arguments[1]) : FileManager.default.temporaryDirectory.appendingPathComponent("speech-review-" + UUID().uuidString)
 let physicalParent = realpath(requested.deletingLastPathComponent().path, nil)!
 defer { free(physicalParent) }
@@ -71,6 +89,7 @@ let root = URL(fileURLWithPath: String(cString: physicalParent)).appendingPathCo
 try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
 defer { if CommandLine.arguments.count == 1 { try? FileManager.default.removeItem(at: root) } }
 let key = Data(repeating: 7, count: 32)
+try checkConfirmedRetention(root: root, key: key)
 try checkCreationOrder(root: root, key: key)
 try checkAutomaticReview(root: root, key: key)
 let diagnostics = root.appendingPathComponent("diagnostics")

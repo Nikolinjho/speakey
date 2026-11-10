@@ -2,6 +2,7 @@ import Foundation
 import CryptoKit
 import Security
 import LocalAuthentication
+import Darwin
 
 /// Согласие действует только для текущего поколения. Выключение отзывает незавершённые записи.
 final class SpeechCollectionPolicy {
@@ -174,7 +175,10 @@ struct SpeechDiagnosticsStore {
     }
 
     func prune(now: Date = Date(), maximumRecords: Int = 200, maximumAge: TimeInterval = 7 * 86400) throws {
-        let entries = try records().sorted {
+        SpeechDiagnostics.reviewLock.lock()
+        defer { SpeechDiagnostics.reviewLock.unlock() }
+        let confirmed = try confirmedRecordNames()
+        let entries = try records().filter { !confirmed.contains($0.url.lastPathComponent) }.sorted {
             $0.modified == $1.modified ? $0.url.lastPathComponent < $1.url.lastPathComponent : $0.modified > $1.modified
         }
         for (index, entry) in entries.enumerated() where index >= maximumRecords || now.timeIntervalSince(entry.modified) > maximumAge {
@@ -182,9 +186,31 @@ struct SpeechDiagnosticsStore {
         }
     }
 
-    /// Удаляет собранные примеры, сохраняя ключ, чужие файлы и внешние экспорты.
+    /// Удаляет неподтверждённые примеры. Подтверждённый звук хранится вместе с эталоном.
     func deleteRecords() throws {
-        for entry in try records() { try FileManager.default.removeItem(at: entry.url) }
+        SpeechDiagnostics.reviewLock.lock()
+        defer { SpeechDiagnostics.reviewLock.unlock() }
+        let confirmed = try confirmedRecordNames()
+        for entry in try records() where !confirmed.contains(entry.url.lastPathComponent) {
+            try FileManager.default.removeItem(at: entry.url)
+        }
+    }
+
+    private func confirmedRecordNames() throws -> Set<String> {
+        let corrections = directory.deletingLastPathComponent().appendingPathComponent("speech-corrections", isDirectory: true)
+        var attributes = stat()
+        guard lstat(corrections.path, &attributes) == 0 else {
+            guard errno == ENOENT else { throw CocoaError(.fileReadUnknown) }
+            return []
+        }
+        let info = try corrections.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard info.isDirectory == true, info.isSymbolicLink != true else { throw CocoaError(.fileReadInvalidFileName) }
+        return Set(try FileManager.default.contentsOfDirectory(at: corrections, includingPropertiesForKeys: nil).compactMap { url in
+            let name = url.deletingPathExtension().lastPathComponent
+            guard url.pathExtension == "enc", let id = UUID(uuidString: name), id.uuidString == name else { return nil }
+            // Даже повреждённый эталон защищает звук: ошибка чтения не должна удалять данные.
+            return url.lastPathComponent
+        })
     }
 
     private func validatedKey() throws -> SymmetricKey {
@@ -234,10 +260,6 @@ enum SpeechDiagnostics {
             do {
                 let store = SpeechDiagnosticsStore(directory: directory, enabled: false, keyProvider: key)
                 try store.deleteRecords()
-                let corrections = SpeechDiagnosticsStore(
-                    directory: directory.deletingLastPathComponent().appendingPathComponent("speech-corrections", isDirectory: true),
-                    enabled: false, keyProvider: key)
-                try corrections.deleteRecords()
                 DispatchQueue.main.async { completion(true) }
             } catch { DispatchQueue.main.async { completion(false) } }
         }

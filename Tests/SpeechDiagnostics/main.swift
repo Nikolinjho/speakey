@@ -136,6 +136,45 @@ for url in [unrelated, malformedName, linked, namedDirectory] {
 }
 print("PASS: retention max200/7days, explicit deletion, unrelated files/symlinks/directories preserved")
 
+let confirmedRoot = root.appendingPathComponent("confirmed-retention")
+let confirmedAudio = confirmedRoot.appendingPathComponent("speech-diagnostics")
+let confirmedText = confirmedRoot.appendingPathComponent("speech-corrections")
+try FileManager.default.createDirectory(at: confirmedAudio, withIntermediateDirectories: true)
+try FileManager.default.createDirectory(at: confirmedText, withIntermediateDirectories: false)
+let confirmedStore = SpeechDiagnosticsStore(directory: confirmedAudio, enabled: true, keyProvider: { key })
+var protectedFiles: [URL] = []
+for _ in 0..<3 {
+    let name = UUID().uuidString + ".enc"
+    let audio = confirmedAudio.appendingPathComponent(name)
+    try encrypted.write(to: audio)
+    try encrypted.write(to: confirmedText.appendingPathComponent(name))
+    try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-30 * 86400)], ofItemAtPath: audio.path)
+    protectedFiles.append(audio)
+}
+let unconfirmed = confirmedAudio.appendingPathComponent(UUID().uuidString + ".enc")
+try encrypted.write(to: unconfirmed)
+try confirmedStore.prune(now: now, maximumRecords: 1)
+require(protectedFiles.allSatisfy { FileManager.default.fileExists(atPath: $0.path) }, "Подтверждённый звук удалён по сроку или лимиту")
+require(FileManager.default.fileExists(atPath: unconfirmed.path), "Подтверждённые записи заняли лимит неподтверждённых")
+try confirmedStore.deleteRecords()
+require(protectedFiles.allSatisfy { FileManager.default.fileExists(atPath: $0.path) }, "Очистка собранных примеров удалила подтверждённый звук")
+require(!FileManager.default.fileExists(atPath: unconfirmed.path), "Очистка сохранила неподтверждённый пример")
+try FileManager.default.removeItem(at: confirmedText.appendingPathComponent(protectedFiles[0].lastPathComponent))
+try confirmedStore.prune(now: now)
+require(!FileManager.default.fileExists(atPath: protectedFiles[0].path), "Снятое подтверждение навсегда защищает старый звук")
+require(protectedFiles.dropFirst().allSatisfy { FileManager.default.fileExists(atPath: $0.path) }, "Очистка после снятия одного подтверждения затронула остальные")
+let inaccessible = root.appendingPathComponent("unsafe-confirmations")
+let unsafeAudio = inaccessible.appendingPathComponent("speech-diagnostics")
+try FileManager.default.createDirectory(at: unsafeAudio, withIntermediateDirectories: true)
+let unsafeFile = unsafeAudio.appendingPathComponent(UUID().uuidString + ".enc")
+try encrypted.write(to: unsafeFile)
+try FileManager.default.createSymbolicLink(at: inaccessible.appendingPathComponent("speech-corrections"), withDestinationURL: inaccessible.appendingPathComponent("missing"))
+let unsafeStore = SpeechDiagnosticsStore(directory: unsafeAudio, enabled: true, keyProvider: { key })
+rejects { try unsafeStore.prune(maximumRecords: 0) }
+rejects { try unsafeStore.deleteRecords() }
+require(FileManager.default.fileExists(atPath: unsafeFile.path), "Неизвестный статус подтверждения привёл к удалению аудио")
+print("PASS: подтверждённый звук переживает срок, лимит и очистку, отдельный лимит черновиков")
+
 let envSuiteName = "speech-policy-env-test-" + UUID().uuidString
 let envDefaults = UserDefaults(suiteName: envSuiteName)!
 defer { envDefaults.removePersistentDomain(forName: envSuiteName) }
