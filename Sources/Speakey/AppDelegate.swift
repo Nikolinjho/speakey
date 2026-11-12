@@ -807,6 +807,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // вернёт не-nil РОВНО когда Accessibility реально выдан СЕЙЧАС — это живой детектор без TCC-кэша.
         if engine.start() {
             engineRunning = true
+            if AutocompletePrefs.enabled { AutocompleteController.shared.setEnabled(true) }
             welcomePending = false
             retryTicks = 0
             // ⚠️ ПОДНЯВШИЙСЯ TAP НЕ ЗНАЧИТ, ЧТО МЫ ЧТО-ТО СЛЫШИМ (12.08.2026, поймано на авторе).
@@ -1268,6 +1269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         CallRecorder.shared.stopForTermination()   // сегмент закрывается, расшифровку доберёт следующий запуск
+        CompletionEngine.shared.stop()             // помощник автодополнения не переживает Speakey
         VoiceController.shared.unloadForTermination()
         slapDetector?.shutdown()
         if let observer = slapSettingsObserver {

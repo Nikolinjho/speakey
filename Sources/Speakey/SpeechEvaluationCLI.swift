@@ -37,8 +37,10 @@ enum SpeechEvaluationCLI {
         guard samples.count <= Int(Int32.max) else { throw SpeechDiagnosticsExport.Failure.invalidAudio }
         let modelHash = try sha256(file: model)
         let loadStart = ProcessInfo.processInfo.systemUptime
-        // В CLI не читаем VoiceDictionary.shared и AppSettings.shared, не меняем UserDefaults.
-        guard let bridge = WhisperBridge(modelPath: model.path, recognitionHint: { nil }) else { throw Failure.modelUnavailable }
+        // В CLI не читаем AppSettings.shared, не меняем UserDefaults. Словарь диктовки читаем только
+        // при SPEAKEY_SPEECH_HINT=1 (замер затравки); по умолчанию затравка без словаря, как раньше.
+        let useHint = ProcessInfo.processInfo.environment["SPEAKEY_SPEECH_HINT"] == "1"
+        guard let bridge = WhisperBridge(modelPath: model.path, recognitionHint: useHint ? { VoiceDictionary.shared.recognitionHint() } : { nil }) else { throw Failure.modelUnavailable }
         let loadSeconds = ProcessInfo.processInfo.systemUptime - loadStart
         let trace = SpeechDiagnosticTrace(samples: samples, configuration: ["scope": "isolated_whisper_bridge_no_dictionary"])
         let started = ProcessInfo.processInfo.systemUptime

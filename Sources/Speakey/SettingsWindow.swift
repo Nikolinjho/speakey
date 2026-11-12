@@ -40,7 +40,7 @@ enum SettingsSection: Int, CaseIterable {
     /// функции, потом система, потом «про нас». Голосовой набор стоит третьим, а не пятым: это
     /// второй двигатель приложения и первая тема по числу отзывов (21 из 73 содержательных).
     /// `rawValue` нигде не сохраняется, поэтому переставлять здесь безопасно.
-    case switching, exceptions, layoutJournal, ambiguous, voice, snippets, translate, general, privacy, about
+    case switching, exceptions, layoutJournal, ambiguous, voice, autocomplete, snippets, translate, general, privacy, about
 
     /// Спорные слова открываются из раздела исключений.
     static var sidebarCases: [SettingsSection] { allCases.filter { $0 != .ambiguous } }
@@ -53,6 +53,7 @@ enum SettingsSection: Int, CaseIterable {
         case .snippets:   return "sec.snippets"
         case .translate:  return "sec.translate"
         case .voice:      return "sec.voice"
+        case .autocomplete: return "sec.autocomplete"
         case .general:    return "sec.general"
         case .privacy:    return "sec.privacy"
         case .about:      return "sec.about"
@@ -67,6 +68,7 @@ enum SettingsSection: Int, CaseIterable {
         case .snippets:   return "wand.and.stars"
         case .translate:  return "character.bubble"
         case .voice:      return "mic"
+        case .autocomplete: return "text.cursor"
         case .general:    return "gearshape"
         case .privacy:    return "lock.shield"
         case .about:      return "info.circle"
@@ -1280,6 +1282,7 @@ final class DetailVC: NSViewController {
         case .snippets:   built = buildSnippets()
         case .translate:  built = buildTranslate()
         case .voice:      built = buildVoice()
+        case .autocomplete: built = AutocompleteSettingsView()
         case .general:    built = buildGeneral()
         case .privacy:    built = buildPrivacy()
         case .about:      built = buildAbout()

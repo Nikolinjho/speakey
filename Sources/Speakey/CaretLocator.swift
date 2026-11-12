@@ -8,7 +8,11 @@ import AppKit
 enum CaretLocator {
 
     /// Прямоугольник каретки в Cocoa-координатах (origin снизу-слева). nil — если недоступно.
-    static func caretScreenRect() -> NSRect? {
+    /// `preferCharBefore` — сначала правый край символа перед кареткой. Нужен призрачному тексту
+    /// автодополнения: TextEdit для пустого диапазона в конце строки отдаёт прямоугольник на ~строку
+    /// выше настоящей каретки (замер 12.11.2026), а прямоугольник символа точен. Диктовка остаётся
+    /// на прежнем порядке — для неё важнее пустое поле, где символа перед кареткой нет.
+    static func caretScreenRect(preferCharBefore: Bool = false) -> NSRect? {
         let sys = AXUIElementCreateSystemWide()
         // Кап на AX-сообщения: не вешаем старт диктовки, если фронтальное приложение тупит.
         AXUIElementSetMessagingTimeout(sys, 0.25)
@@ -44,7 +48,11 @@ enum CaretLocator {
             return q
         }
 
-        var quartz = bounds(loc, 0)
+        var quartz: CGRect?
+        if preferCharBefore, loc > 0, let before = bounds(loc - 1, 1), before.width > 0, before.width < 200 {
+            quartz = CGRect(x: before.maxX, y: before.origin.y, width: 1, height: before.height)
+        }
+        if quartz == nil { quartz = bounds(loc, 0) }
         if quartz == nil { quartz = bounds(loc, 1) }
         if quartz == nil, loc > 0, let before = bounds(loc - 1, 1) {
             quartz = CGRect(x: before.maxX, y: before.origin.y, width: 1, height: before.height)

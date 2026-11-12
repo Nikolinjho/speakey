@@ -680,6 +680,12 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         menu.addItem(auto)
         addLayoutTwins(of: auto, keyCode: 0)   // a
 
+        let autocomplete = NSMenuItem(title: L10n.t("sec.autocomplete"), action: #selector(toggleAutocomplete), keyEquivalent: "")
+        autocomplete.target = self
+        autocomplete.state = AutocompletePrefs.enabled ? .on : .off
+        autocomplete.image = icon("text.cursor")
+        menu.addItem(autocomplete)
+
         // ПАУЗА — СРАЗУ ПОД АВТОПЕРЕКЛЮЧЕНИЕМ, вместо прежней строки-подсказки «Переключить слово:
         // ⌥⇧» (автор 07.08). Место выбрано по смыслу: это соседний тумблер того же самого, только на
         // время, и стоять он должен рядом со своим постоянным собратом, а не отдельной группой.
@@ -831,6 +837,13 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         let newValue = !settings.autoEnabled
         settings.autoEnabled = newValue
         onToggleAuto?(newValue)
+        buildMenu()
+    }
+
+    @objc private func toggleAutocomplete() {
+        let newValue = !AutocompletePrefs.enabled
+        AutocompletePrefs.enabled = newValue
+        AutocompleteController.shared.setEnabled(newValue)
         buildMenu()
     }
 

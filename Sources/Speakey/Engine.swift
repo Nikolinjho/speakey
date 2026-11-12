@@ -645,6 +645,7 @@ final class Engine: EventTapHandler {
     }
 
     func handleContextReset(at eventTime: TimeInterval) {
+        AutocompleteController.shared.contextReset()
         diagnostics.controller.resetContext()
         invalidateNeuralContext()
         contextResetAt = eventTime
@@ -731,6 +732,16 @@ final class Engine: EventTapHandler {
             return false
         }
         if Pause.active { diagnostics.clearTemporaryState() }
+
+        // АВТОДОПОЛНЕНИЕ (спека 2026-11-12). Стоит ДО сниппетов и раскладки, но перехватывает
+        // клавишу ТОЛЬКО при видимой подсказке: без неё Tab идёт дальше как раньше. Принятый кусок
+        // вставляет синтетика, которую буфер не видит, поэтому буфер после приёма обнуляем —
+        // иначе конверсия на следующей границе работала бы по устаревшему слову.
+        if AutocompleteController.shared.handleKey(keyCode: keyCode, characters: characters, flags: flags) {
+            liveFixLast = ""
+            buffer.clear()
+            return true
+        }
 
         // Ленивая очистка после context-события (клик/Spotlight — каретка сдвинулась): делаем СИНХРОННО
         // здесь, прямо перед обработкой нажатия → первый символ записывается в уже чистый буфер (без гонки).
@@ -987,6 +998,7 @@ final class Engine: EventTapHandler {
         neuralFocus.track(pid: NSWorkspace.shared.frontmostApplication?.processIdentifier)
         let bid = Engine.frontmostBundleID()
         if bid != frontAppBID {
+            AutocompleteController.shared.contextReset()
             if bid == diagnostics.ownBundleID { diagnostics.freezeRecent() }
             diagnostics.controller.resetContext()
             invalidateNeuralContext()

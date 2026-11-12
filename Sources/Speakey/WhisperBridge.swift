@@ -29,7 +29,7 @@ final class WhisperBridge {
     }()
 
     /// Загружает модель ggml-*.bin. Возвращает nil, если файла нет / не та архитектура.
-    init?(modelPath: String, recognitionHint: @escaping () -> String? = { VoiceDictionary.shared.recognitionHint() }) {
+    init?(modelPath: String, recognitionHint: @escaping () -> String? = { DictationContext.hint() }) {
         self.recognitionHint = recognitionHint
         diagnosticModel = URL(fileURLWithPath: modelPath).lastPathComponent
         guard FileManager.default.fileExists(atPath: modelPath) else { return nil }

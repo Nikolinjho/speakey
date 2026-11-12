@@ -261,6 +261,7 @@ final class VoiceController {
             // ⚠️ УРОВЕНЬ ВХОДА ПОДНИМАЕМ ЗДЕСЬ, А НЕ В setState(.recording): тот вызывается уже ПОСЛЕ
             // recorder.start(), и первые слова ушли бы с прежней громкостью. Функция выключена по
             // умолчанию и на устройствах без регулятора молча ничего не делает.
+            DictationContext.prepare()   // снимок текста экрана для затравки (если включено)
             MicVolume.raiseIfEnabled()
             do {
                 try recorder.start()

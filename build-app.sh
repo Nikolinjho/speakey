@@ -332,6 +332,19 @@ fi
 # Уведомления об авторстве и лицензии распространяются вместе с приложением.
 cp LICENSE "$APP/Contents/Resources/LICENSE"
 cp THIRD_PARTY.md "$APP/Contents/Resources/THIRD_PARTY.md"
+
+# Помощник автодополнения: llama-server из vendor/llama.cpp (свой ggml, поэтому отдельный процесс,
+# см. CompletionEngine). Нет сборки — приложение собирается без него, раздел покажет «нет помощника».
+# Собрать один раз: cmake -S vendor/llama.cpp -B vendor/llama.cpp/build-speakey -DBUILD_SHARED_LIBS=OFF \
+#   -DLLAMA_CURL=OFF -DGGML_METAL_EMBED_LIBRARY=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=14.0 -DCMAKE_BUILD_TYPE=Release
+#   && cmake --build vendor/llama.cpp/build-speakey --target llama-server -j
+LLAMA_SERVER="vendor/llama.cpp/build-speakey/bin/llama-server"
+if [ -x "$LLAMA_SERVER" ]; then
+  mkdir -p "$APP/Contents/Helpers"
+  cp "$LLAMA_SERVER" "$APP/Contents/Helpers/speakey-complete"
+else
+  echo "  ⚠️ llama-server не собран — автодополнение будет без помощника"
+fi
 bash "$PROJECT_ROOT/scripts/sign-speakey-app.sh" "$APP"
 
 echo "✓ Готово: $APP"

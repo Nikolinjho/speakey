@@ -51,6 +51,11 @@ else
   ENT="$PROJECT_ROOT/Speakey-dev.entitlements"
   CS_OPTS=(--timestamp=none)
 fi
+# Вложенный помощник подписываем первым: подпись бандла запечатывает уже подписанные вложения.
+HELPER="$APP/Contents/Helpers/speakey-complete"
+if [ -f "$HELPER" ]; then
+  codesign --force --sign "$SIGN_SHA" "${CS_OPTS[@]}" "$HELPER"
+fi
 codesign --force --sign "$SIGN_SHA" --entitlements "$ENT" "${CS_OPTS[@]}" "$APP"
 codesign --verify --deep --strict "$APP"
 echo "Подпись и строгая проверка готовы: $SIGN_ID ($SIGN_SHA)"
