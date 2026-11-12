@@ -48,7 +48,7 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
         let title = NSTextField(labelWithString: L10n.autocomplete("title"))
         title.font = .systemFont(ofSize: 20, weight: .semibold)
         title.alignment = .left
-        addArrangedSubview(title)
+        addArrangedSubview(leftAligned(title))
         addArrangedSubview(gap(2))
 
         addArrangedSubview(card([
@@ -124,7 +124,20 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
 
     // MARK: - Строки
 
-    private func eyebrow(_ t: String) -> NSView { DetailVC.eyebrowLabel(t) }
+    private func eyebrow(_ t: String) -> NSView { leftAligned(DetailVC.eyebrowLabel(t)) }
+
+    /// В вертикальном стеке с `.width` лейбл растягивался и рисовался у правого края. Ряд с
+    /// распоркой держит его слева, как заголовки в остальных разделах.
+    private func leftAligned(_ v: NSView) -> NSView {
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        v.setContentHuggingPriority(.required, for: .horizontal)
+        let row = NSStackView(views: [v, spacer])
+        row.orientation = .horizontal
+        row.alignment = .firstBaseline
+        row.spacing = 0
+        return row
+    }
 
     private func gap(_ h: CGFloat) -> NSView {
         let v = NSView(); v.translatesAutoresizingMaskIntoConstraints = false
@@ -313,7 +326,7 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
         aboutText.setAccessibilityIdentifier("ac.about")
         aboutText.setAccessibilityLabel(L10n.autocomplete("about"))
         scroll.documentView = aboutText
-        let v = NSStackView(views: [title, sub, scroll])
+        let v = NSStackView(views: [leftAligned(title), sub, scroll])
         v.orientation = .vertical; v.alignment = .width; v.spacing = 3
         v.edgeInsets = NSEdgeInsets(top: 7, left: 11, bottom: 9, right: 11)
         return v
