@@ -7,6 +7,8 @@ struct FieldSnapshot {
     let before: String
     let caretRect: NSRect   // Cocoa-координаты
     let pid: pid_t
+    /// Справа от каретки на той же строке есть текст — подсказка легла бы поверх него.
+    var textAfterOnLine = false
 }
 
 /// Снимок поля ввода и сборка контекста для модели. Только вне main-колбэка тапа:
@@ -17,8 +19,33 @@ enum ContextHub {
               let bid = app.bundleIdentifier else { return nil }
         guard let before = AXScreenCheck.textBeforeCaret(maxLen: maxBefore) else { return nil }
         guard let rect = CaretLocator.caretScreenRect(preferCharBefore: true) else { return nil }
-        return FieldSnapshot(bundleID: bid, appName: app.localizedName ?? bid, before: before,
-                             caretRect: rect, pid: app.processIdentifier)
+        var snap = FieldSnapshot(bundleID: bid, appName: app.localizedName ?? bid, before: before,
+                                 caretRect: rect, pid: app.processIdentifier)
+        snap.textAfterOnLine = charAfterCaret().map { $0 != "\n" && $0 != "\r" } ?? false
+        return snap
+    }
+
+    /// Символ сразу после каретки: nil — каретка в конце текста или поле не ответило.
+    private static func charAfterCaret() -> Character? {
+        let sys = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(sys, 0.05)
+        var focused: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
+              let raw = focused, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
+        let el = unsafeDowncast(raw as AnyObject, to: AXUIElement.self)
+        AXUIElementSetMessagingTimeout(el, 0.05)
+        var rangeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rr = rangeRef, CFGetTypeID(rr) == AXValueGetTypeID() else { return nil }
+        var sel = CFRange()
+        guard AXValueGetValue(unsafeDowncast(rr as AnyObject, to: AXValue.self), .cfRange, &sel) else { return nil }
+        var want = CFRange(location: sel.location + sel.length, length: 1)
+        guard let v = AXValueCreate(.cfRange, &want) else { return nil }
+        var out: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(el, kAXStringForRangeParameterizedAttribute as CFString,
+                                                         v, &out) == .success,
+              let str = out as? String else { return nil }
+        return str.first
     }
 
     static func context(for s: FieldSnapshot) -> CompletionContext {
@@ -43,12 +70,15 @@ enum ContextHub {
 
         if AutocompletePrefs.useScreen,
            !AutocompleteAppStore.hardExcluded.contains(s.bundleID),
-           let t = ScreenContextProvider.shared.latestText, !t.isEmpty {
+           let t = ScreenContextProvider.shared.text(for: s.pid), !t.isEmpty {
             c.screenText = t
         }
 
-        if AutocompletePrefs.useClipboard,
-           let clip = NSPasteboard.general.string(forType: .string) {
+        // Буфер с пометкой «скрытое/временное» (менеджеры паролей) в промпт не идёт.
+        let pb = NSPasteboard.general
+        let concealed = pb.types?.contains { $0.rawValue == "org.nspasteboard.ConcealedType" || $0.rawValue == "org.nspasteboard.TransientType" } ?? false
+        if AutocompletePrefs.useClipboard, !concealed,
+           let clip = pb.string(forType: .string) {
             let t = clip.trimmingCharacters(in: .whitespacesAndNewlines)
             if !t.isEmpty && t.count <= 500 { c.clipboard = t }
         }

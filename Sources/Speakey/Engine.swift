@@ -998,7 +998,7 @@ final class Engine: EventTapHandler {
         neuralFocus.track(pid: NSWorkspace.shared.frontmostApplication?.processIdentifier)
         let bid = Engine.frontmostBundleID()
         if bid != frontAppBID {
-            AutocompleteController.shared.contextReset()
+            AutocompleteController.shared.contextReset(appChanged: true)
             if bid == diagnostics.ownBundleID { diagnostics.freezeRecent() }
             diagnostics.controller.resetContext()
             invalidateNeuralContext()

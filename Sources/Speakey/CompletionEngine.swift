@@ -23,6 +23,13 @@ final class CompletionEngine {
     private var modelURL: URL?
     private var lastUse = Date()
     private var idleTimer: Timer?
+    /// Бэкофф перезапусков: упавший помощник (битая модель, нехватка памяти) не поднимается на каждой
+    /// паузе в наборе. 5 с, 10 с, 20 с… до 5 минут; успешный старт сбрасывает счётчик.
+    private var failures = 0
+    private var nextAttempt = Date.distantPast
+    /// Подряд идущие запросы без ответа: помощник жив, но завис — перезапускаем.
+    private var silentFailures = 0
+    var currentModel: URL? { modelURL }
 
     private let lock = NSLock()
     private var requestSeq = 0
@@ -56,9 +63,12 @@ final class CompletionEngine {
 
     /// Идемпотентно. Другая модель — перезапуск. Вызывать с main.
     func ensureRunning(model: URL) {
+        lastUse = Date()
         if let p = process, p.isRunning, modelURL == model { return }
+        guard Date() >= nextAttempt else { return }
         stop()
         guard let helper = Self.helperURL else {
+            noteFailure()
             state = .failed("helper-missing")
             kbLog("complete: помощник не найден в бандле")
             return
@@ -79,6 +89,7 @@ final class CompletionEngine {
             DispatchQueue.main.async {
                 guard let self, self.process === proc else { return }
                 self.process = nil
+                self.noteFailure()
                 self.state = .failed("exit-\(proc.terminationStatus)")
                 kbLog("complete: помощник завершился, код \(proc.terminationStatus)")
             }
@@ -86,6 +97,7 @@ final class CompletionEngine {
         do {
             try p.run()
         } catch {
+            noteFailure()
             state = .failed("launch")
             kbLog("complete: помощник не запустился")
             return
@@ -113,6 +125,11 @@ final class CompletionEngine {
 
     func noteUse() { lastUse = Date() }
 
+    private func noteFailure() {
+        failures += 1
+        nextAttempt = Date().addingTimeInterval(min(300, 5 * pow(2, Double(failures - 1))))
+    }
+
     /// Старый помощник от упавшего Speakey держал бы гигабайты модели — гасим по pid-файлу.
     private static func killStale() {
         guard let s = try? String(contentsOf: pidFile, encoding: .utf8),
@@ -130,12 +147,15 @@ final class CompletionEngine {
             DispatchQueue.main.async {
                 guard let self, self.process === p else { return }
                 if ok {
+                    self.failures = 0
+                    self.silentFailures = 0
                     self.state = .ready
                     kbLog("complete: модель готова за \(Int(Date().timeIntervalSince(started) * 1000)) мс")
                 } else if Date().timeIntervalSince(started) > 120 {
-                    self.state = .failed("timeout")
                     kbLog("complete: модель не поднялась за 120 с")
                     self.stop()
+                    self.noteFailure()
+                    self.state = .failed("timeout")
                 } else {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.pollHealth(process: p, started: started) }
                 }
@@ -177,11 +197,15 @@ final class CompletionEngine {
 
         io.async { [weak self] in
             guard let self else { return }
-            let res = try? Self.http(method: "POST", path: "/completion", body: data, timeout: 3) { fd in
+            let res = try? Self.http(method: "POST", path: "/completion", body: data, timeout: 3, fdSink: { fd in
                 self.lock.lock(); defer { self.lock.unlock() }
                 if self.requestSeq == seq { self.inFlightFD = fd; return true }
                 return false   // уже отменён
-            }
+            }, fdDone: { fd in
+                // Номер сокета снимаем ДО close: иначе отмена из другого потока могла бы сделать
+                // shutdown по номеру, который система уже отдала чужому сокету (ревью 12.11).
+                self.lock.lock(); if self.inFlightFD == fd { self.inFlightFD = -1 }; self.lock.unlock()
+            })
             var text: String?
             if let res, res.status == 200,
                let obj = try? JSONSerialization.jsonObject(with: res.body) as? [String: Any] {
@@ -192,7 +216,19 @@ final class CompletionEngine {
             let cb = mine ? self.inFlightCompletion : nil
             if mine { self.inFlightCompletion = nil; self.inFlightFD = -1 }
             self.lock.unlock()
-            if let cb { DispatchQueue.main.async { cb(text) } }
+            let hung = mine && res == nil
+            DispatchQueue.main.async {
+                if hung {
+                    self.silentFailures += 1
+                    if self.silentFailures >= 3, let m = self.modelURL {
+                        kbLog("complete: помощник не отвечает — перезапуск")
+                        self.silentFailures = 0
+                        self.stop()
+                        self.ensureRunning(model: m)
+                    }
+                } else if mine { self.silentFailures = 0 }
+                cb?(text)
+            }
         }
     }
 
@@ -214,10 +250,10 @@ final class CompletionEngine {
 
     /// `fdSink` получает сокет до отправки и может отказаться (запрос уже отменён).
     static func http(method: String, path: String, body: Data?, timeout: TimeInterval,
-                     fdSink: ((Int32) -> Bool)?) throws -> Response {
+                     fdSink: ((Int32) -> Bool)?, fdDone: ((Int32) -> Void)? = nil) throws -> Response {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw HTTPError.socket }
-        defer { close(fd) }
+        defer { fdDone?(fd); close(fd) }
         var tv = timeval(tv_sec: Int(timeout), tv_usec: Int32((timeout - floor(timeout)) * 1_000_000))
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))

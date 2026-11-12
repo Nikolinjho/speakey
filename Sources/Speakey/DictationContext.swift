@@ -7,8 +7,9 @@ enum DictationContext {
     /// ничего не ждём; без разрешения провайдер тихо оставит nil.
     static func prepare() {
         guard AutocompletePrefs.dictationContext, AutocompletePrefs.useScreen,
-              let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier else { return }
-        ScreenContextProvider.shared.refreshIfNeeded(pid: pid)
+              let app = NSWorkspace.shared.frontmostApplication,
+              AutocompleteAppStore.shared.isEnabled(app.bundleIdentifier ?? "") else { return }
+        ScreenContextProvider.shared.refreshIfNeeded(pid: app.processIdentifier)
     }
 
     /// Слова для затравки whisper. Выключено — байт-в-байт `VoiceDictionary.recognitionHint()`.
@@ -16,11 +17,14 @@ enum DictationContext {
     /// затравки это ≤ 495 при лимите 600 в WhisperBridge).
     static func hint() -> String? {
         guard AutocompletePrefs.dictationContext else { return VoiceDictionary.shared.recognitionHint() }
+        // Текст экрана — только того окна, куда пойдёт диктовка, и свежий.
+        let pid = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+        let screen = ScreenContextProvider.shared.text(for: pid) ?? ""
         let dictionary = (VoiceDictionary.shared.recognitionHint() ?? "")
             .components(separatedBy: ", ").filter { !$0.isEmpty }
         return CompletionPrompt.dictationHint(
             dictionary: dictionary,
-            screenTerms: CompletionPrompt.terms(from: ScreenContextProvider.shared.latestText ?? "", max: 12),
+            screenTerms: CompletionPrompt.terms(from: screen, max: 12),
             corpusTerms: PersonalCorpus.shared.topTerms(limit: 12),
             maxChars: 240)
     }

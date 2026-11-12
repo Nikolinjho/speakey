@@ -11,6 +11,10 @@ final class ScreenContextProvider {
     private let lock = NSLock()
     private var _latest: String?
     private var lastAttempt = Date.distantPast
+    /// Чей текст лежит в кэше и когда снят: чужое или старое окно в промпт не попадает (ревью 12.11).
+    private var _latestPID: pid_t = 0
+    private var _latestAt = Date.distantPast
+    private var requestedPID: pid_t = 0
     private var inFlight = false
     private var cache: (windowID: CGWindowID, date: Date, text: String)?
 
@@ -25,7 +29,14 @@ final class ScreenContextProvider {
     private func finish() { lock.lock(); inFlight = false; lock.unlock() }
 
     private func setLatest(_ t: String?) {
-        lock.lock(); _latest = t; lock.unlock()
+        lock.lock(); _latest = t; _latestPID = requestedPID; _latestAt = Date(); lock.unlock()
+    }
+
+    /// Текст окна процесса `pid`, если он снят именно с него и не старше 15 с.
+    func text(for pid: pid_t) -> String? {
+        lock.lock(); defer { lock.unlock() }
+        guard _latestPID == pid, Date().timeIntervalSince(_latestAt) < 15 else { return nil }
+        return _latest
     }
 
     /// Асинхронно, не чаще раза в 3 с. Кэш распознанного текста окна живёт 10 с.
@@ -36,8 +47,10 @@ final class ScreenContextProvider {
             setLatest(nil); return
         }
         lock.lock()
-        if inFlight || Date().timeIntervalSince(lastAttempt) < 3 { lock.unlock(); return }
-        inFlight = true; lastAttempt = Date()
+        // Смена процесса снимает троттлинг: старый текст к новому окну не относится.
+        let samePID = pid == requestedPID
+        if inFlight || (samePID && Date().timeIntervalSince(lastAttempt) < 3) { lock.unlock(); return }
+        inFlight = true; lastAttempt = Date(); requestedPID = pid
         lock.unlock()
         Task.detached(priority: .utility) { [weak self] in
             await self?.capture(pid: pid)

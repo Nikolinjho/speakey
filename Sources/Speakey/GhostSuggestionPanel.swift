@@ -17,7 +17,9 @@ final class GhostSuggestionPanel {
             let fontSize = min(28, max(11, (caret.height * 0.85).rounded()))
             let font = NSFont.systemFont(ofSize: fontSize)
             label.font = font
-            label.textColor = .secondaryLabelColor
+            // Фиксированный средне-серый, а не secondaryLabelColor: тот берёт тему Speakey, а не поля,
+            // и в тёмной теме светло-серая подсказка пропадала на белой странице Safari (12.11).
+            label.textColor = NSColor(white: 0.52, alpha: 0.95)
             label.stringValue = isCorrection ? "→ " + text : text
             label.sizeToFit()
             let size = label.frame.size
@@ -31,7 +33,7 @@ final class GhostSuggestionPanel {
             // Центр строки лейбла — на центр каретки: базовые линии разных шрифтов совпадают с точностью
             // до пикселя, а ошибиться на строку так нельзя.
             let y = (caret.midY - h / 2).rounded()
-            if ProcessInfo.processInfo.environment["SPEAKEY_GHOST_DEBUG"] != nil || Self.debugOnce {
+            if UserDefaults.standard.bool(forKey: "ac.debugSkips") || Self.debugOnce {
                 Self.debugOnce = false
                 kbLog("ghost: каретка \(caret.integral) панель y=\(Int(y)) h=\(Int(h)) шрифт \(Int(fontSize))")
             }

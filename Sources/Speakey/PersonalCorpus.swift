@@ -8,7 +8,7 @@ final class PersonalCorpus {
     static let shared = PersonalCorpus(
         directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Speakey", isDirectory: true),
-        keyProvider: { PersonalCorpus.keychainKey() })
+        keyProvider: { PersonalCorpus.keychainKey() }, usesKeychain: true)
 
     private struct Entry: Codable {
         var text: String
@@ -24,8 +24,10 @@ final class PersonalCorpus {
     private let lock = NSLock()
     private var entries: [Entry] = []
     private var loaded = false
+    private let usesKeychain: Bool
 
-    init(directory: URL, keyProvider: @escaping () -> SymmetricKey) {
+    init(directory: URL, keyProvider: @escaping () -> SymmetricKey, usesKeychain: Bool = false) {
+        self.usesKeychain = usesKeychain
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         self.fileURL = directory.appendingPathComponent("corpus.bin")
         self.keyProvider = keyProvider
@@ -42,7 +44,19 @@ final class PersonalCorpus {
         guard clean.count >= Self.minLength else { return }
         lock.lock(); defer { lock.unlock() }
         loadIfNeeded()
-        entries.append(Entry(text: clean, bundleID: bundleID, date: Date().timeIntervalSince1970))
+        // Та же сессия поля приходит повторно и дописанной: заменяем запись, а не плодим перекрытия —
+        // иначе любое слово набирало бы частоту и лезло в частые термины (ревью 12.11).
+        let now = Date().timeIntervalSince1970
+        if let i = entries.indices.suffix(30).last(where: {
+            entries[$0].bundleID == bundleID && (clean.hasPrefix(entries[$0].text) || entries[$0].text.hasPrefix(clean)
+                || clean.hasSuffix(entries[$0].text) || entries[$0].text.hasSuffix(clean))
+        }) {
+            if clean.count >= entries[i].text.count { entries[i].text = clean }
+            entries[i].date = now
+            save()
+            return
+        }
+        entries.append(Entry(text: clean, bundleID: bundleID, date: now))
         if entries.count > Self.maxEntries { entries.removeFirst(entries.count - Self.maxEntries) }
         save()
     }
@@ -108,6 +122,7 @@ final class PersonalCorpus {
     }
 
     private func save() {
+        guard !Self.writeBlocked || !usesKeychain else { return }
         guard let data = try? JSONEncoder().encode(entries),
               let sealed = try? AES.GCM.seal(data, using: keyProvider()),
               let combined = sealed.combined else { return }
@@ -137,7 +152,15 @@ final class PersonalCorpus {
     }
 
     private static func resolveKey() -> SymmetricKey {
-        if let d = keychainRead(), d.count == 32 { return SymmetricKey(data: d) }
+        let (stored, status) = keychainRead()
+        if let d = stored, d.count == 32 { return SymmetricKey(data: d) }
+        // Связка заблокирована или не ответила — НЕ перевыпускаем ключ: иначе старый corpus.bin
+        // стал бы нечитаемым, а следующая запись его затёрла бы. Ключ на сессию, запись запрещена.
+        guard status == errSecItemNotFound else {
+            kbLog("corpus key: Keychain не ответил (\(status)) — корпус в этой сессии только читается")
+            writeBlocked = true
+            return SymmetricKey(size: .bits256)
+        }
         let key = SymmetricKey(size: .bits256)
         let data = key.withUnsafeBytes { Data(Array($0)) }
         if !keychainWrite(data) { kbLog("corpus key: Keychain недоступен, ключ только в памяти") }
@@ -145,7 +168,9 @@ final class PersonalCorpus {
     }
 
     /// Чтение без диалога: если связка не узнала нас, ключ молча перевыпускается (корпус обнулится).
-    private static func keychainRead() -> Data? {
+    static var writeBlocked = false
+
+    private static func keychainRead() -> (Data?, OSStatus) {
         var wasAllowed: DarwinBoolean = true
         SecKeychainGetUserInteractionAllowed(&wasAllowed)
         SecKeychainSetUserInteractionAllowed(false)
@@ -155,8 +180,8 @@ final class PersonalCorpus {
         q[kSecMatchLimit as String] = kSecMatchLimitOne
         var out: CFTypeRef?
         let st = SecItemCopyMatching(q as CFDictionary, &out)
-        guard st == errSecSuccess, let d = out as? Data else { return nil }
-        return d
+        guard st == errSecSuccess, let d = out as? Data else { return (nil, st) }
+        return (d, st)
     }
 
     @discardableResult
