@@ -1,0 +1,2 @@
+Backup: /Applications/.Speakey-backup-20261114-153958-093c6012
+Installed and verified: /Applications/Speakey.app

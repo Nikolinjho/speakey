@@ -1,4 +1,6 @@
 import importlib.util
+import errno
+import os
 from pathlib import Path
 import plistlib
 import subprocess
@@ -33,6 +35,31 @@ class InstallationTests(unittest.TestCase):
             installer.copy_directory_safely(source, target)
         self.assertEqual((target / 'history.enc').read_bytes(), b'other')
         self.assertEqual((source / 'history.enc').read_bytes(), b'history')
+
+    def test_clone_backup_is_independent_and_preserves_metadata(self):
+        """Копия на APFS имеет другой inode и не меняет исходник при записи."""
+        source, destination = self.root / 'model.bin', self.root / 'clone.bin'
+        source.write_bytes(b'original-model')
+        source.chmod(0o600)
+        installer.clone_or_copy(source, destination)
+        self.assertEqual(destination.read_bytes(), b'original-model')
+        self.assertNotEqual(source.stat().st_ino, destination.stat().st_ino)
+        self.assertEqual(destination.stat().st_mode & 0o777, 0o600)
+        destination.write_bytes(b'changed-clone')
+        self.assertEqual(source.read_bytes(), b'original-model')
+
+    def test_clone_copy_falls_back_only_when_clone_is_unsupported(self):
+        """Неподдерживаемый clone допускает обычную копию, отказ диска не маскируется."""
+        source, destination = self.root / 'source.bin', self.root / 'copy.bin'
+        source.write_bytes(b'data')
+        with patch.object(installer, '_clone_file', side_effect=OSError(errno.ENOTSUP, 'unsupported')):
+            installer.clone_or_copy(source, destination)
+        self.assertEqual(destination.read_bytes(), b'data')
+        destination.unlink()
+        with patch.object(installer, '_clone_file', side_effect=OSError(errno.ENOSPC, 'full')):
+            with self.assertRaises(OSError):
+                installer.clone_or_copy(source, destination)
+        self.assertFalse(destination.exists())
 
     def test_rejects_symlinks_and_missing_history_key(self):
         """Миграция отклоняет ссылки и историю без исходного ключа."""

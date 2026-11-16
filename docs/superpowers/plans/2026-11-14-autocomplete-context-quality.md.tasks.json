@@ -1,0 +1,36 @@
+{
+  "planPath": "docs/superpowers/plans/2026-11-14-autocomplete-context-quality.md",
+  "tasks": [
+    {
+      "id": 1,
+      "subject": "Окончательный текст поля",
+      "status": "completed",
+      "description": "Окончательный текст поля"
+    },
+    {
+      "id": 2,
+      "subject": "Служебный текст",
+      "status": "completed",
+      "description": "Служебный текст"
+    },
+    {
+      "id": 3,
+      "subject": "Устойчивость контекста",
+      "status": "completed",
+      "description": "Устойчивость контекста"
+    },
+    {
+      "id": 4,
+      "subject": "Активное окно OCR",
+      "status": "completed",
+      "description": "Активное окно OCR"
+    },
+    {
+      "id": 5,
+      "subject": "Интеграция и установка",
+      "status": "completed",
+      "description": "Интеграция и установка"
+    }
+  ],
+  "lastUpdated": "2026-11-14T15:43:33.880502+03:00"
+}

@@ -1,0 +1,62 @@
+Sources/Speakey/PersonalCorpus.swift:247:9: warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+245 |     private static func keychainRead() -> (Data?, OSStatus) {
+246 |         var wasAllowed: DarwinBoolean = true
+247 |         SecKeychainGetUserInteractionAllowed(&wasAllowed)
+    |         `- warning: 'SecKeychainGetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+248 |         SecKeychainSetUserInteractionAllowed(false)
+249 |         defer { SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue) }
+
+Sources/Speakey/PersonalCorpus.swift:248:9: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+246 |         var wasAllowed: DarwinBoolean = true
+247 |         SecKeychainGetUserInteractionAllowed(&wasAllowed)
+248 |         SecKeychainSetUserInteractionAllowed(false)
+    |         `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+249 |         defer { SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue) }
+250 |         var q = keychainBase
+
+Sources/Speakey/PersonalCorpus.swift:249:17: warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+247 |         SecKeychainGetUserInteractionAllowed(&wasAllowed)
+248 |         SecKeychainSetUserInteractionAllowed(false)
+249 |         defer { SecKeychainSetUserInteractionAllowed(wasAllowed.boolValue) }
+    |                 `- warning: 'SecKeychainSetUserInteractionAllowed' was deprecated in macOS 10.10: SecKeychain is deprecated [#DeprecatedDeclaration]
+250 |         var q = keychainBase
+251 |         q[kSecReturnData as String] = true
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+ok   тексты <20 симв. не пишутся
+ok   4 записи
+ok   файл не содержит UTF-8 исходного текста
+ok   файл не содержит ASCII-слов
+ok   секрет не на диске в открытом виде
+ok   секрет вырезан
+ok   similar находит фрагмент с общими словами
+ok   similar без пересечения пуст
+ok   topTerms: повторяющееся слово
+ok   topTerms: разовые слова не попадают
+ok   перечитывание с диска
+ok   чужой ключ не читает файл
+ok   снимок содержит все расшифрованные записи
+ok   счётчики по источникам
+ok   фильтр по приложению
+ok   идентификатор стабилен между снимками
+ok   удаление выбранной записи успешно
+ok   удалена только выбранная запись
+ok   несуществующая запись не сообщает об удалении
+ok   ошибка расшифровки видна в снимке
+ok   чужой ключ запрещает запись
+ok   чужой ключ запрещает очистку
+ok   файл с чужим ключом сохранён побайтно
+ok   недоступный ключ не позволяет удалять данные
+ok   нет ключа и файла: состояние недоступности явно
+ok   зашифрованный файл доступен только владельцу
+ok   старые записи сортируются от новых к старым
+ok   удаление старой записи без id
+ok   удаление старой записи сохранено
+ok   исходная запись сохранена
+ok   ошибка удаления возвращается вызывающему коду
+ok   ошибка удаления сохраняет память и диск
+ok   ошибка полной очистки сохраняет записи
+ok   remove(bundleID:)
+ok   remove сохранён на диск
+ok   removeAll
+ALL OK

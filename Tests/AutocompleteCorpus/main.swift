@@ -60,6 +60,60 @@ expect(reloaded.count == 4, "перечитывание с диска")
 let wrong = PersonalCorpus(directory: dir, keyProvider: { SymmetricKey(data: Data(repeating: 9, count: 32)) })
 expect(wrong.count == 0, "чужой ключ не читает файл")
 
+// Просмотр корпуса и удаление конкретной записи.
+let snapshot = corpus.snapshot()
+expect(snapshot.available && snapshot.records.count == 4, "снимок содержит все расшифрованные записи")
+expect(snapshot.sourceCounts["com.tg"] == 2 && snapshot.sourceCounts["com.mail"] == 2, "счётчики по источникам")
+expect(corpus.snapshot(bundleID: "com.tg").records.count == 2, "фильтр по приложению")
+let sample = snapshot.records.first { $0.text == t1 }!
+expect(corpus.snapshot().records.contains { $0.id == sample.id }, "идентификатор стабилен между снимками")
+expect(corpus.remove(id: sample.id), "удаление выбранной записи успешно")
+expect(corpus.count == 3 && !corpus.snapshot().records.contains { $0.id == sample.id }, "удалена только выбранная запись")
+expect(!corpus.remove(id: UUID()), "несуществующая запись не сообщает об удалении")
+corpus.add(t1, bundleID: "com.tg")
+
+// Чужой или недоступный ключ не разрешает затереть существующий файл.
+let beforeWrong = try! Data(contentsOf: dir.appendingPathComponent("corpus.bin"))
+expect(!wrong.snapshot().available, "ошибка расшифровки видна в снимке")
+expect(!wrong.add("Этот новый текст не должен затереть прежний корпус", bundleID: "wrong"), "чужой ключ запрещает запись")
+expect(!wrong.removeAll(), "чужой ключ запрещает очистку")
+expect(try! Data(contentsOf: dir.appendingPathComponent("corpus.bin")) == beforeWrong, "файл с чужим ключом сохранён побайтно")
+let noKey = PersonalCorpus(directory: dir, keyProvider: { nil })
+expect(!noKey.snapshot().available && !noKey.remove(bundleID: "com.tg"), "недоступный ключ не позволяет удалять данные")
+
+let missingKeyDir = dir.appendingPathComponent("missing-key")
+let emptyWithoutKey = PersonalCorpus(directory: missingKeyDir, keyProvider: { nil })
+expect(!emptyWithoutKey.snapshot().available, "нет ключа и файла: состояние недоступности явно")
+let permissions = try! FileManager.default.attributesOfItem(atPath: dir.appendingPathComponent("corpus.bin").path)[.posixPermissions] as! NSNumber
+expect(permissions.intValue == 0o600, "зашифрованный файл доступен только владельцу")
+// Старый формат без идентификаторов читается и допускает точечное удаление.
+let legacyDir = dir.appendingPathComponent("legacy")
+try! FileManager.default.createDirectory(at: legacyDir, withIntermediateDirectories: true)
+let legacy = try! JSONSerialization.data(withJSONObject: [
+    ["text": t1, "bundleID": "com.tg", "date": 100.0],
+    ["text": t3, "bundleID": "com.mail", "date": 200.0]
+])
+let legacyBlob = try! AES.GCM.seal(legacy, using: key).combined!
+try! legacyBlob.write(to: legacyDir.appendingPathComponent("corpus.bin"))
+let legacyCorpus = PersonalCorpus(directory: legacyDir, keyProvider: { key })
+let legacyRecord = legacyCorpus.snapshot().records.first!
+expect(legacyRecord.bundleID == "com.mail", "старые записи сортируются от новых к старым")
+expect(legacyCorpus.remove(id: legacyRecord.id), "удаление старой записи без id")
+expect(PersonalCorpus(directory: legacyDir, keyProvider: { key }).count == 1, "удаление старой записи сохранено")
+
+// Ошибка записи не должна исчезать в интерфейсе как успешное удаление.
+let failureDir = dir.appendingPathComponent("failure")
+var failWrites = false
+let failing = PersonalCorpus(directory: failureDir, keyProvider: { key }, writer: { data, url in
+    if failWrites { throw CocoaError(.fileWriteNoPermission) }
+    try data.write(to: url, options: .atomic)
+})
+expect(failing.add(t1, bundleID: "one"), "исходная запись сохранена")
+let failureID = failing.snapshot().records[0].id
+failWrites = true
+expect(!failing.remove(id: failureID), "ошибка удаления возвращается вызывающему коду")
+expect(failing.count == 1 && PersonalCorpus(directory: failureDir, keyProvider: { key }).count == 1, "ошибка удаления сохраняет память и диск")
+expect(!failing.removeAll() && failing.count == 1, "ошибка полной очистки сохраняет записи")
 // remove(bundleID:)
 corpus.remove(bundleID: "com.mail")
 expect(corpus.count == 2, "remove(bundleID:)")

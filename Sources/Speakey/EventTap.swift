@@ -10,6 +10,7 @@ protocol EventTapHandler: AnyObject {
     /// Возврат true = клавишу проглотить (сниппет раскрыт / inline-замена уже отправлена).
     func handleKeyDown(keyCode: Int64, characters: String, flags: CGEventFlags,
                        eventTime: TimeInterval,
+                       isRepeat: Bool,
                        post: ((CGEvent) -> Void)?) -> Bool
     func handleSwitchHotkey()
     /// ТОЛЬКО смена языка (RU↔EN), без конвертации набранного — действие клавиши 🌐/Fn.
@@ -775,7 +776,8 @@ final class EventTap {
             // его после возврата нельзя). Engine принимает его как обычное замыкание и не хранит.
             let post: (CGEvent) -> Void = { $0.tapPostEvent(proxy) }
             if handler?.handleKeyDown(keyCode: keyCode, characters: chars, flags: event.flags,
-                                      eventTime: Self.eventUptime(event), post: post) == true {
+                                      eventTime: Self.eventUptime(event),
+                                      isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0, post: post) == true {
                 // Здесь НЕ регистрируем парность: за inline-замену учёт ведёт Engine
                 // (inlineSwallowedKeyCode → consumeInlineSwallowedKeyUp), и двойной учёт съел бы
                 // keyUp дважды. ⚠️ Но handleKeyDown возвращает true из ТРЁХ мест, а метку ставит

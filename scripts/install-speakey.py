@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Stage, stop and replace a local app while retaining its previous bundle."""
 import argparse
+import ctypes
 from datetime import datetime
+import errno
 import hashlib
 import os
 from pathlib import Path
@@ -56,13 +58,40 @@ def require_identical_or_absent(source, destination):
     return expected
 
 
+def _clone_file(source, destination):
+    """Независимый APFS-клон сохраняет блоки до первой записи в любую копию."""
+    if sys.platform != 'darwin':
+        raise OSError(errno.ENOTSUP, 'File cloning is unavailable')
+    try:
+        clone = ctypes.CDLL(None, use_errno=True).clonefile
+    except AttributeError:
+        raise OSError(errno.ENOTSUP, 'File cloning is unavailable') from None
+    clone.argtypes = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_int]
+    clone.restype = ctypes.c_int
+    if clone(os.fsencode(source), os.fsencode(destination), 0) != 0:
+        code = ctypes.get_errno()
+        raise OSError(code, os.strerror(code))
+
+
+def clone_or_copy(source, destination):
+    """Обычная копия нужна только на томах без поддержки клонов."""
+    try:
+        _clone_file(source, destination)
+    except OSError as error:
+        if error.errno not in (errno.ENOTSUP, errno.EXDEV, errno.ENOSYS):
+            raise
+        return shutil.copy2(source, destination)
+    shutil.copystat(source, destination)
+    return str(destination)
+
+
 def copy_directory_safely(source, destination):
     source, destination = Path(source), Path(destination)
     expected = require_identical_or_absent(source, destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
     stage = Path(tempfile.mkdtemp(prefix='.speakey-copy-', dir=str(destination.parent)))
     try:
-        shutil.copytree(str(source), str(stage / 'data'), copy_function=shutil.copy2)
+        shutil.copytree(str(source), str(stage / 'data'), copy_function=clone_or_copy)
         if directory_manifest(stage / 'data') != expected:
             raise RuntimeError('Data changed during copy; installation aborted')
         if not destination.exists() and not destination.is_symlink():

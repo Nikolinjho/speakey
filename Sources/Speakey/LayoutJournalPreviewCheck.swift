@@ -338,8 +338,34 @@ extension LayoutJournalPreviewCheck {
                 let geometry = "document=\(document.bounds.width), viewport=\(scroll.contentView.bounds.width), clipped=\(clipped.map { $0.identifier?.rawValue ?? String(describing: type(of: $0)) })"
                 print("Геометрия \(section): \(geometry)")
                 try check("Раздел \(section) помещается по ширине", clipped.isEmpty && !scroll.hasHorizontalScroller)
+                if section == .autocomplete {
+                    for id in ["ac.trailingSpace", "ac.trailingPunctuation", "ac.tabEnabled"] {
+                        let control = try control(id, NSSwitch.self)
+                        try check("Переключатель \(id) доступен", control.isEnabled)
+                    }
+                    let escape = try control("ac.escapeMode", NSPopUpButton.self)
+                    try check("Доступны три режима Esc", escape.numberOfItems == 3)
+                    for action in CompletionAction.allCases {
+                        let button = try control("ac.shortcut.\(action.rawValue)", NSButton.self)
+                        try check("Сочетание \(action.rawValue) доступно для записи", button.isEnabled && !button.title.isEmpty)
+                        let clear = try control("ac.clearShortcut.\(action.rawValue)", NSButton.self)
+                        try check("Очистка сочетания \(action.rawValue) доступна", clear.isEnabled)
+                    }
+                    let rows = views(document).compactMap { $0 as? NSStackView }.filter {
+                        $0.orientation == .horizontal && ($0.identifier?.rawValue.hasPrefix("ac.") ?? false)
+                    }
+                    try check("Найдены строки автодополнения", rows.count >= 10)
+                    for row in rows {
+                        guard let text = row.arrangedSubviews.first else { continue }
+                        let frame = row.convert(text.bounds, from: text)
+                        let top = row.bounds.maxY - frame.maxY
+                        let bottom = frame.minY - row.bounds.minY
+                        print("Поля \(row.identifier!.rawValue): сверху=\(top), снизу=\(bottom)")
+                        try check("Поля строки \(row.identifier!.rawValue) не сжаты", top >= 4.5 && bottom >= 4.5)
+                    }
+                }
                 if let directory = ProcessInfo.processInfo.environment["SPEAKEY_COMPACT_SETTINGS_ARTIFACTS"],
-                   [.switching, .layoutJournal, .voice, .general].contains(section) {
+                   [.switching, .layoutJournal, .voice, .autocomplete, .general].contains(section) {
                     try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
                     window.liveDiag(to: directory + "/\(section).txt")
                     nativeWindow.displayIfNeeded()

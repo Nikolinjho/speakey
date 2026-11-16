@@ -1,4 +1,5 @@
 import Foundation
+import NaturalLanguage
 
 /// Чистая логика автодополнения: чистка ответа модели, разбиение по словам,
 /// «съедание» набранного поверх подсказки, свежесть и фильтр секретов.
@@ -9,7 +10,8 @@ enum CompletionText {
         options: [.caseInsensitive])
 
     /// Обрезать на первом \n, убрать повтор хвоста `before`, ограничить maxWords словами; "" если пусто/мусор.
-    static func clean(_ raw: String, before: String, maxWords: Int) -> String {
+    static func clean(_ raw: String, before: String, maxWords: Int,
+                      stopPhrases: [String] = [], singleSentence: Bool = false) -> String {
         guard maxWords > 0 else { return "" }
         var s = raw
         // Всё после первого служебного токена — мусор.
@@ -18,11 +20,35 @@ enum CompletionText {
             s = String(s[..<r.lowerBound])
         }
         if let nl = s.firstIndex(where: { $0.isNewline }) { s = String(s[..<nl]) }
+        // Только метки, переданные вызывающим кодом: обычные заголовки документа не запрещены.
+        var end = s.endIndex
+        for phrase in stopPhrases where !phrase.isEmpty {
+            var start = s.startIndex
+            while start < end, let range = s.range(of: phrase, options: .caseInsensitive, range: start..<end) {
+                if range.lowerBound == s.startIndex || !s[s.index(before: range.lowerBound)].isLetter && !s[s.index(before: range.lowerBound)].isNumber {
+                    end = range.lowerBound
+                    break
+                }
+                start = range.upperBound
+            }
+        }
+        s = String(s[..<end])
         // Перед кареткой уже пробел — ведущий пробел ответа лишний.
         if let last = before.last, last.isWhitespace {
             s = String(s.drop(while: { $0.isWhitespace }))
         }
         s = stripRepeat(s, before: before)
+        // У запроса с фоновым контекстом не дописываем второе предложение с пояснениями модели.
+        if singleSentence, !s.isEmpty {
+            let tokenizer = NLTokenizer(unit: .sentence)
+            tokenizer.string = s
+            var sentenceEnd = s.endIndex
+            tokenizer.enumerateTokens(in: s.startIndex..<s.endIndex) { range, _ in
+                sentenceEnd = range.upperBound
+                return false
+            }
+            s = String(s[..<sentenceEnd])
+        }
         s = trimTrailing(s)
         if s.allSatisfy({ $0.isWhitespace }) { return "" }
 
@@ -48,6 +74,29 @@ enum CompletionText {
         if i == s.endIndex { return (s, "") }
         while i < s.endIndex, !s[i].isWhitespace { i = s.index(after: i) }
         return (String(s[..<i]), String(s[i...]))
+    }
+
+    /// Пробел и завершающая пунктуация независимы. Непринятые знаки остаются в подсказке.
+    static func acceptedChunk(_ s: String, trailingSpace: Bool, punctuation: Bool) -> (chunk: String, rest: String) {
+        var (chunk, rest) = nextChunk(s)
+        guard !chunk.isEmpty else { return (chunk, rest) }
+        if !punctuation {
+            let trimmed = chunk.trimmingCharacters(in: .whitespaces)
+            // Отдельный фрагмент из знаков принимается целиком, чтобы Tab двигался дальше.
+            if trimmed.contains(where: { $0.isLetter || $0.isNumber }) {
+                var suffix = ""
+                while let last = chunk.last, last.isPunctuation {
+                    suffix.insert(chunk.removeLast(), at: suffix.startIndex)
+                }
+                rest = suffix + rest
+            }
+        }
+        if trailingSpace, !chunk.last!.isWhitespace,
+           rest.isEmpty || rest.first == " " {
+            chunk += " "
+            if rest.first == " " { rest.removeFirst() }
+        }
+        return (chunk, rest)
     }
 
     /// Человек напечатал `typed` поверх подсказки: остаток, если `s` начинается с `typed`; иначе nil.

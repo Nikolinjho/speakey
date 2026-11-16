@@ -38,13 +38,15 @@ final class CompletionEngine {
     private let io = DispatchQueue(label: "dev.speakey.complete.io", qos: .userInitiated)
 
     static var supportDir: URL {
+        if let path = ProcessInfo.processInfo.environment["SPEAKEY_COMPLETE_TEST_DIR"] { return URL(fileURLWithPath: path) }
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return base.appendingPathComponent("Speakey", isDirectory: true)
     }
     /// Сокет — во временной папке пользователя, а не в Application Support: установщик сверяет
     /// папку данных до и после замены бандла и отказывается работать при «особых» файлах в ней.
     static var socketPath: String {
-        FileManager.default.temporaryDirectory.appendingPathComponent("dev.speakey.complete.sock").path
+        if ProcessInfo.processInfo.environment["SPEAKEY_COMPLETE_TEST_DIR"] != nil { return supportDir.appendingPathComponent("complete.sock").path }
+        return FileManager.default.temporaryDirectory.appendingPathComponent("dev.speakey.complete.sock").path
     }
     private static var pidFile: URL { supportDir.appendingPathComponent("complete.pid") }
 
@@ -115,11 +117,17 @@ final class CompletionEngine {
     func stop() {
         cancelInFlight()
         idleTimer?.invalidate(); idleTimer = nil
-        if let p = process, p.isRunning { p.terminate() }
+        if let p = process {
+            if p.isRunning { p.terminate() }
+            // Второй запуск для открытия настроек не владеет помощником первого экземпляра.
+            let owner = (try? String(contentsOf: Self.pidFile))?.trimmingCharacters(in: .whitespacesAndNewlines)
+            if owner == String(p.processIdentifier) {
+                try? FileManager.default.removeItem(at: Self.pidFile)
+                try? FileManager.default.removeItem(atPath: Self.socketPath)
+            }
+        }
         process = nil
         modelURL = nil
-        try? FileManager.default.removeItem(at: Self.pidFile)
-        try? FileManager.default.removeItem(atPath: Self.socketPath)
         if state != .stopped { state = .stopped }
     }
 
@@ -179,11 +187,13 @@ final class CompletionEngine {
 
     /// Отменяет предыдущий незавершённый запрос (его колбэк получает nil). Колбэк — на main.
     /// Потокобезопасно.
-    func complete(prompt: String, maxTokens: Int, completion: @escaping (String?) -> Void) {
-        let body: [String: Any] = [
-            "prompt": prompt, "n_predict": maxTokens, "temperature": 0.2, "top_k": 20, "top_p": 0.9,
+    func complete(prompt: String, maxTokens: Int, temperature: Double = 0.2, seed: Int? = nil,
+                  completion: @escaping (String?) -> Void) {
+        var body: [String: Any] = [
+            "prompt": prompt, "n_predict": maxTokens, "temperature": min(1.5, max(0, temperature)), "top_k": temperature <= 0.2 ? 20 : 40, "top_p": 0.9,
             "cache_prompt": true, "stop": ["\n"], "repeat_penalty": 1.1
         ]
+        if let seed { body["seed"] = seed }
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { completion(nil); return }
         lock.lock()
         let prev = inFlightCompletion

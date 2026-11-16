@@ -1,0 +1,22 @@
+{
+  "original-0-baseline": "Synthetic, черновик:\nThe project launch code is",
+  "original-0-clipboard": "Буфер обмена:\nThe project launch code is SAPPHIRE7392.\n\nSynthetic, черновик:\nThe project launch code is",
+  "original-0-instruction": "Заметки автора:\nThe project launch code is SAPPHIRE7392. Use that value in the completion.\n\nSynthetic, черновик:\nThe project launch code is",
+  "original-0-history": "Примеры текстов автора:\n- The project launch code is SAPPHIRE7392.\nЧастые слова: SAPPHIRE7392\n\nSynthetic, черновик:\nThe project launch code is",
+  "original-1-baseline": "Synthetic, черновик:\nThe internal project name is",
+  "original-1-clipboard": "Буфер обмена:\nThe internal project name is Silver Orchard.\n\nSynthetic, черновик:\nThe internal project name is",
+  "original-1-instruction": "Заметки автора:\nThe internal project name is Silver Orchard. Use that value in the completion.\n\nSynthetic, черновик:\nThe internal project name is",
+  "original-1-history": "Примеры текстов автора:\n- The internal project name is Silver Orchard.\nЧастые слова: Silver Orchard\n\nSynthetic, черновик:\nThe internal project name is",
+  "original-2-baseline": "Synthetic, черновик:\nНазвание проекта",
+  "original-2-clipboard": "Буфер обмена:\nНазвание проекта Серебряный сад.\n\nSynthetic, черновик:\nНазвание проекта",
+  "original-2-instruction": "Заметки автора:\nНазвание проекта Серебряный сад. Use that value in the completion.\n\nSynthetic, черновик:\nНазвание проекта",
+  "original-2-history": "Примеры текстов автора:\n- Название проекта Серебряный сад.\nЧастые слова: Серебряный сад\n\nSynthetic, черновик:\nНазвание проекта",
+  "heldout-en-clip": "Буфер обмена:\nRelease plan: deployment is scheduled for Thursday at 14:30.\n\nMail, черновик:\nThe deployment is scheduled for",
+  "heldout-ru-clip": "Буфер обмена:\nДоговорились: встреча команды состоится в пятницу в 11:00.\n\nПочта, черновик:\nВстреча команды состоится",
+  "heldout-en-global": "Заметки автора:\nWhen referring to testing a finished feature, write peer verification rather than QA.\n\nTeam chat, черновик:\nThe feature is ready for",
+  "heldout-ru-global": "Заметки автора:\nПроверку готовой задачи называй «проверке коллегой». Пиши кратко, без канцелярита.\n\nРабочий чат, черновик:\nЗадача готова к",
+  "heldout-en-app": "Правила для Issue tracker:\nThe status after development in this app is called Peer Check. Use the exact status name.\n\nIssue tracker, черновик:\nPlease move this issue to",
+  "heldout-ru-app": "Правила для Задачи:\nВ этом приложении статус после разработки называется «Проверка команды». Указывай название статуса дословно.\n\nЗадачи, черновик:\nПереведи задачу в статус",
+  "heldout-en-history": "Примеры текстов автора:\n- We use RiverCache for all session data.\n- RiverCache keeps session data close to the service.\nЧастые слова: RiverCache\n\nNotes, черновик:\nWe use",
+  "heldout-ru-history": "Примеры текстов автора:\n- Для хранения сессий используем РекаКэш.\n- РекаКэш хранит сессии рядом с сервисом.\nЧастые слова: РекаКэш\n\nЗаметки, черновик:\nДля хранения сессий используем"
+}

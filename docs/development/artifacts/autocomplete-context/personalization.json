@@ -1,0 +1,125 @@
+{
+  "model" : "qwen3-1.7b-base",
+  "results" : [
+    {
+      "before" : "The project launch code is",
+      "case" : "baseline",
+      "cleaned" : " a crucial component of the development",
+      "completed" : true,
+      "elapsed_ms" : 172,
+      "response" : " a crucial component of the development process for any software application. It serves as an initial version or prototype that provides users with",
+      "target" : "SAPPHIRE7392",
+      "target_present" : false
+    },
+    {
+      "before" : "The project launch code is",
+      "case" : "clipboard",
+      "cleaned" : " 106845.",
+      "completed" : true,
+      "elapsed_ms" : 148,
+      "response" : " 106845.",
+      "target" : "SAPPHIRE7392",
+      "target_present" : false
+    },
+    {
+      "before" : "The project launch code is",
+      "case" : "instruction",
+      "cleaned" : " 106485. Use this number for your",
+      "completed" : true,
+      "elapsed_ms" : 121,
+      "response" : " 106485. Use this number for your submission.",
+      "target" : "SAPPHIRE7392",
+      "target_present" : false
+    },
+    {
+      "before" : "The project launch code is",
+      "case" : "history",
+      "cleaned" : " SAPPHIRE7392.",
+      "completed" : true,
+      "elapsed_ms" : 83,
+      "response" : " SAPPHIRE7392. ",
+      "target" : "SAPPHIRE7392",
+      "target_present" : true
+    },
+    {
+      "before" : "The internal project name is",
+      "case" : "baseline",
+      "cleaned" : " a unique identifier for the current",
+      "completed" : true,
+      "elapsed_ms" : 158,
+      "response" : " a unique identifier for the current version of your application. It helps in distinguishing between different versions and ensures that updates are correctly",
+      "target" : "Silver Orchard",
+      "target_present" : false
+    },
+    {
+      "before" : "The internal project name is",
+      "case" : "clipboard",
+      "cleaned" : " Silver Orchard.",
+      "completed" : true,
+      "elapsed_ms" : 44,
+      "response" : " Silver Orchard.",
+      "target" : "Silver Orchard",
+      "target_present" : true
+    },
+    {
+      "before" : "The internal project name is",
+      "case" : "instruction",
+      "cleaned" : " Silver Orchard. Use this value for",
+      "completed" : true,
+      "elapsed_ms" : 83,
+      "response" : " Silver Orchard. Use this value for the completion.",
+      "target" : "Silver Orchard",
+      "target_present" : true
+    },
+    {
+      "before" : "The internal project name is",
+      "case" : "history",
+      "cleaned" : " \"Silver Orchard\". This suggests that the",
+      "completed" : true,
+      "elapsed_ms" : 171,
+      "response" : " \"Silver Orchard\". This suggests that the team or organization has chosen a creative and descriptive term for their ongoing work. It",
+      "target" : "Silver Orchard",
+      "target_present" : true
+    },
+    {
+      "before" : "Название проекта",
+      "case" : "baseline",
+      "cleaned" : ": \"Синтез и оптимизация алгоритмов для",
+      "completed" : true,
+      "elapsed_ms" : 145,
+      "response" : ": \"Синтез и оптимизация алгоритмов для решения задач поиска в боль",
+      "target" : "Серебряный сад",
+      "target_present" : false
+    },
+    {
+      "before" : "Название проекта",
+      "case" : "clipboard",
+      "cleaned" : ": Синтетический мир",
+      "completed" : true,
+      "elapsed_ms" : 69,
+      "response" : ": Синтетический мир",
+      "target" : "Серебряный сад",
+      "target_present" : false
+    },
+    {
+      "before" : "Название проекта",
+      "case" : "instruction",
+      "cleaned" : ": Синтез",
+      "completed" : true,
+      "elapsed_ms" : 58,
+      "response" : ": Синтез",
+      "target" : "Серебряный сад",
+      "target_present" : false
+    },
+    {
+      "before" : "Название проекта",
+      "case" : "history",
+      "cleaned" : " \"Серебряный сад\". Частые слова: \"Серебряный сад\".",
+      "completed" : true,
+      "elapsed_ms" : 159,
+      "response" : " \"Серебряный сад\". Частые слова: \"Серебряный сад\".",
+      "target" : "Серебряный сад",
+      "target_present" : true
+    }
+  ]
+}

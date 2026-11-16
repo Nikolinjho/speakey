@@ -711,6 +711,7 @@ final class Engine: EventTapHandler {
     @discardableResult
     func handleKeyDown(keyCode: Int64, characters: String, flags: CGEventFlags,
                        eventTime: TimeInterval = ProcessInfo.processInfo.systemUptime,
+                       isRepeat: Bool = false,
                        post: ((CGEvent) -> Void)? = nil) -> Bool {
         // ВАЖНО: больше НЕ гейтим реальный ввод по muted — наша синтетика отсеивается тегом в EventTap
         // (kbSyntheticMarker), а реальные нажатия должны копиться в буфер ВСЕГДА, даже пока летит наша
@@ -737,7 +738,7 @@ final class Engine: EventTapHandler {
         // клавишу ТОЛЬКО при видимой подсказке: без неё Tab идёт дальше как раньше. Принятый кусок
         // вставляет синтетика, которую буфер не видит, поэтому буфер после приёма обнуляем —
         // иначе конверсия на следующей границе работала бы по устаревшему слову.
-        if AutocompleteController.shared.handleKey(keyCode: keyCode, characters: characters, flags: flags) {
+        if AutocompleteController.shared.handleKey(keyCode: keyCode, characters: characters, flags: flags, app: frontAppBID, isRepeat: isRepeat) {
             liveFixLast = ""
             buffer.clear()
             return true

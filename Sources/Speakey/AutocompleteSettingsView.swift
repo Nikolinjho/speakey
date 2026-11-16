@@ -2,11 +2,12 @@ import AppKit
 
 /// Раздел настроек «Автодополнение». Отдельный NSStackView по образцу NeuralLayoutSettingsView:
 /// строки и карточки повторяют оформление SettingsWindow (CardView, hairline, 12/11 pt).
-final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFieldDelegate {
+final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate {
     private let prefsModels = CompletionModels.all
     private let wordsOptions = [3, 6, 10]
     private let pauseOptions = [80, 120, 200, 350]
-    private let acceptAllOptions = [-1, 10, 50]
+    private let escapeOptions = CompletionEscapeMode.allCases
+    private var shortcutButtons: [CompletionAction: NSButton] = [:]
     private let recordOptions: [AutocompleteRecordMode] = [.off, .accepted, .all]
 
     private let modelPopup = NSPopUpButton()
@@ -16,15 +17,21 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
     private let progress = NSProgressIndicator()
     private var downloading = false
     private let corpusCount = NSTextField(labelWithString: "")
-    private let appsBox = NSStackView()
     private let aboutText = NSTextView()
     private var timer: Timer?
-    private var instructionFields: [NSTextField: String] = [:]
+    private let appStore: AutocompleteAppStore
+    private let corpus: PersonalCorpus
+    private var corpusWindow: PersonalCorpusWindowController?
+    private var corpusRefreshPending = false
 
-    init() {
+    init(appStore: AutocompleteAppStore = .shared, corpus: PersonalCorpus = .shared) {
+        self.appStore = appStore; self.corpus = corpus
         super.init(frame: .zero)
-        orientation = .vertical; alignment = .width; spacing = DS.itemGap
+        orientation = .vertical; alignment = .leading; spacing = DS.itemGap
         build()
+        for item in arrangedSubviews {
+            item.widthAnchor.constraint(equalTo: widthAnchor).isActive = true
+        }
         refreshModel()
         refreshCorpus()
     }
@@ -71,16 +78,40 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
                      pauseOptions.map { String(format: L10n.autocomplete("ms"), $0) },
                      pauseOptions.firstIndex(of: AutocompletePrefs.pauseMs) ?? 1,
                      #selector(pauseChanged(_:)), key: "ac.pause"),
-            popupRow(L10n.autocomplete("acceptAll"), L10n.autocomplete("keysSub"),
-                     acceptAllOptions.map { L10n.autocomplete("acceptAll\($0)") },
-                     acceptAllOptions.firstIndex(of: AutocompletePrefs.acceptAllKeyCode) ?? 0,
-                     #selector(acceptAllChanged(_:)), key: "ac.acceptAll"),
+            switchRow(L10n.autocomplete("trailingSpace"), nil,
+                      AutocompletePrefs.trailingSpace, #selector(toggleTrailingSpace(_:)), key: "ac.trailingSpace"),
+            switchRow(L10n.autocomplete("trailingPunctuation"), nil,
+                      AutocompletePrefs.trailingPunctuation, #selector(toggleTrailingPunctuation(_:)), key: "ac.trailingPunctuation"),
+            switchRow(L10n.autocomplete("tabEnabled"), L10n.autocomplete("tabEnabledSub"),
+                      AutocompletePrefs.tabEnabled, #selector(toggleTab(_:)), key: "ac.tabEnabled"),
+            popupRow(L10n.autocomplete("escapeMode"), nil,
+                     escapeOptions.map { L10n.autocomplete("escape.\($0.rawValue)") },
+                     escapeOptions.firstIndex(of: AutocompletePrefs.escapeMode) ?? 0,
+                     #selector(escapeChanged(_:)), key: "ac.escapeMode"),
             switchRow(L10n.autocomplete("typo"), L10n.autocomplete("typoSub"),
                       AutocompletePrefs.typoFix, #selector(toggleTypo(_:)), key: "ac.typo"),
             switchRow(L10n.autocomplete("battery"), L10n.autocomplete("batterySub"),
                       AutocompletePrefs.batteryLight, #selector(toggleBattery(_:)), key: "ac.battery")
         ]))
 
+        addArrangedSubview(gap(6))
+        addArrangedSubview(eyebrow(L10n.autocomplete("editingTitle")))
+        addArrangedSubview(card([
+            switchRow(L10n.autocomplete("onlyCurrentWord"), L10n.autocomplete("onlyCurrentWordSub"),
+                      AutocompletePrefs.onlyCurrentWord, #selector(toggleOnlyWord(_:)), key: "ac.onlyCurrentWord"),
+            switchRow(L10n.autocomplete("inlineCompletion"), L10n.autocomplete("inlineCompletionSub"),
+                      AutocompletePrefs.inlineCompletion, #selector(toggleInline(_:)), key: "ac.inlineCompletion"),
+            switchRow(L10n.autocomplete("autoAlternatives"), L10n.autocomplete("autoAlternativesSub"),
+                      AutocompletePrefs.autoAlternatives, #selector(toggleAlternatives(_:)), key: "ac.autoAlternatives"),
+            switchRow(L10n.autocomplete("autoSynonyms"), L10n.autocomplete("autoSynonymsSub"),
+                      AutocompletePrefs.autoSynonyms, #selector(toggleSynonyms(_:)), key: "ac.autoSynonyms"),
+            popupRow(L10n.autocomplete("variantsDelay"), nil, [300, 600, 1000, 1500].map { String(format: L10n.autocomplete("ms"), $0) },
+                     [300, 600, 1000, 1500].firstIndex(of: AutocompletePrefs.variantsDelayMs) ?? 1,
+                     #selector(variantsDelayChanged(_:)), key: "ac.variantsDelay")
+        ]))
+        addArrangedSubview(gap(6))
+        addArrangedSubview(eyebrow(L10n.autocomplete("shortcutsTitle")))
+        addArrangedSubview(card(CompletionAction.allCases.map { shortcutRow($0) }))
         addArrangedSubview(gap(6))
         addArrangedSubview(eyebrow(L10n.autocomplete("personalTitle")))
         addArrangedSubview(card([
@@ -98,9 +129,8 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
 
         addArrangedSubview(gap(6))
         addArrangedSubview(eyebrow(L10n.autocomplete("appsTitle")))
-        appsBox.orientation = .vertical; appsBox.alignment = .width; appsBox.spacing = 0
-        addArrangedSubview(card([appsBox]))
-        rebuildApps()
+        addArrangedSubview(AutocompleteAppsView(store: appStore, corpus: corpus) { [weak self] bid in self?.showCorpus(bundleID: bid) })
+        addArrangedSubview(note(L10n.autocomplete("appRecordGate")))
         addArrangedSubview(note(L10n.autocomplete("appsSub")))
 
         addArrangedSubview(gap(6))
@@ -221,6 +251,8 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
         let r = NSStackView(views: items)
         r.orientation = .horizontal; r.alignment = .centerY; r.spacing = 8
         r.edgeInsets = NSEdgeInsets(top: 5, left: 11, bottom: 5, right: 11)
+        // Как в DetailVC.settingRow: переносимая подпись не должна съедать поля строки.
+        r.heightAnchor.constraint(greaterThanOrEqualTo: col.heightAnchor, constant: 10).isActive = true
         r.heightAnchor.constraint(greaterThanOrEqualToConstant: 35).isActive = true
         r.setClippingResistancePriority(.required, for: .vertical)
         if let key { r.identifier = NSUserInterfaceItemIdentifier(key) }
@@ -237,6 +269,11 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
         let r = NSStackView(views: items)
         r.orientation = .horizontal; r.alignment = .centerY; r.spacing = 8
         r.edgeInsets = NSEdgeInsets(top: 7, left: 11, bottom: 7, right: 11)
+        r.heightAnchor.constraint(greaterThanOrEqualTo: s.heightAnchor, constant: 14).isActive = true
+        if let trailing {
+            r.heightAnchor.constraint(greaterThanOrEqualTo: trailing.heightAnchor, constant: 14).isActive = true
+        }
+        r.setClippingResistancePriority(.required, for: .vertical)
         return r
     }
 
@@ -291,6 +328,7 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
         let bottom = NSStackView(views: [controls, spacer])
         bottom.orientation = .horizontal; bottom.alignment = .centerY
         bottom.edgeInsets = NSEdgeInsets(top: 0, left: 11, bottom: 7, right: 11)
+        bottom.heightAnchor.constraint(greaterThanOrEqualTo: controls.heightAnchor, constant: 7).isActive = true
         let v = NSStackView(views: [top, bottom])
         v.orientation = .vertical; v.alignment = .width; v.spacing = 0
         return v
@@ -299,10 +337,10 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
     private func corpusRow() -> NSView {
         corpusCount.font = .systemFont(ofSize: 11); corpusCount.textColor = .secondaryLabelColor
         corpusCount.setAccessibilityIdentifier("ac.corpusCount")
-        let del = button(L10n.autocomplete("deleteAll"), #selector(deleteCorpus))
-        del.setAccessibilityIdentifier("ac.deleteCorpus")
-        let box = NSStackView(views: [corpusCount, del])
-        box.orientation = .horizontal; box.alignment = .centerY; box.spacing = 8
+        let browse = button(L10n.autocomplete("corpusBrowse"), #selector(browseCorpus))
+        browse.setAccessibilityIdentifier("ac.browseCorpus")
+        let box = NSStackView(views: [corpusCount, browse])
+        box.orientation = .horizontal; box.alignment = .centerY; box.spacing = DS.itemGap
         return row(L10n.autocomplete("corpus"), L10n.autocomplete("corpusSub"), trailing: box)
     }
 
@@ -329,58 +367,8 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
         let v = NSStackView(views: [leftAligned(title), sub, scroll])
         v.orientation = .vertical; v.alignment = .width; v.spacing = 3
         v.edgeInsets = NSEdgeInsets(top: 7, left: 11, bottom: 9, right: 11)
+        v.setClippingResistancePriority(.required, for: .vertical)
         return v
-    }
-
-    // MARK: - Приложения
-
-    private func appName(_ bid: String) -> String {
-        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bid) {
-            return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
-        }
-        return bid
-    }
-
-    private func rebuildApps() {
-        for v in appsBox.arrangedSubviews { appsBox.removeArrangedSubview(v); v.removeFromSuperview() }
-        instructionFields.removeAll()
-        let store = AutocompleteAppStore.shared
-        let apps = store.configuredApps
-        if apps.isEmpty {
-            appsBox.addArrangedSubview(plainRow(L10n.autocomplete("appsEmpty"), trailing: nil))
-        }
-        for bid in apps {
-            let excluded = AutocompleteAppStore.hardExcluded.contains(bid)
-            let sw = NSSwitch(); sw.controlSize = .small
-            sw.state = (!excluded && store.isEnabled(bid)) ? .on : .off
-            sw.isEnabled = !excluded
-            sw.target = self; sw.action = #selector(toggleApp(_:))
-            sw.identifier = NSUserInterfaceItemIdentifier(bid)
-            let field = NSTextField(string: store.instruction(bid))
-            field.placeholderString = L10n.autocomplete("appInstruction")
-            field.font = .systemFont(ofSize: 11); field.controlSize = .small
-            field.delegate = self
-            field.identifier = NSUserInterfaceItemIdentifier(bid)
-            field.translatesAutoresizingMaskIntoConstraints = false
-            field.widthAnchor.constraint(equalToConstant: 200).isActive = true
-            field.isEnabled = !excluded
-            instructionFields[field] = bid
-            let ctl = NSStackView(views: [field, sw])
-            ctl.orientation = .horizontal; ctl.alignment = .centerY; ctl.spacing = 8
-            let r = row(appName(bid), excluded ? L10n.autocomplete("appAlwaysOff") : nil, trailing: ctl)
-            r.alphaValue = excluded ? 0.5 : 1
-            if appsBox.arrangedSubviews.count > 0 { appsBox.addArrangedSubview(hairline()) }
-            appsBox.addArrangedSubview(r)
-        }
-        if !apps.isEmpty { appsBox.addArrangedSubview(hairline()) }
-        let add = button(L10n.autocomplete("addApp"), #selector(addApp))
-        add.setAccessibilityIdentifier("ac.addApp")
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(NSLayoutConstraint.Priority(1), for: .horizontal)
-        let br = NSStackView(views: [add, spacer])
-        br.orientation = .horizontal; br.alignment = .centerY
-        br.edgeInsets = NSEdgeInsets(top: 7, left: 11, bottom: 7, right: 11)
-        appsBox.addArrangedSubview(br)
     }
 
     // MARK: - Обновление
@@ -412,7 +400,19 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
     }
 
     private func refreshCorpus() {
-        corpusCount.stringValue = String(format: L10n.autocomplete("corpusCount"), PersonalCorpus.shared.count)
+        guard !corpusRefreshPending else { return }
+        corpusRefreshPending = true
+        PersonalCorpus.workQueue.async { [weak self] in
+            guard let self else { return }
+            let snapshot = self.corpus.snapshot()
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.corpusRefreshPending = false
+                self.corpusCount.stringValue = snapshot.available
+                    ? String(format: L10n.autocomplete("corpusCount"), snapshot.records.count)
+                    : L10n.autocomplete("corpusUnavailableShort")
+            }
+        }
     }
 
     // MARK: - Действия
@@ -455,7 +455,40 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
     }
     @objc private func wordsChanged(_ p: NSPopUpButton) { AutocompletePrefs.maxWords = wordsOptions[p.indexOfSelectedItem] }
     @objc private func pauseChanged(_ p: NSPopUpButton) { AutocompletePrefs.pauseMs = pauseOptions[p.indexOfSelectedItem] }
-    @objc private func acceptAllChanged(_ p: NSPopUpButton) { AutocompletePrefs.acceptAllKeyCode = acceptAllOptions[p.indexOfSelectedItem] }
+    @objc private func toggleOnlyWord(_ s: NSSwitch) { AutocompletePrefs.onlyCurrentWord = s.state == .on }
+    @objc private func toggleInline(_ s: NSSwitch) { AutocompletePrefs.inlineCompletion = s.state == .on }
+    @objc private func toggleAlternatives(_ s: NSSwitch) { AutocompletePrefs.autoAlternatives = s.state == .on }
+    @objc private func toggleSynonyms(_ s: NSSwitch) { AutocompletePrefs.autoSynonyms = s.state == .on }
+    @objc private func variantsDelayChanged(_ p: NSPopUpButton) { AutocompletePrefs.variantsDelayMs = [300, 600, 1000, 1500][p.indexOfSelectedItem] }
+    @objc private func toggleTrailingSpace(_ s: NSSwitch) { AutocompletePrefs.trailingSpace = s.state == .on }
+    @objc private func toggleTrailingPunctuation(_ s: NSSwitch) { AutocompletePrefs.trailingPunctuation = s.state == .on }
+    @objc private func toggleTab(_ s: NSSwitch) { AutocompletePrefs.tabEnabled = s.state == .on }
+    @objc private func escapeChanged(_ p: NSPopUpButton) { AutocompletePrefs.escapeMode = escapeOptions[p.indexOfSelectedItem] }
+
+    private func shortcutRow(_ action: CompletionAction) -> NSView {
+        let record = button(AutocompleteShortcutRecorder.label(AutocompletePrefs.shortcut(action)), #selector(recordShortcut(_:)))
+        record.identifier = NSUserInterfaceItemIdentifier(action.rawValue)
+        record.setAccessibilityIdentifier("ac.shortcut.\(action.rawValue)")
+        record.setAccessibilityLabel(L10n.autocomplete("action.\(action.rawValue)"))
+        shortcutButtons[action] = record
+        let clear = button(L10n.autocomplete("clearShortcut"), #selector(clearShortcut(_:)))
+        clear.identifier = NSUserInterfaceItemIdentifier(action.rawValue)
+        clear.setAccessibilityIdentifier("ac.clearShortcut.\(action.rawValue)")
+        let controls = NSStackView(views: [record, clear])
+        controls.orientation = .horizontal; controls.alignment = .centerY; controls.spacing = DS.itemGap
+        return row(L10n.autocomplete("action.\(action.rawValue)"), nil, trailing: controls)
+    }
+    @objc private func recordShortcut(_ button: NSButton) {
+        guard let id = button.identifier?.rawValue, let action = CompletionAction(rawValue: id) else { return }
+        AutocompleteShortcutRecorder.shared.start(action, window: window) { [weak self] in
+            self?.shortcutButtons[action]?.title = AutocompleteShortcutRecorder.label(AutocompletePrefs.shortcut(action))
+        }
+    }
+    @objc private func clearShortcut(_ button: NSButton) {
+        guard let id = button.identifier?.rawValue, let action = CompletionAction(rawValue: id) else { return }
+        AutocompletePrefs.setShortcut(nil, for: action)
+        shortcutButtons[action]?.title = AutocompleteShortcutRecorder.label(nil)
+    }
     @objc private func toggleTypo(_ s: NSSwitch) { AutocompletePrefs.typoFix = s.state == .on }
     @objc private func toggleBattery(_ s: NSSwitch) { AutocompletePrefs.batteryLight = s.state == .on }
     @objc private func recordChanged(_ p: NSPopUpButton) { AutocompletePrefs.recordMode = recordOptions[p.indexOfSelectedItem] }
@@ -467,32 +500,10 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
         AutocompletePrefs.useScreen = on
         if on, !ScreenContextProvider.hasPermission { ScreenContextProvider.requestPermission() }
     }
-    @objc private func toggleApp(_ s: NSSwitch) {
-        AutocompleteAppStore.shared.setEnabled(s.identifier?.rawValue ?? "", s.state == .on)
-    }
-    @objc private func deleteCorpus() {
-        let alert = NSAlert()
-        alert.messageText = L10n.autocomplete("deleteAllTitle")
-        alert.informativeText = L10n.autocomplete("deleteAllText")
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: L10n.autocomplete("deleteAllOk"))
-        alert.addButton(withTitle: L10n.autocomplete("cancel"))
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        PersonalCorpus.shared.removeAll()
-        refreshCorpus()
-    }
-    @objc private func addApp() {
-        let panel = NSOpenPanel()
-        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-        panel.allowedContentTypes = [.application]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.message = L10n.autocomplete("addAppMessage")
-        guard panel.runModal() == .OK, let url = panel.url,
-              let bid = Bundle(url: url)?.bundleIdentifier else { return }
-        let store = AutocompleteAppStore.shared
-        store.setEnabled(bid, store.isEnabled(bid))   // заносит приложение в список настроенных
-        rebuildApps()
+    @objc private func browseCorpus() { showCorpus(bundleID: nil) }
+    private func showCorpus(bundleID: String?) {
+        if corpusWindow == nil { corpusWindow = PersonalCorpusWindowController(corpus: corpus) }
+        corpusWindow?.show(bundleID: bundleID)
     }
     @objc private func openKeyboardSettings() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.Keyboard-Settings.extension") {
@@ -505,9 +516,5 @@ final class AutocompleteSettingsView: NSStackView, NSTextViewDelegate, NSTextFie
     func textDidChange(_ notification: Notification) {
         guard (notification.object as? NSTextView) === aboutText else { return }
         AutocompletePrefs.globalInstruction = aboutText.string
-    }
-    func controlTextDidChange(_ obj: Notification) {
-        guard let f = obj.object as? NSTextField, let bid = instructionFields[f] else { return }
-        AutocompleteAppStore.shared.setInstruction(bid, f.stringValue)
     }
 }

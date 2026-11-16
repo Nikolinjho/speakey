@@ -312,6 +312,20 @@ enum HotkeyGuard {
     /// Добавляя СЛЕДУЮЩИЙ хоткей, добавь его сюда же. Это единственное место, где перечислены все.
     enum Slot: CaseIterable {
         case convert, voice, translate, instant, snippet, plainPaste, caseChange, pasteDictation
+        case completionWord, completionAll, completionManual, completionApp, completionGlobal, completionAlternatives, completionSynonyms
+
+        var completionAction: CompletionAction? {
+            switch self {
+            case .completionWord: return .nextWord
+            case .completionAll: return .acceptAll
+            case .completionManual: return .manual
+            case .completionApp: return .toggleApp
+            case .completionGlobal: return .toggleGlobal
+            case .completionAlternatives: return .alternatives
+            case .completionSynonyms: return .synonyms
+            default: return nil
+            }
+        }
 
         /// Как назвать функцию человеку в тексте «занято: %@».
         var name: String {
@@ -324,6 +338,8 @@ enum HotkeyGuard {
             case .plainPaste: return L10n.t("is.busy.paste")
             case .caseChange: return L10n.t("is.busy.case")
             case .pasteDictation: return L10n.t("is.busy.pasteLast")
+            case .completionWord, .completionAll, .completionManual, .completionApp, .completionGlobal, .completionAlternatives, .completionSynonyms:
+                return L10n.autocomplete("action.\(completionAction!.rawValue)")
             }
         }
 
@@ -340,6 +356,7 @@ enum HotkeyGuard {
             case .voice, .pasteDictation:             return .voice
             case .translate:                          return .translate
             case .snippet, .plainPaste, .caseChange:  return .snippets
+            case .completionWord, .completionAll, .completionManual, .completionApp, .completionGlobal, .completionAlternatives, .completionSynonyms: return .autocomplete
             }
         }
 
@@ -371,6 +388,11 @@ enum HotkeyGuard {
             case .pasteDictation:
                 guard s.pasteDictationEnabled else { return nil }
                 return ("key", s.pasteDictationKeyCode, s.pasteDictationModifiers)
+            case .completionWord, .completionAll, .completionManual, .completionApp, .completionGlobal, .completionAlternatives, .completionSynonyms:
+                guard let action = completionAction,
+                      action == .toggleGlobal || AutocompletePrefs.enabled,
+                      let shortcut = AutocompletePrefs.shortcut(action) else { return nil }
+                return ("key", Int(shortcut.keyCode), shortcut.modifiers)
             }
         }
     }

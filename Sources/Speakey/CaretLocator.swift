@@ -7,20 +7,35 @@ import AppKit
 /// возвращаем nil, и вызывающий падает на позицию мыши. (автор 2026-06-30.)
 enum CaretLocator {
 
+    /// Только один символ возле каретки. Вызывается после проверки поля, вне колбэка клавиатуры.
+    static func fontNearCaret(element: AXUIElement, range: CFRange) -> NSFont? {
+        guard range.location >= 0 else { return nil }
+        var character = CFRange(location: max(0, range.location - 1), length: 1)
+        guard let argument = AXValueCreate(.cfRange, &character) else { return nil }
+        var raw: CFTypeRef?
+        guard AXUIElementCopyParameterizedAttributeValue(element, kAXAttributedStringForRangeParameterizedAttribute as CFString,
+                                                         argument, &raw) == .success,
+              let text = raw as? NSAttributedString, text.length > 0 else { return nil }
+        let attributes = text.attributes(at: 0, effectiveRange: nil)
+        if let font = attributes[.font] as? NSFont, font.pointSize.isFinite, (1...200).contains(font.pointSize) { return font }
+        guard let info = attributes[NSAttributedString.Key(kAXFontTextAttribute.takeUnretainedValue() as String)] as? [String: Any],
+              let number = info[kAXFontSizeKey.takeUnretainedValue() as String] as? NSNumber else { return nil }
+        let size = CGFloat(number.doubleValue)
+        guard size.isFinite, (1...200).contains(size) else { return nil }
+        if let name = info[kAXFontNameKey.takeUnretainedValue() as String] as? String,
+           let font = NSFont(name: name, size: size) { return font }
+        if let family = info[kAXFontFamilyKey.takeUnretainedValue() as String] as? String,
+           let font = NSFont(name: family, size: size) { return font }
+        return NSFont.systemFont(ofSize: size)
+    }
+
     /// Прямоугольник каретки в Cocoa-координатах (origin снизу-слева). nil — если недоступно.
     /// `preferCharBefore` — сначала правый край символа перед кареткой. Нужен призрачному тексту
     /// автодополнения: TextEdit для пустого диапазона в конце строки отдаёт прямоугольник на ~строку
     /// выше настоящей каретки (замер 12.11.2026), а прямоугольник символа точен. Диктовка остаётся
     /// на прежнем порядке — для неё важнее пустое поле, где символа перед кареткой нет.
     static func caretScreenRect(preferCharBefore: Bool = false) -> NSRect? {
-        let sys = AXUIElementCreateSystemWide()
-        // Кап на AX-сообщения: не вешаем старт диктовки, если фронтальное приложение тупит.
-        AXUIElementSetMessagingTimeout(sys, 0.25)
-
-        var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let rawEl = focused, CFGetTypeID(rawEl) == AXUIElementGetTypeID() else { return nil }
-        let element = rawEl as! AXUIElement
+        guard let element = AXFocusedElement.read(timeout: 0.25) else { return nil }
 
         // Диапазон выделения/каретки (каретка = длина 0 в позиции курсора).
         var rangeRef: CFTypeRef?
@@ -56,6 +71,25 @@ enum CaretLocator {
         if quartz == nil { quartz = bounds(loc, 1) }
         if quartz == nil, loc > 0, let before = bounds(loc - 1, 1) {
             quartz = CGRect(x: before.maxX, y: before.origin.y, width: 1, height: before.height)
+        }
+        // Slack отдаёт нулевые AXBoundsForRange даже при доступном тексте. Диапазон
+        // текстовых маркеров того же поля содержит настоящую геометрию каретки.
+        // Для выделения это рамка всего текста, поэтому используем только пустой диапазон.
+        if quartz == nil, range.length == 0 {
+            var markerRange: CFTypeRef?
+            var markerBounds: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, "AXSelectedTextMarkerRange" as CFString, &markerRange) == .success,
+               let markerRange,
+               AXUIElementCopyParameterizedAttributeValue(element, "AXBoundsForTextMarkerRange" as CFString,
+                                                          markerRange, &markerBounds) == .success,
+               let rawBounds = markerBounds, CFGetTypeID(rawBounds) == AXValueGetTypeID() {
+                var rect = CGRect.zero
+                if AXValueGetValue(rawBounds as! AXValue, .cgRect, &rect),
+                   rect.origin.x.isFinite, rect.origin.y.isFinite,
+                   rect.width.isFinite, rect.height.isFinite, rect.width >= 0, rect.height > 0 {
+                    quartz = rect
+                }
+            }
         }
         guard let q = quartz, q != .zero else { return nil }
         return flipToCocoa(q)

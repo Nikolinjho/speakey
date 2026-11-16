@@ -14,6 +14,42 @@ if ProcessInfo.processInfo.environment["SPEAKEY_NEURAL_TRANSPORT_CHECK"] == "1" 
     exit(NeuralLayoutTransportCheck.run())
 }
 
+// Проверка OCR использует только синтетические окна и отдельный проверочный процесс.
+if ProcessInfo.processInfo.environment["SPEAKEY_SCREEN_CONTEXT_CHECK"] == "1" {
+    let checkApp = NSApplication.shared
+    checkApp.setActivationPolicy(.regular)
+    Task { @MainActor in exit(await ScreenContextCheck.run()) }
+    checkApp.run()
+    exit(1)
+}
+
+// Проверка финального текста использует только собственные синтетические поля.
+if ProcessInfo.processInfo.environment["SPEAKEY_RECORDING_CHECK"] == "1" {
+    let checkApp = NSApplication.shared
+    checkApp.setActivationPolicy(.regular)
+    Task { @MainActor in exit(await AutocompleteRecordingCheck.run()) }
+    checkApp.run()
+    exit(1)
+}
+
+// Проверка контекста использует синтетический корпус и отдельный буфер, без AppDelegate.
+if ProcessInfo.processInfo.environment["SPEAKEY_CONTEXT_CHECK"] == "1" {
+    let checkApp = NSApplication.shared
+    checkApp.setActivationPolicy(.regular)
+    Task { @MainActor in exit(await AutocompleteContextCheck.run()) }
+    checkApp.run()
+    exit(1)
+}
+
+// Проверка редактирования работает с собственными синтетическими полями и отдельным помощником.
+if ProcessInfo.processInfo.environment["SPEAKEY_EDITING_CHECK"] == "1" {
+    let checkApp = NSApplication.shared
+    checkApp.setActivationPolicy(.regular)
+    Task { @MainActor in exit(await CompletionEditingCheck.run()) }
+    checkApp.run()
+    exit(1)
+}
+
 // Изолированный просмотр настроек: до любых системных guard и AppDelegate.
 if ProcessInfo.processInfo.environment["SPEAKEY_JOURNAL_PREVIEW"] == "1" || ProcessInfo.processInfo.environment["SPEAKEY_NEURAL_PREVIEW_CHECK"] == "1" {
     let previewApp = NSApplication.shared

@@ -9,12 +9,20 @@ struct FieldSnapshot {
     let pid: pid_t
     /// Справа от каретки на той же строке есть текст — подсказка легла бы поверх него.
     var textAfterOnLine = false
+    var target: CompletionTarget? = nil
 }
 
 /// Снимок поля ввода и сборка контекста для модели. Только вне main-колбэка тапа:
 /// AX-запросы синхронные (с таймаутами).
 enum ContextHub {
     static func snapshot(maxBefore: Int = 1500) -> FieldSnapshot? {
+        if let target = CompletionTarget.capture() {
+            var snapshot = FieldSnapshot(bundleID: target.bundleID, appName: target.appName, before: target.before,
+                                         caretRect: target.caret, pid: target.pid)
+            snapshot.target = target
+            snapshot.textAfterOnLine = CompletionEditing.hasTextOnCurrentLine(after: target.after)
+            return snapshot
+        }
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bid = app.bundleIdentifier else { return nil }
         guard let before = AXScreenCheck.textBeforeCaret(maxLen: maxBefore) else { return nil }
@@ -48,7 +56,8 @@ enum ContextHub {
         return str.first
     }
 
-    static func context(for s: FieldSnapshot) -> CompletionContext {
+    static func context(for s: FieldSnapshot, corpus: PersonalCorpus = .shared,
+                        pasteboard: NSPasteboard = .general) -> CompletionContext {
         var c = CompletionContext(appName: s.appName, before: s.before)
         let g = AutocompletePrefs.globalInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         if !g.isEmpty { c.globalInstruction = g }
@@ -56,16 +65,10 @@ enum ContextHub {
         if !a.isEmpty { c.appInstruction = a }
 
         let strength = AutocompletePrefs.personalStrength
-        if strength > 0, AutocompletePrefs.recordMode != .off || PersonalCorpus.shared.count > 0 {
-            let (nSnippets, nTerms): (Int, Int) = {
-                switch strength {
-                case 1: return (1, 10)
-                case 2: return (3, 20)
-                default: return (5, 30)
-                }
-            }()
-            c.snippets = PersonalCorpus.shared.similar(to: s.before, limit: nSnippets)
-            c.terms = PersonalCorpus.shared.topTerms(limit: nTerms)
+        if strength > 0 {
+            let profile = corpus.personalization(before: s.before, bundleID: s.bundleID, strength: strength)
+            c.snippets = profile.snippets
+            c.terms = profile.terms
         }
 
         if AutocompletePrefs.useScreen,
@@ -75,7 +78,7 @@ enum ContextHub {
         }
 
         // Буфер с пометкой «скрытое/временное» (менеджеры паролей) в промпт не идёт.
-        let pb = NSPasteboard.general
+        let pb = pasteboard
         let concealed = pb.types?.contains { $0.rawValue == "org.nspasteboard.ConcealedType" || $0.rawValue == "org.nspasteboard.TransientType" } ?? false
         if AutocompletePrefs.useClipboard, !concealed,
            let clip = pb.string(forType: .string) {

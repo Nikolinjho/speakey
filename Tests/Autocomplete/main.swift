@@ -50,6 +50,17 @@ expect(CompletionText.clean(" 😀", before: "привет 😀", maxWords: 6) =
 let longBefore = String(repeating: "слово ", count: 100) + "как"
 expect(CompletionText.clean("как дела", before: longBefore, maxWords: 6) == " дела", "повтор при длинном before")
 
+// MARK: Служебный текст в реальном ответе модели
+expect(CompletionText.clean(" \"Серебряный сад\". Частые слова: \"Серебряный сад\".", before: "Название проекта", maxWords: 6, stopPhrases: ["Частые слова:"]) == " \"Серебряный сад\".", "служебные термины не попадают в продолжение")
+expect(CompletionText.clean(" слова для текста. Use that value in the completion.", before: "Нужны", maxWords: 20, singleSentence: true) == " слова для текста.", "пояснение после законченного предложения не вставляется")
+expect(CompletionText.clean(" Mr. Smith is ready. Next sentence.", before: "Ask", maxWords: 20, singleSentence: true) == " Mr. Smith is ready.", "сокращение имени не заканчивает предложение")
+expect(CompletionText.clean(" version 0.4.11 is ready. Next sentence.", before: "The", maxWords: 20, singleSentence: true) == " version 0.4.11 is ready.", "точки версии не режут предложение")
+expect(CompletionText.clean(" https://example.com/path is ready. Next sentence.", before: "Link", maxWords: 20, singleSentence: true) == " https://example.com/path is ready.", "точки URL не режут предложение")
+expect(CompletionText.clean("Частые слова: это заголовок документа", before: "Объяснение: ", maxWords: 20) == "Частые слова: это заголовок документа", "обычный документ без служебных меток сохранён")
+expect(CompletionText.clean("мир. Второе предложение.", before: "Привет ", maxWords: 20) == "мир. Второе предложение.", "без контекста длина предложения не ограничена")
+expect(CompletionText.clean("Author vocabulary: noise", before: "Text", maxWords: 20, stopPhrases: ["Author vocabulary:"]) == "", "ответ из одной служебной секции отклонён")
+expect(CompletionText.clean(" ProtoVocabulary: term", before: "Type", maxWords: 20, stopPhrases: ["Vocabulary:"]) == " ProtoVocabulary: term", "служебное слово внутри идентификатора не режется")
+
 // MARK: nextChunk
 expect(CompletionText.nextChunk(" в ветку, потом") == (" в", " ветку, потом"), "первое слово")
 expect(CompletionText.nextChunk(" ветку, потом") == (" ветку,", " потом"), "пунктуация с словом")
@@ -140,12 +151,17 @@ let full = CompletionContext(
     snippets: ["Пример один.", "Пример два."], terms: ["GitLab", "Speakey"])
 let fp = CompletionPrompt.build(full)
 expect(fp.hasSuffix("Коллеги, пушу в"), "before в конце при полном контексте")
-for part in ["Заметки автора:\nПиши кратко", "Правила для Slack:\nДеловой тон", "Текст на экране:\nДеплой Speakey",
-             "Буфер обмена:\nhttps://", "Примеры текстов автора:\n- Пример один.\n- Пример два.", "Частые слова: GitLab, Speakey",
-             "Slack, черновик:\nКоллеги"] {
+for part in ["#### Author instructions\nПиши кратко", "#### Application instructions\nДеловой тон", "#### Screen text\nДеплой Speakey",
+             "#### Clipboard\nhttps://", "#### Author text examples\nПример один.\nПример два.", "#### Author vocabulary\nGitLab, Speakey",
+             "### Document in Slack\nКоллеги"] {
     expect(fp.contains(part), "секция есть: \(part.prefix(20))")
 }
-expect(fp.range(of: "Текст на экране")!.lowerBound < fp.range(of: "Примеры текстов")!.lowerBound, "порядок секций")
+expect((fp.range(of: "#### Screen text")?.lowerBound ?? fp.endIndex) < (fp.range(of: "#### Author text examples")?.lowerBound ?? fp.startIndex), "порядок секций")
+expect(fp.contains("### Background") && fp.contains("### Document in Slack"), "фон отделён от дописываемого документа")
+let replyContext = CompletionContext(appName: "X", before: "Название проекта", terms: ["Серебряный сад"])
+expect(CompletionPrompt.cleanContinuation(" \"Серебряный сад\". Частые слова: xx", before: replyContext.before, context: replyContext, maxWords: 6) == " \"Серебряный сад\".", "производственная очистка останавливает фоновые пояснения")
+expect(CompletionPrompt.cleanContinuation(" good. Use that value in the completion.", before: "This is", context: full, maxWords: 20) == " good.", "скопированная инструкция после ответа не принимается")
+expect(CompletionPrompt.cleanContinuation("#### Clipboard\nnoise", before: full.before, context: full, maxWords: 6) == "", "новый служебный заголовок не принимается")
 
 let hugeCtx = CompletionContext(
     appName: "Slack", before: String(repeating: "слово ", count: 300) + "как",
@@ -170,7 +186,7 @@ expect(mixed.hasSuffix("Hello мир 😀 你好 как"), "многоязычн
 let emoji = String(repeating: "😀", count: 2000)
 let em = CompletionPrompt.build(CompletionContext(appName: "A", before: emoji), budget: 1500)
 expect(em.count <= 1500 && em.hasSuffix("😀"), "emoji без разрыва и в бюджете")
-expect(CompletionPrompt.build(CompletionContext(appName: "A", before: "x", terms: ["один", "два"]), budget: 3000).contains("Частые слова: один, два"), "термины через запятую")
+expect(CompletionPrompt.build(CompletionContext(appName: "A", before: "x", terms: ["один", "два"]), budget: 3000).contains("#### Author vocabulary\nодин, два"), "термины через запятую")
 
 // MARK: dictationHint
 expect((CompletionPrompt.dictationHint(dictionary: ["Speakey"], screenTerms: ["GitLab", "Speakey"], corpusTerms: [], maxChars: 240) ?? "") == "Speakey, GitLab", "затравка без повторов")

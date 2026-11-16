@@ -1,0 +1,89 @@
+{
+  "before_kib": 9096592,
+  "verification": {
+    "qwen_upstream_digest": "8bce5adfb5d9bab45c387d249d0005de701b746eba10932da2904d2d5930464e",
+    "gigaam-v3-e2e-ctc": "public download manifest SHA-256 matches",
+    "gigaam-v3-e2e-rnnt": "public download manifest SHA-256 matches"
+  },
+  "public_downloads": {
+    "gigaam-v3-e2e-ctc": [
+      {
+        "file": "v3_e2e_ctc.ckpt",
+        "url": "https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM/v3_e2e_ctc.ckpt",
+        "bytes": 442404646,
+        "sha256": "73e27ec8f904e486ab063d5bb7c6ab701838b7e5a967ee79b71ccc5aefde146f",
+        "upstream_md5": "367074d6498f426d960b25f49531cf68"
+      },
+      {
+        "file": "v3_e2e_ctc_tokenizer.model",
+        "url": "https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM/v3_e2e_ctc_tokenizer.model",
+        "bytes": 240941,
+        "sha256": "0b9a1960898fbfdf5424ab852ea17445eb3da960fba23e977ff100eb0054fbc8",
+        "upstream_md5": "2a9cd0c246db42d076e92abb31055deb"
+      }
+    ],
+    "gigaam-v3-e2e-rnnt": [
+      {
+        "file": "v3_e2e_rnnt.ckpt",
+        "url": "https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM/v3_e2e_rnnt.ckpt",
+        "bytes": 448929252,
+        "sha256": "f60c62fe45902d967000770a12f260de7c5ac4d4b8e5e852f1df8c548e3958b5",
+        "upstream_md5": "2730de7545ac43ad256485a462b0a27a"
+      },
+      {
+        "file": "v3_e2e_rnnt_tokenizer.model",
+        "url": "https://cdn.chatwm.opensmodel.sberdevices.ru/GigaAM/v3_e2e_rnnt_tokenizer.model",
+        "bytes": 255336,
+        "sha256": "828c12c991019eef952a960661f25a92d6ad279591e2ea466b4aeddf1d20a18a",
+        "upstream_md5": "3b3bf8370e882885d79731592fc99f98"
+      }
+    ]
+  },
+  "removed": [
+    {
+      "path": "vendor/speech-evaluation/models/qwen3-asr-1.7b-8bit",
+      "reason": "unused public Qwen3-ASR benchmark weights",
+      "kib": 2410044
+    },
+    {
+      "path": "vendor/speech-evaluation/models/gigaam-v3-e2e-ctc",
+      "reason": "unused public GigaAM CTC benchmark weights",
+      "kib": 432276
+    },
+    {
+      "path": "vendor/speech-evaluation/models/gigaam-v3-e2e-rnnt",
+      "reason": "unused public GigaAM RNNT benchmark weights",
+      "kib": 438664
+    },
+    {
+      "path": "vendor/speech-evaluation/venv",
+      "reason": "regenerable Qwen-ASR benchmark Python environment",
+      "kib": 598568
+    },
+    {
+      "path": "vendor/speech-evaluation/gigaam-venv",
+      "reason": "regenerable GigaAM benchmark Python environment",
+      "kib": 970968
+    },
+    {
+      "path": "vendor/FluidAudio/.build",
+      "reason": "SwiftPM cache; app uses vendor/fluidaudio-prebuilt",
+      "kib": 406952
+    },
+    {
+      "path": "vendor/sparkle/Symbols",
+      "reason": "upstream debug symbols, not runtime files",
+      "kib": 80696
+    }
+  ],
+  "preserved": [
+    "vendor/speech-evaluation/models/whisper-large-v3-turbo-hf",
+    "vendor/speech-evaluation/whisper-venv",
+    "vendor/speech-evaluation/models/parakeet-tdt-0.6b-v3",
+    "vendor/fluidaudio-prebuilt",
+    "vendor/whisper.cpp/build-macos14",
+    "vendor/llama.cpp/build-speakey"
+  ],
+  "after_kib": 3758428,
+  "status": "completed"
+}

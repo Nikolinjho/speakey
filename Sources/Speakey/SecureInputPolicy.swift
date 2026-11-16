@@ -77,13 +77,7 @@ enum SecureInputPolicy {
     /// IPC, который обслуживает main-цикл ЧУЖОГО приложения; занято оно спиннером — мы висим.
     /// Худший случай тут 2×50мс и честный `.unknown` (разбор — в шапке `AXScreenCheck`).
     static func focusedFieldVerdict() -> FieldVerdict {
-        let sys = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(sys, 0.05)
-        var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
-              let focusedAny = focusedRef, CFGetTypeID(focusedAny) == AXUIElementGetTypeID() else { return .unknown }
-        let el = unsafeDowncast(focusedAny as AnyObject, to: AXUIElement.self)
-        AXUIElementSetMessagingTimeout(el, 0.05)
+        guard let el = AXFocusedElement.read() else { return .unknown }
 
         var subroleRef: CFTypeRef?
         if AXUIElementCopyAttributeValue(el, kAXSubroleAttribute as CFString, &subroleRef) == .success,

@@ -59,6 +59,15 @@ python3 Tests/NeuralLayout/SigningPipelineTests.py
 bash scripts/test-compact-settings.sh /private/tmp/Speakey_check.app
 ```
 
+[Правила оформления настроек](docs/development/settings-ui.md): размеры,
+отступы, общие компоненты и проверка страниц в обеих темах.
+
+[Функции Cotypist и сравнение со Speakey](docs/development/cotypist-functional-inventory.md):
+возможности автодополнения, пробелы реализации и порядок дальнейшей работы.
+
+[Качество контекста и запись полей](docs/development/autocomplete-quality-verification.md):
+окончательный текст, активное окно OCR, сравнение запросов и нативные проверки.
+
 ## Лицензии
 
 MIT, полный текст и обязательные уведомления об авторстве – в `LICENSE`.
