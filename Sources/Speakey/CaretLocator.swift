@@ -29,13 +29,34 @@ enum CaretLocator {
         return NSFont.systemFont(ofSize: size)
     }
 
+    /// Границы поля в той же системе координат, что и каретка.
+    static func fieldScreenRect(element: AXUIElement) -> NSRect? {
+        var pid: pid_t = 0
+        if !Thread.isMainThread, AXUIElementGetPid(element, &pid) == .success, pid == getpid() {
+            return DispatchQueue.main.sync { fieldScreenRect(element: element) }
+        }
+        var positionRef: CFTypeRef?
+        var sizeRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(element, kAXPositionAttribute as CFString, &positionRef) == .success,
+              AXUIElementCopyAttributeValue(element, kAXSizeAttribute as CFString, &sizeRef) == .success,
+              let positionRef, CFGetTypeID(positionRef) == AXValueGetTypeID(),
+              let sizeRef, CFGetTypeID(sizeRef) == AXValueGetTypeID() else { return nil }
+        var position = CGPoint.zero
+        var size = CGSize.zero
+        guard AXValueGetValue(positionRef as! AXValue, .cgPoint, &position),
+              AXValueGetValue(sizeRef as! AXValue, .cgSize, &size),
+              position.x.isFinite, position.y.isFinite, size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0 else { return nil }
+        return flipToCocoa(CGRect(origin: position, size: size))
+    }
+
     /// Прямоугольник каретки в Cocoa-координатах (origin снизу-слева). nil — если недоступно.
     /// `preferCharBefore` — сначала правый край символа перед кареткой. Нужен призрачному тексту
     /// автодополнения: TextEdit для пустого диапазона в конце строки отдаёт прямоугольник на ~строку
     /// выше настоящей каретки (замер 12.11.2026), а прямоугольник символа точен. Диктовка остаётся
     /// на прежнем порядке — для неё важнее пустое поле, где символа перед кареткой нет.
-    static func caretScreenRect(preferCharBefore: Bool = false) -> NSRect? {
-        guard let element = AXFocusedElement.read(timeout: 0.25) else { return nil }
+    static func caretScreenRect(preferCharBefore: Bool = false, element focusedElement: AXUIElement? = nil) -> NSRect? {
+        guard let element = focusedElement ?? AXFocusedElement.read(timeout: 0.25) else { return nil }
 
         // Диапазон выделения/каретки (каретка = длина 0 в позиции курсора).
         var rangeRef: CFTypeRef?

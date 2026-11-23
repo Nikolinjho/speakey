@@ -127,54 +127,42 @@ final class WhisperBridge {
         // пополам), максимум 1500 кадров = те самые 30 с, больше нельзя — whisper_full вернёт -5.
         params.audio_ctx = Self.audioContext(forSamples: samples.count)
 
-        // ⚠️ В «АВТО» ЯЗЫК ОПРЕДЕЛЯЕМ ДО РАСШИФРОВКИ, И ЗАТРАВКА ИДЁТ НА НЁМ ОДНОМ (25.09.2026).
-        // автор продиктовал 12.5 с по-русски, в логе стояло «lang=auto→ru», а пришёл английский
-        // перевод. Язык определился верно, но двуязычная затравка кончается английской фразой, и
-        // декодер продолжил тот язык, которым она кончается. Замер 25.09.2026 на large-v3-turbo
-        // нашим жадным путём: английский хвост затравки поднимает вероятность латинского первого
-        // слова на живой русской речи примерно вчетверо (SOVA, медиана 4.8% против 1.3%), и на 252
-        // коротких зашумлённых репликах вышло 2 английских перевода при языке ru. С затравкой на
-        // одном определённом языке: 0 из 252, а «Gagarin» вместо «Гагарина» на 20 копиях одной
-        // реплики встретился 5 раз вместо 13. Испанская и французская речь в «Авто» выходила
-        // русским переводом, теперь выходит на своём языке. Цена: на живых обрывках SOVA 80
-        // ошибок 114 против 103, почти все на одной реплике, начатой с середины фразы (модель
-        // дописала ей начало). Ровно так же сегодня работает явный «ru». Как выбирается язык
-        // затравки: WhisperPrompt.promptLanguage.
-        //
-        // Порядок вызовов здесь не косметика. whisper_full при n_samples > 0 заново считает мел, а
-        // это сбрасывает кэш энкодера (vendor-patches/whisper-encoder-cache.diff), и энкодер идёт
-        // второй раз: +0.9 с на M1 Max. Поэтому мел считаем сами, язык определяем на нём, а
-        // whisper_full зовём с n_samples = 0, и он берёт мел и проход энкодера готовыми.
-        // Определение то же самое, что whisper_full делал внутри (тот же вызов, то же первое окно
-        // записи), поэтому язык выбирается как раньше. Меняется только затравка.
-        // Явные «ru» и «en» идут прежней дорогой, их это не касается.
+        // В «Авто» считаем мел и запускаем детектор на первом окне. whisper_full
+        // получает n_samples = 0 и переиспользует мел и кэш энкодера.
         let t0 = CFAbsoluteTimeGetCurrent()
         var decodeLanguage = language
+        var promptLanguage = language
         var melReady = false
         var detectP: Float = 0
         if language == "auto" {
+            // Если детектор не сработал, распознаём на русском без повторного автоопределения.
+            decodeLanguage = "ru"
+            promptLanguage = "ru"
             let melRc = samples.withUnsafeBufferPointer {
                 whisper_pcm_to_mel(ctx, $0.baseAddress, Int32($0.count), params.n_threads)
             }
             var probs = [Float](repeating: 0, count: Int(whisper_lang_max_id()) + 1)
             let id = melRc == 0 ? whisper_lang_auto_detect(ctx, 0, params.n_threads, &probs) : -1
-            if id >= 0, let name = whisper_lang_str(id) {
-                decodeLanguage = String(cString: name)
-                detectP = probs[Int(id)]
+            if id >= 0 {
+                let russian = whisper_lang_id("ru")
+                let english = whisper_lang_id("en")
+                let selected = probs[Int(english)] > probs[Int(russian)] ? english : russian
+                decodeLanguage = selected == english ? "en" : "ru"
+                detectP = probs[Int(selected)]
                 melReady = true
+                // Сохраняем прежнюю затравку, когда детектор сам выбрал русский или английский.
+                // При замене третьего языка затравка должна совпасть с языком декодера.
+                promptLanguage = id == selected
+                    ? WhisperPrompt.promptLanguage(setting: language, detected: decodeLanguage, p: detectP)
+                    : decodeLanguage
             } else {
-                // Не вышло: старый путь, whisper_full определит язык сам, затравка двуязычная.
-                kbLog("whisper: язык заранее не определился (mel=\(melRc) id=\(id)), распознаю одним проходом")
+                kbLog("whisper: язык заранее не определился (mel=\(melRc) id=\(id)), распознаю на русском")
             }
         }
-        let promptLanguage = WhisperPrompt.promptLanguage(
-            setting: language, detected: melReady ? decodeLanguage : nil, p: detectP)
 
-        // whisper.h: для авто-определения language = "auto" (НЕ detect_language + пустой language —
-        // тогда оставался дефолтный "en" → на RU-речи выходило пусто). Всегда задаём language строкой.
         let lang = strdup(decodeLanguage)
         defer { free(lang) }
-        params.language = UnsafePointer(lang)        // определённый язык; "auto" только если определить не вышло
+        params.language = UnsafePointer(lang)
 
         // initial_prompt: НАТУРАЛЬНАЯ фраза со знаками препинания смещает авторегрессионный whisper
         // к «режиму С пунктуацией». Без неё на ХОЛОДНОМ декоде (no_context=true) whisper ~в трети
@@ -192,9 +180,7 @@ final class WhisperBridge {
         //    присваивается ПОСЛЕ этой чистки, src/whisper.cpp) — анти-залипание сохраняем;
         //  — carry_initial_prompt=true: на длинной диктовке (>30с = несколько окон) знаки не теряются на
         //    2-м+ окне; для коротких реплик это no-op, downside нет.
-        // Какая затравка в «Авто», разобрано выше и у `punctuationPrompt`. Пустая строка значит
-        // «без затравки» (уверенно определён третий язык): пустой указатель и пустая подсказка для
-        // whisper разные вещи, поэтому проверку оставляем.
+        // Пустой указатель и пустая подсказка для whisper означают разные вещи.
         let prompt = punctuationPrompt(for: promptLanguage)
         let promptC = prompt.isEmpty ? nil : strdup(prompt)
         defer { if let promptC { free(promptC) } }

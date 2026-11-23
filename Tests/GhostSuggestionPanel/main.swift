@@ -68,6 +68,18 @@ print("baseline: editor=\(editorBaseline), preview=\(previewBaseline), nativeOff
 check("Обычная подсказка использует шрифт и размер исходного редактора", actualFont?.fontName == editorFont.fontName && actualFont?.pointSize == 17.5)
 check("Базовая линия подсказки совпадает с настоящей строкой NSTextView", abs(previewBaseline - editorBaseline) <= 0.5 / NSScreen.screens.first!.backingScaleFactor)
 check("Текст начинается у каретки без двойного отступа NSTextField", abs(pill.frame.minX + label.frame.minX + label.alignmentRectInsets.left - editorCaret.minX) <= 0.5)
+let field = NSRect(x: caret.minX - 250, y: caret.minY - 5, width: 300, height: 28)
+let nearRight = NSRect(x: field.maxX - 6, y: caret.minY, width: 1, height: caret.height)
+let overflow = " длинное продолжение"
+presenter.show(overflow, caret: nearRight, isCorrection: false, fieldBounds: field)
+check("У правого края поля подсказка остаётся в его горизонтальных границах",
+      pill.frame.minX >= field.minX && pill.frame.maxX <= field.maxX)
+check("У правого края поля продолжение опускается под строку", pill.frame.maxY < nearRight.minY)
+check("В плашке у края сохраняется полное продолжение", label.stringValue == overflow)
+presenter.show(" да", caret: caret, isCorrection: false, fieldBounds: field)
+check("Короткое продолжение остаётся на строке", !pill.hasShadow && abs(pill.frame.midY - caret.midY) <= 1)
+presenter.show(overflow, caret: edge, isCorrection: false)
+check("Когда границы поля недоступны, подсказка остаётся на экране", screen.contains(pill.frame))
 presenter.hide()
 check("Отмена скрывает плашку", !presenter.isVisible)
 print("ghost suggestion panel: \(checks) checks, \(failures) failures")

@@ -9,6 +9,7 @@ final class LayoutData {
     let trigramsEn: [String: Double]
     let wordsRu: Set<String>
     let wordsEn: Set<String>
+    private let sortedRussianWords: [String]
     let isLoaded: Bool
 
     private init() {
@@ -16,8 +17,24 @@ final class LayoutData {
         trigramsEn = Self.loadDict("trigrams_en")
         wordsRu = Self.loadSet("words_ru").union(ExtraWords.ru).union(ExtraWords.ruDev).union(ExtraWords.ruAbbr).union(ExtraWords.ruShort).union(ExtraWords.ruCommonForms).union(ExtraWords.ruLoanNames)
         wordsEn = Self.loadSet("words_en").union(ExtraWords.en)
+        sortedRussianWords = wordsRu.sorted()
         isLoaded = !trigramsRu.isEmpty && !wordsEn.isEmpty
         NSLog("Speakey: LayoutData loaded=\(isLoaded) ru-tri=\(trigramsRu.count) en-tri=\(trigramsEn.count) ru-w=\(wordsRu.count) en-w=\(wordsEn.count)")
+    }
+
+    /// Ищем первое слово не меньше префикса. Индекс строится при прогреве языковых данных.
+    func hasRussianWord(startingWith prefix: String) -> Bool {
+        var low = 0
+        var high = sortedRussianWords.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if sortedRussianWords[middle] < prefix {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        return low < sortedRussianWords.count && sortedRussianWords[low].hasPrefix(prefix)
     }
 
     /// Средняя лог-вероятность триграмм слова (с паддингом пробелами). Штраф −20 за отсутствие.

@@ -10,6 +10,7 @@ struct FieldSnapshot {
     /// Справа от каретки на той же строке есть текст — подсказка легла бы поверх него.
     var textAfterOnLine = false
     var target: CompletionTarget? = nil
+    var fieldBounds: NSRect? = nil
 }
 
 /// Снимок поля ввода и сборка контекста для модели. Только вне main-колбэка тапа:
@@ -20,15 +21,18 @@ enum ContextHub {
             var snapshot = FieldSnapshot(bundleID: target.bundleID, appName: target.appName, before: target.before,
                                          caretRect: target.caret, pid: target.pid)
             snapshot.target = target
+            snapshot.fieldBounds = CaretLocator.fieldScreenRect(element: target.element)
             snapshot.textAfterOnLine = CompletionEditing.hasTextOnCurrentLine(after: target.after)
             return snapshot
         }
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bid = app.bundleIdentifier else { return nil }
         guard let before = AXScreenCheck.textBeforeCaret(maxLen: maxBefore) else { return nil }
-        guard let rect = CaretLocator.caretScreenRect(preferCharBefore: true) else { return nil }
+        guard let element = AXFocusedElement.read(pid: app.processIdentifier, timeout: 0.25),
+              let rect = CaretLocator.caretScreenRect(preferCharBefore: true, element: element) else { return nil }
         var snap = FieldSnapshot(bundleID: bid, appName: app.localizedName ?? bid, before: before,
                                  caretRect: rect, pid: app.processIdentifier)
+        snap.fieldBounds = CaretLocator.fieldScreenRect(element: element)
         snap.textAfterOnLine = charAfterCaret().map { $0 != "\n" && $0 != "\r" } ?? false
         return snap
     }

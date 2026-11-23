@@ -40,6 +40,7 @@ final class AutocompleteController {
     /// Для исправления опечатки: сколько символов стереть и чем заменить.
     private var correction: (deleteCount: Int, text: String)?
     private var caret = NSRect.zero
+    private var fieldBounds: NSRect?
     private var suggestionFont: NSFont?
     private var sourceTarget: CompletionTarget?
     private var guardedTarget: CompletionTarget?
@@ -301,10 +302,13 @@ final class AutocompleteController {
         let item = DispatchWorkItem { [weak self] in
             self?.queue.async {
                 guard self?.isCurrent(gen) == true else { return }
-                let rect = CaretLocator.caretScreenRect(preferCharBefore: true)
+                let element = AXFocusedElement.read(timeout: 0.25)
+                let rect = element.flatMap { CaretLocator.caretScreenRect(preferCharBefore: true, element: $0) }
+                let bounds = element.flatMap { CaretLocator.fieldScreenRect(element: $0) }
                 DispatchQueue.main.async {
                     guard let self, gen == self.generation, !self.ghost.isEmpty, let rect else { return }
                     self.caret = rect
+                    self.fieldBounds = bounds
                     self.present()
                 }
             }
@@ -365,6 +369,7 @@ final class AutocompleteController {
                 self.noteField(snap, text: fieldText)
                 self.sourceTarget = snap.target
                 self.suggestionFont = snap.target?.textFont
+                self.fieldBounds = snap.fieldBounds
                 if AutocompletePrefs.useScreen { ScreenContextProvider.shared.refreshIfNeeded(pid: snap.pid) }
                 if let typo, self.suppressForWord?(typo.word) != true {
                     self.showCorrection(typo.fix, word: typo.word, caret: snap.caretRect)
@@ -423,6 +428,7 @@ final class AutocompleteController {
                         self.lastSkip = ""
                         self.sourceTarget = snap.target
                         self.suggestionFont = snap.target?.textFont
+                        self.fieldBounds = snap.fieldBounds
                         self.guardedTarget = (snap.textAfterOnLine || AutocompletePrefs.onlyCurrentWord) ? snap.target : nil
                         self.midlineSuggestion = snap.textAfterOnLine
                         self.midlineAnchor = snap.textAfterOnLine ? snap.caretRect : nil
@@ -583,6 +589,7 @@ final class AutocompleteController {
                 let ok = target.commit(text)
                 let candidate = ok ? CompletionTarget.capture() : nil
                 let updated = candidate.flatMap { target.verifies(text, updated: $0) ? $0 : nil }
+                let bounds = updated.flatMap { CaretLocator.fieldScreenRect(element: $0.element) }
                 let finalText = updated.flatMap { self.recordingText(for: $0.fieldIdentity, bundleID: target.bundleID, revision: revision) }
                 DispatchQueue.main.async {
                     defer { self.finishInsertion() }
@@ -592,6 +599,7 @@ final class AutocompleteController {
                     self.confirmRecordedInsertion(target.fieldIdentity, text: finalText, epoch: epoch, revision: revision)
                     if self.midlineSuggestion { self.midlinePrefix += text }
                     self.ghost = updated.selected.isEmpty ? rest : ""; self.guardedTarget = updated; self.sourceTarget = updated; self.caret = updated.caret
+                    self.fieldBounds = bounds
                     if self.ghost.isEmpty { self.hide() } else { self.present() }
                 }
             }
@@ -697,7 +705,8 @@ final class AutocompleteController {
     private func present() {
         guard !ghost.isEmpty else { return }
         GhostSuggestionPanel.shared.show(ghost, caret: midlineAnchor ?? caret, isCorrection: ghostIsCorrection,
-                                         belowLine: midlineSuggestion, typedPrefix: midlinePrefix, textFont: suggestionFont)
+                                         belowLine: midlineSuggestion, typedPrefix: midlinePrefix, textFont: suggestionFont,
+                                         fieldBounds: fieldBounds)
         ttl?.cancel()
         let gen = generation
         let item = DispatchWorkItem { [weak self] in
@@ -716,6 +725,7 @@ final class AutocompleteController {
         sourceTarget = nil; guardedTarget = nil; midlineSuggestion = false
         midlineAnchor = nil; midlinePrefix = ""
         suggestionFont = nil
+        fieldBounds = nil
         ghost = ""
         ghostIsCorrection = false
         correction = nil

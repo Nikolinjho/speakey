@@ -1360,27 +1360,32 @@ final class Engine: EventTapHandler {
         // 24.07) — ровно про это. Пока вставка в Chromium не решена, inline там ЗАПРЕЩЁН: у этих
         // приложений остаётся прежний асинхронный путь по границе слова.
         guard !frontAppIsChromium else { return false }
-        // F2 (ревью 25.07): если пользователь ФИЗИЧЕСКИ держит модификатор, наши backspace'ы поедут
-        // с ним: ⇧⌫ выделяет назад, ⌥⌫ стирает слово целиком — молчаливая потеря текста. Заглавные
-        // буквы набирают с зажатым ⇧, так что случай штатный. Флаги события не «обнулить»: приложение
-        // читает ГЛОБАЛЬНОЕ состояние модификаторов. Единственный безопасный ход — не стрелять.
-        let heldMods: CGEventFlags = [.maskShift, .maskAlternate, .maskCommand, .maskControl]
+        let heldMods: CGEventFlags = [.maskAlternate, .maskCommand, .maskControl]
         guard flags.intersection(heldMods).isEmpty else { return false }
         // F5: secure input проверяем ЗДЕСЬ по кэшу поллера, а не в TextReplacer (сам вызов до ~44мс).
         guard !secureInputWasOn else { return false }
         // Слово на экране = буфер; символ этой клавиши ещё не отрисован — добавляем его сами.
         let onScreen = buffer.currentWord
         let candidate = onScreen + pendingChar
-        guard candidate.count >= 4, candidate.count <= 16 else { return false }   // cap: держим колбэк коротким
-        guard candidate != liveFixLast else { return false }
-        guard !candidate.hasCyrillic || !candidate.hasLatinLetter else { return false }  // смешанное — не наш случай
-        guard case .convert(let toCyr) = LayoutDetector.liveDecide(word: candidate) else { return false }
-        // ⚠️ ЗАДАЧА 262 (отзыв #312, 26.09.2026): «gthtrk.» это недописанное «переклю…», а не «перекл»
-        // с точкой. Если концевой знак в раскладке человека буква, не стреляем: следующая клавиша
-        // сделает его внутренним. Клавиша при этом уходит в приложение как обычно.
-        guard let converted = Keymap.liveConvert(candidate, toCyrillic: toCyr, isValidTarget: Self.ruWordValidator) else {
-            kbLog("live: жду следующую букву, концевой знак = буква (inline, len \(candidate.count))")
-            return false
+        let continuation = LayoutDetector.mixedContinuation(after: onScreen, typed: pendingChar, exceptions: .shared)
+        let converted: String
+        let toCyr: Bool
+        if let continuation {
+            // ⇧⌫ может выделить текст. При зажатом Shift безопасна только вставка без удаления.
+            guard continuation.deleteCount == 0 || !flags.contains(.maskShift) else { return false }
+            converted = String(onScreen.dropLast(continuation.deleteCount)) + continuation.replacement
+            toCyr = continuation.toCyrillic
+        } else {
+            guard !flags.contains(.maskShift), (4...16).contains(candidate.count), candidate != liveFixLast,
+                  !candidate.hasCyrillic || !candidate.hasLatinLetter,
+                  case .convert(let targetIsCyrillic) = LayoutDetector.liveDecide(word: candidate) else { return false }
+            // «gthtrk.» может быть недописанным «переклю…»: концевой знак-буква ждёт продолжения.
+            guard let replacement = Keymap.liveConvert(candidate, toCyrillic: targetIsCyrillic, isValidTarget: Self.ruWordValidator) else {
+                kbLog("live: жду следующую букву, концевой знак = буква (inline, len \(candidate.count))")
+                return false
+            }
+            converted = replacement
+            toCyr = targetIsCyrillic
         }
         guard converted != candidate else { return false }
         guard antiResonance.allow(word: candidate, produced: converted) else {
@@ -1389,11 +1394,11 @@ final class Engine: EventTapHandler {
         }
         if UndoLearner.shared.shouldSuppress(current: candidate)
             || UndoLearner.shared.isSessionProtected(candidate) { return false }
-        // Печатаем: удалить то, что НА ЭКРАНЕ (onScreen), впечатать converted (он включает символ клавиши).
         let diagnosticEvent = recordDecision(word: candidate, proposed: converted, path: .inlineLive,
-            reason: .detectorConvert, action: .replace, completed: false)
+            reason: continuation == nil ? .detectorConvert : .mixedRescue, action: .replace, completed: false)
         neural.changed()
-        let submitted = TextReplacer.replaceInline(deleteCount: onScreen.count, with: converted, post: post)
+        let submitted = TextReplacer.replaceInline(deleteCount: continuation?.deleteCount ?? onScreen.count,
+                                                   with: continuation?.replacement ?? converted, post: post)
         submissionHandler(diagnosticEvent)(submitted)
         guard submitted else { return false }
         inlineSwallowedKeyCode = pendingKeyCode   // F3: его keyUp тоже проглотим (иначе непарный keyup)
@@ -1401,7 +1406,8 @@ final class Engine: EventTapHandler {
         // Модель — синхронно (следующая клавиша обязана видеть верный буфер).
         buffer.append(pendingChar)
         buffer.applyConversion(converted: converted)
-        liveFixLast = converted
+        // У каждой следующей буквы из другой раскладки должна быть своя словарная проверка.
+        liveFixLast = continuation == nil ? converted : ""
         // Хвост: всё, что нельзя в колбэке.
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -2498,7 +2504,8 @@ final class Engine: EventTapHandler {
                 }
                 silentLog("soft-pass", "мягкий режим пропускает: len \(word.count), пауза \(Int(gap * 1000))мс · \(frontAppBID)")
             }
-            let converted = Keymap.smartConvert(word, toCyrillic: c, isValidTarget: Self.ruWordValidator)
+            let converted = LayoutDetector.conversionText(word: word, toCyrillic: c, exceptions: membership,
+                                                          isValidTarget: Self.ruWordValidator)
             if converted == word {
                 kbLog("авто молчит: конверсия совпала с исходным (len \(word.count))")   // диагностика 23.07
                 return nil

@@ -126,7 +126,7 @@ struct CompletionTarget {
         guard let before = text(CFRange(location: start, length: range.location - start)),
               let selected = text(range),
               let after = text(CFRange(location: end, length: min(1000, total - end)), truncatingAtEnd: true),
-              let caret = CaretLocator.caretScreenRect(preferCharBefore: range.length == 0) else { return nil }
+              let caret = CaretLocator.caretScreenRect(preferCharBefore: range.length == 0, element: element) else { return nil }
         var target = Self(element: element, pid: pid, bundleID: bid, appName: app.localizedName ?? bid, range: range,
                           before: before, selected: selected, after: after, caret: caret)
         target.textFont = CaretLocator.fontNearCaret(element: element, range: range)

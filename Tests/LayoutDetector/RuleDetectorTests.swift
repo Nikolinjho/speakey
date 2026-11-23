@@ -61,6 +61,40 @@ enum RuleDetectorTests {
         for key in ["didSeedExcExamples", "didSeedExcVkLatin", "didUnseedExcSpotlight"] { defaults.set(true, forKey: key) }
         let exceptions = ExceptionStore(defaults: defaults)
         let backend = ExceptionLayoutRuleBackend(exceptions: exceptions)
+        for (onScreen, key, expected, deleteCount, toCyrillic) in [
+            ("привt", "n", "ет", 1, true),
+            ("прbdt", "n", "ивет", 3, true),
+            ("пhbdt", "n", "ривет", 4, true),
+            ("hell", "щ", "o", 0, false),
+            ("helд", "щ", "lo", 1, false),
+            ("heдд", "щ", "llo", 2, false),
+            ("hудд", "щ", "ello", 3, false),
+            ("HELД", "Щ", "LO", 1, false),
+        ] {
+            let result = LayoutDetector.mixedContinuation(after: onScreen, typed: key, exceptions: exceptions)
+            t.check("Подставляет окончание в раскладке начала слова: \(onScreen) + \(key)",
+                    result?.replacement == expected && result?.deleteCount == deleteCount && result?.toCyrillic == toCyrillic)
+        }
+        for (prefix, key, expected) in [
+            ("приве", "n", "т"),
+            ("при", "d", "в"),
+            ("МИ", "H", "Р"),
+        ] {
+            t.check("Латинская клавиша дописывает русское слово: \(prefix) + \(key)",
+                    LayoutDetector.mixedContinuation(after: prefix, typed: key, exceptions: exceptions)?.replacement == expected)
+        }
+        for (prefix, key) in [("приве", "s"), ("ноутбук", "m"), ("при", "de"), ("приве", "."),
+                              ("api-ключ", "b"), ("C++код", "s"), ("фид", "e"), ("п", "h"),
+                              ("helд", "я"), ("heдl", "щ"), ("helж", "щ")] {
+            t.check("Клавиша остаётся исходной: \(prefix) + \(key)",
+                    LayoutDetector.mixedContinuation(after: prefix, typed: key, exceptions: exceptions) == nil)
+        }
+        exceptions.addIgnored("привеn")
+        t.check("Явное исключение сохраняет латинскую букву", LayoutDetector.mixedContinuation(after: "приве", typed: "n", exceptions: exceptions) == nil)
+        exceptions.removeIgnored("привеn")
+        exceptions.addLearned("привеn")
+        t.check("Выученная отмена сохраняет латинскую букву", LayoutDetector.mixedContinuation(after: "приве", typed: "n", exceptions: exceptions) == nil)
+        exceptions.removeLearned("привеn")
         func neuralBlocked(_ word: String) -> Bool { LayoutDetector.neuralRuleBlock(word: word, exceptions: exceptions) }
         t.check("Обычный keep не становится явным запретом нейромодели", LayoutDetector.decide(word: "дд", exceptions: exceptions) == .keep && !neuralBlocked("дд"))
         t.check("Каша без правила допускает проверку модели", !neuralBlocked("ghbdtn"))
@@ -147,7 +181,23 @@ enum RuleDetectorTests {
         try! LayoutRuleService.restore(force, backend: backend)
         t.check("Удаление восстанавливает исходные наборы", exceptions.forceSwap.contains("hello") && exceptions.learned.contains("hello") && !exceptions.forceSwap.contains("руддщ") && decide("hello") == .keep)
         t.check("Keymap проверяет ghbdtn и hello", backend.opposite(of: "ghbdtn") == "привет" && backend.opposite(of: "hello") == "руддщ")
-        for pair in [("ghbdtn.", "приветю"), ("ghbdtn", "привет."), ("hello1", "руддщ1"), ("heлlo", "руддщ"), ("ghbdtn", "мир"), ("ок", "jr")] {
+        for (source, target, toCyrillic) in [
+            ("юсдфгву", ".claude", false),
+            ("hello1", "руддщ1", true),
+            ("rud.", "кгвю", true),
+        ] {
+            let receipt = try? LayoutRuleService.prepare(case: item(source, target), action: .force, backend: backend)
+            t.check("Журнал принимает точную пару со знаками или цифрами: \(source) / \(target)", receipt != nil)
+            guard let receipt else { continue }
+            try! LayoutRuleService.applyPrepared(receipt, backend: backend)
+            let restarted = ExceptionStore(defaults: defaults)
+            t.check("Сохранённая пара переключает раскладку: \(source)", LayoutDetector.decide(word: source, exceptions: restarted) == .convert(toCyrillic: toCyrillic))
+            t.check("Полная конверсия сохраняет знаки пары: \(target)", LayoutDetector.conversionText(word: source, toCyrillic: toCyrillic, exceptions: restarted) == target)
+            t.check("Цель правила сохраняется и защищена от нейромодели: \(target)", decide(target) == .keep && neuralBlocked(target) && neuralBlocked(source))
+            try! LayoutRuleService.restore(receipt, backend: backend)
+            t.check("Удаление убирает точное правило: \(target)", !exceptions.forceSwap.contains(target))
+        }
+        for pair in [("ghbdtn", "привет."), ("heлlo", "руддщ"), ("ghbdtn", "мир"), ("ок", "jr")] {
             t.check("Неподдерживаемая пара \(pair.0) / \(pair.1) отклонена", (try? LayoutRuleService.prepare(case: item(pair.0, pair.1), action: .force, backend: backend)) == nil)
         }
         for source in ["xd", "XD", "xD", "Xd"] {

@@ -61,8 +61,49 @@ enum HyphenTokenShape {
 /// Двусторонний детектор «слово набрано не в той раскладке».
 /// Каскад: guard'ы → force-swap → словарь → триграммная плаузивность (margin).
 enum LayoutDetector {
+    static func ruleCounterpart(of word: String) -> String? {
+        guard let sourceIsCyrillic = ruleTokenScript(word), !isEmoticon(word),
+              !ExtraWords.defaultKeep.contains(word.lowercased()) else { return nil }
+        let target = Keymap.convert(word, toCyrillic: !sourceIsCyrillic)
+        guard ruleTokenScript(target) == !sourceIsCyrillic,
+              Keymap.convert(target, toCyrillic: sourceIsCyrillic) == word else { return nil }
+        return target
+    }
+
+    private static func ruleTokenScript(_ word: String) -> Bool? {
+        var latin = false
+        var cyrillic = false
+        for scalar in word.lowercased().unicodeScalars {
+            switch scalar.value {
+            case 97...122: latin = true
+            case 1072...1103, 1105: cyrillic = true
+            case 33...64, 91...96, 123...126: break
+            default: return nil
+            }
+        }
+        return latin != cyrillic ? cyrillic : nil
+    }
+
+    // Сверяем полный токен до обрезания знаков и цифр. Буквенные правила идут по прежнему каскаду.
+    private static func exactSymbolRule(word: String, exceptions: ExceptionStore) -> SwapDecision? {
+        guard !exceptions.forceSwap.isEmpty, let target = ruleCounterpart(of: word),
+              !word.allSatisfy({ $0.isLetter }) || !target.allSatisfy({ $0.isLetter }) else { return nil }
+        if exceptions.forceSwap.contains(target.lowercased()) { return .convert(toCyrillic: !word.hasCyrillic) }
+        if exceptions.forceSwap.contains(word.lowercased()) { return .keep }
+        return nil
+    }
+
+    static func conversionText(word: String, toCyrillic: Bool, exceptions: ExceptionStore,
+                               isValidTarget: ((String) -> Bool)? = nil) -> String {
+        if exactSymbolRule(word: word, exceptions: exceptions) == .convert(toCyrillic: toCyrillic) {
+            return Keymap.convert(word, toCyrillic: toCyrillic)
+        }
+        return Keymap.smartConvert(word, toCyrillic: toCyrillic, isValidTarget: isValidTarget)
+    }
+
     /// Явные правила и защитные keep-гейты, без повторного статистического решения.
     static func neuralRuleBlock(word raw: String, exceptions: ExceptionStore) -> Bool {
+        if exactSymbolRule(word: raw, exceptions: exceptions) != nil { return true }
         let literal = letterCore(of: raw).lowercased()
         let typed = Keymap.core(of: literal)
         var core = Substring(literal)
@@ -408,6 +449,52 @@ enum LayoutDetector {
         return .keep
     }
 
+    /// Подставляет окончание в раскладке начала слова. Текущая клавиша ещё не на экране.
+    static func mixedContinuation(after onScreen: String, typed: String, exceptions: ExceptionStore)
+        -> (replacement: String, deleteCount: Int, toCyrillic: Bool)?
+    {
+        func isRussian(_ letter: Character) -> Bool {
+            guard letter.unicodeScalars.count == 1, let scalar = letter.unicodeScalars.first else { return false }
+            switch scalar.value {
+            case 0x0410...0x044F, 0x0401, 0x0451: return true
+            default: return false
+            }
+        }
+
+        func isEnglish(_ letter: Character) -> Bool {
+            ("a"..."z").contains(letter) || ("A"..."Z").contains(letter)
+        }
+
+        guard typed.count == 1, let key = typed.first, let first = onScreen.first else { return nil }
+        let toCyrillic = isEnglish(key)
+        let isTargetLetter = toCyrillic ? isRussian : isEnglish
+        let isSourceLetter = toCyrillic ? isEnglish : isRussian
+        guard isSourceLetter(key), isTargetLetter(first) else { return nil }
+
+        let deleteCount = onScreen.reversed().prefix(while: isSourceLetter).count
+        let prefix = onScreen.dropLast(deleteCount)
+        guard prefix.allSatisfy(isTargetLetter) else { return nil }
+        guard prefix.count >= 2 || deleteCount >= 2 else { return nil }
+        let original = onScreen + typed
+        let normalized = original.lowercased()
+        guard !exceptions.ignored.contains(normalized), !exceptions.learned.contains(normalized) else { return nil }
+
+        let replacement = Keymap.convert(String(onScreen.suffix(deleteCount)) + typed, toCyrillic: toCyrillic)
+        guard replacement.allSatisfy(isTargetLetter) else { return nil }
+
+        if case .convert(let target) = mixedRescue(word: original), target == toCyrillic {
+            return (replacement, deleteCount, toCyrillic)
+        }
+
+        // Для одной латинской клавиши сохраняем раннюю подстановку по русскому словарному префиксу.
+        let data = LayoutData.shared
+        let candidate = prefix.lowercased() + replacement.lowercased()
+        guard toCyrillic, deleteCount == 0, candidate.count >= 4,
+              data.hasRussianWord(startingWith: candidate),
+              !data.wordsEn.contains(Keymap.convert(normalized, toCyrillic: false)) else { return nil }
+        return (replacement, deleteCount, toCyrillic)
+    }
+
     /// Узкий мост для русской фразы, внутри которой стоит латинская аббревиатура:
     /// `… касается iOS, nj` / `… нашего EPG, nj`. Непосредственный сосед тут латинский и обычный
     /// enKeepShort-гейт оставляет `nj`, хотя до него продолжается русская фраза.
@@ -459,6 +546,7 @@ enum LayoutDetector {
             || exceptions.ignored.contains(whole) || exceptions.learned.contains(whole) { return .keep }
         // Смайлик — не слово ни в одной раскладке (см. isEmoticon).
         if Self.isEmoticon(raw) { return .keep }
+        if let rule = exactSymbolRule(word: raw, exceptions: exceptions) { return rule }
         // Анализируем БУКВЕННОЕ ЯДРО (без ведущих/концевых скобок, кавычек, тире, пунктуации):
         // "(tckb"→"tckb", "привет."→"привет". Решаем по ядру, конвертим (в Engine) полный токен.
         var coreSub = Substring(letterCore)

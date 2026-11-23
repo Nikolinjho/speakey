@@ -1538,7 +1538,7 @@ extension L10n {
             "confirmFirst": ("Сначала подтверди ожидаемое слово. Это сохранит проверку, но не включит правило.", "Confirm the expected word first. This saves the review without enabling a rule."),
             "incomplete": ("Это часть слова. Для правила добавь полное слово вручную.", "This is part of a word. Add the complete word manually to create a rule."),
             "protected": ("Автокоррекция была отключена или защищала ввод. Правило для этого решения недоступно.", "Autocorrection was disabled or protecting input. This decision cannot become a rule."),
-            "unsupported": ("Для сохранения ожидание должно совпадать с исходным словом. Для замены нужна точная пара русской и английской раскладок из букв.", "To keep a word, the expectation must match the source. Conversion needs an exact letter-only Russian/English keyboard pair."),
+            "unsupported": ("Для сохранения ожидание должно совпадать с исходным словом. Для замены нужна точная пара русской и английской раскладок.", "To keep a word, the expectation must match the source. Conversion needs an exact Russian/English keyboard pair."),
             "loadingRules": ("Правила ещё загружаются. Подожди немного.", "Rules are still loading. Please wait."),
             "chooseApp": ("Выбери приложение", "Choose an app"),
             "otherApp": ("Другое приложение…", "Other app…"),
