@@ -1,3 +1,4 @@
+import ApplicationServices
 import Foundation
 
 /// Все части снимка используют индексы одного источника Accessibility.
@@ -7,6 +8,36 @@ enum CompletionFieldText {
         case unsupported
         case outOfBounds
         case unavailable
+    }
+
+    static func readAXRange(_ span: NSRange, from element: AXUIElement) -> RangeRead {
+        var range = CFRange(location: span.location, length: span.length)
+        guard let argument = AXValueCreate(.cfRange, &range) else { return .unavailable }
+        var result: CFTypeRef?
+        switch AXUIElementCopyParameterizedAttributeValue(
+            element, kAXStringForRangeParameterizedAttribute as CFString, argument, &result
+        ) {
+        case .success:
+            guard let text = result as? String else { return .unavailable }
+            return .text(text)
+        case .parameterizedAttributeUnsupported, .attributeUnsupported, .notImplemented:
+            return .unsupported
+        case .noValue, .illegalArgument:
+            return .outOfBounds
+        default:
+            return .unavailable
+        }
+    }
+
+    static func allowsFallbackPreview(after: RangeRead, confirmsEnd: () -> Bool) -> Bool {
+        switch after {
+        case .text(let text):
+            return text.first?.isNewline ?? confirmsEnd()
+        case .outOfBounds:
+            return confirmsEnd()
+        case .unsupported, .unavailable:
+            return false
+        }
     }
 
     static func read(_ range: NSRange, truncatingAtEnd: Bool = false,

@@ -101,27 +101,11 @@ struct CompletionTarget {
         guard let total, range.location + range.length <= total else { return nil }
         let start = max(0, range.location - 1500)
         let end = range.location + range.length
-        func readRange(_ span: NSRange) -> CompletionFieldText.RangeRead {
-            var wanted = CFRange(location: span.location, length: span.length)
-            guard let argument = AXValueCreate(.cfRange, &wanted) else { return .unavailable }
-            var result: CFTypeRef?
-            let error = AXUIElementCopyParameterizedAttributeValue(element, kAXStringForRangeParameterizedAttribute as CFString,
-                                                                   argument, &result)
-            switch error {
-            case .success:
-                guard let text = result as? String else { return .unavailable }
-                return .text(text)
-            case .parameterizedAttributeUnsupported, .attributeUnsupported, .notImplemented:
-                return .unsupported
-            case .noValue, .illegalArgument:
-                return .outOfBounds
-            default:
-                return .unavailable
-            }
-        }
         func text(_ span: CFRange, truncatingAtEnd: Bool = false) -> String? {
             CompletionFieldText.read(NSRange(location: span.location, length: span.length),
-                                     truncatingAtEnd: truncatingAtEnd, readRange: readRange, fullValue: fullValue)
+                                     truncatingAtEnd: truncatingAtEnd,
+                                     readRange: { CompletionFieldText.readAXRange($0, from: element) },
+                                     fullValue: fullValue)
         }
         guard let before = text(CFRange(location: start, length: range.location - start)),
               let selected = text(range),

@@ -29,35 +29,28 @@ enum ContextHub {
               let bid = app.bundleIdentifier else { return nil }
         guard let before = AXScreenCheck.textBeforeCaret(maxLen: maxBefore) else { return nil }
         guard let element = AXFocusedElement.read(pid: app.processIdentifier, timeout: 0.25),
+              canPreviewAtFallbackCaret(in: element),
               let rect = CaretLocator.caretScreenRect(preferCharBefore: true, element: element) else { return nil }
         var snap = FieldSnapshot(bundleID: bid, appName: app.localizedName ?? bid, before: before,
                                  caretRect: rect, pid: app.processIdentifier)
         snap.fieldBounds = CaretLocator.fieldScreenRect(element: element)
-        snap.textAfterOnLine = charAfterCaret().map { $0 != "\n" && $0 != "\r" } ?? false
         return snap
     }
 
-    /// Символ сразу после каретки: nil — каретка в конце текста или поле не ответило.
-    private static func charAfterCaret() -> Character? {
-        let sys = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(sys, 0.05)
-        var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let raw = focused, CFGetTypeID(raw) == AXUIElementGetTypeID() else { return nil }
-        let el = unsafeDowncast(raw as AnyObject, to: AXUIElement.self)
-        AXUIElementSetMessagingTimeout(el, 0.05)
+    /// Без полного снимка показ на строке возможен только у подтверждённой границы.
+    private static func canPreviewAtFallbackCaret(in element: AXUIElement) -> Bool {
         var rangeRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
-              let rr = rangeRef, CFGetTypeID(rr) == AXValueGetTypeID() else { return nil }
-        var sel = CFRange()
-        guard AXValueGetValue(unsafeDowncast(rr as AnyObject, to: AXValue.self), .cfRange, &sel) else { return nil }
-        var want = CFRange(location: sel.location + sel.length, length: 1)
-        guard let v = AXValueCreate(.cfRange, &want) else { return nil }
-        var out: CFTypeRef?
-        guard AXUIElementCopyParameterizedAttributeValue(el, kAXStringForRangeParameterizedAttribute as CFString,
-                                                         v, &out) == .success,
-              let str = out as? String else { return nil }
-        return str.first
+        guard AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
+              let rawRange = rangeRef, CFGetTypeID(rawRange) == AXValueGetTypeID() else { return false }
+        var selection = CFRange()
+        guard AXValueGetValue(rawRange as! AXValue, .cfRange, &selection),
+              selection.length == 0, selection.location >= 0, selection.location < Int.max else { return false }
+        let next = CompletionFieldText.readAXRange(NSRange(location: selection.location, length: 1), from: element)
+        return CompletionFieldText.allowsFallbackPreview(after: next) {
+            var countRef: CFTypeRef?
+            return AXUIElementCopyAttributeValue(element, kAXNumberOfCharactersAttribute as CFString, &countRef) == .success
+                && (countRef as? NSNumber)?.intValue == selection.location
+        }
     }
 
     static func context(for s: FieldSnapshot, corpus: PersonalCorpus = .shared,

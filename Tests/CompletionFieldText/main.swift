@@ -42,5 +42,19 @@ let emoji = CompletionFieldText.read(NSRange(location: 2, length: 4), truncating
         return .text(unicode.substring(with: r))
     }, fullValue: { "ёж\n😀\n" })
 expect(emoji == "😀", "Граница восстанавливается в UTF16 без потери emoji")
+expect(!CompletionFieldText.allowsFallbackPreview(after: .unavailable, confirmsEnd: { true }),
+       "Таймаут чтения справа скрывает подсказку")
+expect(!CompletionFieldText.allowsFallbackPreview(after: .unsupported, confirmsEnd: { true }),
+       "Недоступное чтение справа скрывает подсказку")
+expect(!CompletionFieldText.allowsFallbackPreview(after: .outOfBounds, confirmsEnd: { false }),
+       "Ошибка диапазона без подтверждённого конца поля скрывает подсказку")
+expect(CompletionFieldText.allowsFallbackPreview(after: .outOfBounds, confirmsEnd: { true }),
+       "Подтверждённый конец поля допускает подсказку")
+expect(!CompletionFieldText.allowsFallbackPreview(after: .text(""), confirmsEnd: { false }),
+       "Пустой ответ внутри поля скрывает подсказку")
+expect(!CompletionFieldText.allowsFallbackPreview(after: .text("ё"), confirmsEnd: { true }),
+       "Видимый текст справа важнее заявленной длины поля")
+expect(CompletionFieldText.allowsFallbackPreview(after: .text("\r\n"), confirmsEnd: { false }),
+       "Перевод строки подтверждает место для подсказки")
 print("completion field text: \(checks) checks, \(failures) failures")
 exit(failures == 0 ? 0 : 1)
