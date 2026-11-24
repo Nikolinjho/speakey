@@ -2,19 +2,30 @@ import Foundation
 import CryptoKit
 import Darwin
 
+// Заглушка словаря: CLI обращается к нему только при SPEAKEY_SPEECH_HINT=1.
+final class VoiceDictionary {
+    static let shared = VoiceDictionary()
+    func recognitionHint() -> String? { nil }
+}
+
 // Дубль только транспортного контракта: настоящая модель не загружается.
 final class WhisperBridge {
     static var calls = 0
     static var fail = false
+    static var lastContextWords: [String] = []
+    static var secondText = "Результаты"
+    var deterministic = false
     init?(modelPath: String, recognitionHint: @escaping () -> String?) {
         precondition(recognitionHint() == nil, "CLI отключает личный словарь")
     }
-    func transcribe(samples: [Float], language: String, diagnostics: SpeechDiagnosticTrace?) -> String {
+    func transcribe(samples: [Float], language: String, contextWords: [String] = [], diagnostics: SpeechDiagnosticTrace?) -> String {
         Self.calls += 1
+        Self.lastContextWords = contextWords
+        if deterministic { diagnostics?.record("whisper_configuration", text: "private prompt sentinel", metadata: ["temperature_inc": "0"]) }
         diagnostics?.record("whisper_configuration", text: "private prompt sentinel", metadata: ["strategy": "greedy"])
         diagnostics?.record("whisper_result", metadata: ["returnCode": Self.fail ? "-1" : "0"])
         diagnostics?.record("whisper_raw", text: "Сырой результат")
-        return "Результат"
+        return contextWords.isEmpty ? "Результат" : Self.secondText
     }
 }
 
@@ -82,6 +93,39 @@ check(replayDoc["raw_hypothesis"] as? String == "Сырой результат",
 check(replayDoc["model_sha256"] as? String == SHA256.hash(data: Data("synthetic model, not inference".utf8)).map { String(format: "%02x", $0) }.joined(), "Хеш локальной модели")
 check(!String(decoding: replayData, as: UTF8.self).contains("private prompt sentinel"), "Промпт не раскрывается в метаданных")
 check(await SpeechEvaluationCLI.run(arguments: replayArgs) == 1 && WhisperBridge.calls == 1, "Существующий вывод отклоняется до распознавания")
+// Без --context вывод прежний: нет полей контекста и ключей конфигурации второго прохода.
+check(replayDoc["second_pass"] == nil && replayDoc["context_candidates"] == nil && replayDoc["accepted"] == nil, "Без --context нет полей контекста")
+let plainConfig = replayDoc["config"] as! [String: Any]
+check(plainConfig["deterministic"] == nil && plainConfig["second_pass_policy"] == nil, "Без флагов конфигурация прежняя")
+// С --context: второй проход при кандидатах, без бюджета; детерминизм фиксируется в конфигурации.
+let contextFile = root.appendingPathComponent("context.json")
+try Data(#"{"sources":[{"kind":"corpus","words":{"Результаты":3}}]}"#.utf8).write(to: contextFile)
+let contextOut = root.appendingPathComponent("with-context.json")
+var contextArgs = replayArgs
+contextArgs[contextArgs.count - 1] = contextOut.path
+contextArgs += ["--context", contextFile.path, "--deterministic", "1"]
+let callsBeforeContext = WhisperBridge.calls
+check(await SpeechEvaluationCLI.run(arguments: contextArgs) == 0, "CLI с контекстом отрабатывает")
+let contextDoc = try JSONSerialization.jsonObject(with: Data(contentsOf: contextOut)) as! [String: Any]
+let contextConfig = contextDoc["config"] as! [String: Any]
+check(contextConfig["deterministic"] as? String == "temperature_inc_0", "Детерминизм в конфигурации")
+check(contextConfig["second_pass_policy"] as? String == "always_when_candidates_no_budget_limit_8", "Политика второго прохода в конфигурации")
+check(contextDoc["context_candidates"] is [String] && contextDoc["second_pass"] is Bool && contextDoc["accepted"] is Bool
+      && contextDoc["first_ms"] is Int && contextDoc["second_ms"] is Int, "Поля контекста в выводе")
+let candidateCount = (contextDoc["context_candidates"] as! [String]).count
+check(WhisperBridge.calls == callsBeforeContext + 2, "Два вызова моста: первый и второй проход")
+check(candidateCount > 0 && contextDoc["second_pass"] as? Bool == true, "Есть кандидат — второй проход выполнен")
+check(WhisperBridge.lastContextWords == (contextDoc["context_candidates"] as! [String]), "Кандидаты переданы мосту как слова контекста")
+let emptyContext = root.appendingPathComponent("empty-context.json")
+try Data(#"{"sources":[]}"#.utf8).write(to: emptyContext)
+let emptyOut = root.appendingPathComponent("empty-out.json")
+var emptyArgs = replayArgs
+emptyArgs[emptyArgs.count - 1] = emptyOut.path
+emptyArgs += ["--context", emptyContext.path]
+let callsBeforeEmpty = WhisperBridge.calls
+check(await SpeechEvaluationCLI.run(arguments: emptyArgs) == 0 && WhisperBridge.calls == callsBeforeEmpty + 1, "Без кандидатов второго прохода нет")
+let emptyDoc = try JSONSerialization.jsonObject(with: Data(contentsOf: emptyOut)) as! [String: Any]
+check(emptyDoc["second_pass"] as? Bool == false && emptyDoc["accepted"] as? Bool == false && (emptyDoc["context_candidates"] as? [String])?.isEmpty == true, "Пустой контекст: второго прохода нет")
 WhisperBridge.fail = true
 let failedReplay = root.appendingPathComponent("failed.json")
 var failedArgs = replayArgs

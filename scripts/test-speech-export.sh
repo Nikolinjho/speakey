@@ -9,5 +9,6 @@ if [[ -f Sources/Speakey/SpeechCollectionPolicy.swift ]]; then
 fi
 swiftc -swift-version 5 -D SPEAKEY_SPEECH_TEST -module-cache-path "$task_tmp/module-cache" \
     "${policy_sources[@]}" Sources/Speakey/SpeechDiagnosticsExport.swift \
+    Sources/Speakey/ContextLexicon.swift Sources/Speakey/ContextualRedecode.swift \
     Sources/Speakey/SpeechEvaluationCLI.swift Sources/Speakey/SpeechParakeetEvaluation.swift Tests/SpeechExport/main.swift -o "$task_tmp/speech-export-tests"
 env -u SPEAKEY_SPEECH_DIAGNOSTICS "$task_tmp/speech-export-tests"
