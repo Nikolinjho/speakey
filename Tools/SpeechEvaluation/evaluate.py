@@ -11,26 +11,11 @@ import sys
 import unicodedata
 
 try:
-    from .dataset import ValidationError, read_jsonl, validate_manifest
+    from .dataset import ValidationError, read_jsonl, select_reference_source, validate_manifest
     from .metrics import NormalizationPolicy, score
 except ImportError:
-    from dataset import ValidationError, read_jsonl, validate_manifest
+    from dataset import ValidationError, read_jsonl, select_reference_source, validate_manifest
     from metrics import NormalizationPolicy, score
-
-
-def select_reference_source(rows, source):
-    """explicit – явное подтверждение или поле отсутствует; implicit – неявный эталон; all – без фильтра."""
-    if source == 'all':
-        return rows
-    wanted = 'implicit_unedited' if source == 'implicit' else 'explicit_user_confirmation'
-    selected = []
-    for row in rows:
-        value = row.get('reference_source', 'explicit_user_confirmation')
-        if value not in ('explicit_user_confirmation', 'implicit_unedited'):
-            raise ValidationError('Неверное поле reference_source')
-        if value == wanted:
-            selected.append(row)
-    return selected
 
 
 def _critical_counts(reference, hypothesis, terms):

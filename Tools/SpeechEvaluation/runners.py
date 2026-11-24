@@ -14,11 +14,11 @@ import time
 
 try:
     from .audio import AudioError, audio_info
-    from .dataset import ValidationError, validate_manifest
+    from .dataset import ValidationError, select_reference_source, validate_manifest
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from Tools.SpeechEvaluation.audio import AudioError, audio_info
-    from Tools.SpeechEvaluation.dataset import ValidationError, validate_manifest
+    from Tools.SpeechEvaluation.dataset import ValidationError, select_reference_source, validate_manifest
 
 
 class RunError(ValueError):
@@ -85,21 +85,6 @@ def _write_private(path, value, *, jsonl=False):
         else:
             json.dump(value, target, ensure_ascii=False, allow_nan=False, indent=2)
             target.write('\n')
-
-
-def select_reference_source(rows, source):
-    """explicit – явное подтверждение или поле отсутствует; implicit – неявный эталон; all – без фильтра."""
-    if source == 'all':
-        return rows
-    wanted = 'implicit_unedited' if source == 'implicit' else 'explicit_user_confirmation'
-    selected = []
-    for row in rows:
-        value = row.get('reference_source', 'explicit_user_confirmation')
-        if value not in ('explicit_user_confirmation', 'implicit_unedited'):
-            raise RunError('Неверное поле reference_source')
-        if value == wanted:
-            selected.append(row)
-    return selected
 
 
 def run_corpus(manifest, *, executable, model, output, language='auto', split='test',

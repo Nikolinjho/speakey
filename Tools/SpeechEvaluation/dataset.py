@@ -16,6 +16,25 @@ class ValidationError(ValueError):
     pass
 
 
+REFERENCE_SOURCE_EXPLICIT = 'explicit_user_confirmation'
+REFERENCE_SOURCE_IMPLICIT = 'implicit_unedited'
+
+
+def select_reference_source(rows, source):
+    """explicit – явное подтверждение или поле отсутствует; implicit – неявный эталон; all – без фильтра."""
+    if source == 'all':
+        return rows
+    wanted = REFERENCE_SOURCE_IMPLICIT if source == 'implicit' else REFERENCE_SOURCE_EXPLICIT
+    selected = []
+    for row in rows:
+        value = row.get('reference_source', REFERENCE_SOURCE_EXPLICIT)
+        if value not in (REFERENCE_SOURCE_EXPLICIT, REFERENCE_SOURCE_IMPLICIT):
+            raise ValidationError('Неверное поле reference_source')
+        if value == wanted:
+            selected.append(row)
+    return selected
+
+
 def read_jsonl(path):
     rows = []
     try:
