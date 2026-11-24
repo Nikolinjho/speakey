@@ -174,13 +174,17 @@ struct SpeechDiagnosticsStore {
             }
     }
 
-    func prune(now: Date = Date(), maximumRecords: Int = 200, maximumAge: TimeInterval = 7 * 86400) throws {
+    /// Записи моложе `protectedAge` ещё созревают для подтверждения: их не удаляем и не считаем в лимит.
+    func prune(now: Date = Date(), maximumRecords: Int = 200, maximumAge: TimeInterval = 7 * 86400,
+               protectedAge: TimeInterval = 13 * 3600) throws {
         SpeechDiagnostics.reviewLock.lock()
         defer { SpeechDiagnostics.reviewLock.unlock() }
         let confirmed = try confirmedRecordNames()
-        let entries = try records().filter { !confirmed.contains($0.url.lastPathComponent) }.sorted {
-            $0.modified == $1.modified ? $0.url.lastPathComponent < $1.url.lastPathComponent : $0.modified > $1.modified
-        }
+        let entries = try records().filter { !confirmed.contains($0.url.lastPathComponent) }
+            .filter { now.timeIntervalSince($0.modified) >= protectedAge }
+            .sorted {
+                $0.modified == $1.modified ? $0.url.lastPathComponent < $1.url.lastPathComponent : $0.modified > $1.modified
+            }
         for (index, entry) in entries.enumerated() where index >= maximumRecords || now.timeIntervalSince(entry.modified) > maximumAge {
             try FileManager.default.removeItem(at: entry.url)
         }

@@ -122,12 +122,12 @@ let linked = retentionRoot.appendingPathComponent(UUID().uuidString + ".enc")
 try FileManager.default.createSymbolicLink(at: linked, withDestinationURL: unrelated)
 let namedDirectory = retentionRoot.appendingPathComponent(UUID().uuidString + ".enc")
 try FileManager.default.createDirectory(at: namedDirectory, withIntermediateDirectories: false)
-try retentionStore.prune(now: now)
+try retentionStore.prune(now: now, protectedAge: 0)
 require(retainedCandidates.filter { FileManager.default.fileExists(atPath: $0.path) }.count == 200, "Лимит записей не соблюдён")
 require(FileManager.default.fileExists(atPath: retainedCandidates[0].path), "Удалена новая запись")
 require(!FileManager.default.fileExists(atPath: retainedCandidates[204].path), "Не удалена старая лишняя запись")
 try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-8 * 86400)], ofItemAtPath: retainedCandidates[0].path)
-try retentionStore.prune(now: now)
+try retentionStore.prune(now: now, protectedAge: 0)
 require(!FileManager.default.fileExists(atPath: retainedCandidates[0].path), "Запись старше 7 дней осталась")
 try retentionStore.deleteRecords()
 require(!retainedCandidates.contains { FileManager.default.fileExists(atPath: $0.path) }, "Собранные примеры не удалены")
@@ -135,6 +135,42 @@ for url in [unrelated, malformedName, linked, namedDirectory] {
     require(FileManager.default.fileExists(atPath: url.path), "Удалён посторонний файл, симлинк или каталог")
 }
 print("PASS: retention max200/7days, explicit deletion, unrelated files/symlinks/directories preserved")
+
+// Созревающие примеры: неподтверждённые записи моложе 13 часов не удаляются и не занимают лимит 200.
+let maturingRoot = root.appendingPathComponent("maturing")
+try FileManager.default.createDirectory(at: maturingRoot, withIntermediateDirectories: false)
+let maturingStore = SpeechDiagnosticsStore(directory: maturingRoot, enabled: true, keyProvider: { key })
+let maturingNow = Date()
+var freshRecords: [URL] = []
+for index in 0..<250 {
+    let candidate = maturingRoot.appendingPathComponent(UUID().uuidString + ".enc")
+    try encrypted.write(to: candidate)
+    try FileManager.default.setAttributes([.modificationDate: maturingNow.addingTimeInterval(-60 * Double(index + 1))], ofItemAtPath: candidate.path)
+    freshRecords.append(candidate)
+}
+var staleRecords: [URL] = []
+for index in 0..<10 {
+    let candidate = maturingRoot.appendingPathComponent(UUID().uuidString + ".enc")
+    try encrypted.write(to: candidate)
+    try FileManager.default.setAttributes([.modificationDate: maturingNow.addingTimeInterval(-8 * 86400 - Double(index))], ofItemAtPath: candidate.path)
+    staleRecords.append(candidate)
+}
+var matureRecords: [URL] = []
+for index in 0..<205 {
+    let candidate = maturingRoot.appendingPathComponent(UUID().uuidString + ".enc")
+    try encrypted.write(to: candidate)
+    try FileManager.default.setAttributes([.modificationDate: maturingNow.addingTimeInterval(-14 * 3600 - Double(index))], ofItemAtPath: candidate.path)
+    matureRecords.append(candidate)
+}
+try maturingStore.prune(now: maturingNow)
+require(freshRecords.allSatisfy { FileManager.default.fileExists(atPath: $0.path) }, "Созревающая запись удалена до 13 часов")
+require(!staleRecords.contains { FileManager.default.fileExists(atPath: $0.path) }, "Запись старше 7 дней осталась")
+require(matureRecords.filter { FileManager.default.fileExists(atPath: $0.path) }.count == 200, "Созревающие записи заняли лимит старых")
+// При protectedAge: 0 поведение прежнее: остаются 200 самых новых записей.
+try maturingStore.prune(now: maturingNow, protectedAge: 0)
+require(freshRecords.prefix(200).allSatisfy { FileManager.default.fileExists(atPath: $0.path) }, "Прежний лимит удалил новые записи")
+require(!freshRecords.suffix(50).contains { FileManager.default.fileExists(atPath: $0.path) }, "Прежний лимит оставил лишние записи")
+print("PASS: созревающие неподтверждённые записи (до 13 часов) не удаляются и не занимают лимит, protectedAge: 0 сохраняет прежний лимит")
 
 let confirmedRoot = root.appendingPathComponent("confirmed-retention")
 let confirmedAudio = confirmedRoot.appendingPathComponent("speech-diagnostics")
@@ -153,7 +189,7 @@ for _ in 0..<3 {
 }
 let unconfirmed = confirmedAudio.appendingPathComponent(UUID().uuidString + ".enc")
 try encrypted.write(to: unconfirmed)
-try confirmedStore.prune(now: now, maximumRecords: 1)
+try confirmedStore.prune(now: now, maximumRecords: 1, protectedAge: 0)
 require(protectedFiles.allSatisfy { FileManager.default.fileExists(atPath: $0.path) }, "Подтверждённый звук удалён по сроку или лимиту")
 require(FileManager.default.fileExists(atPath: unconfirmed.path), "Подтверждённые записи заняли лимит неподтверждённых")
 try confirmedStore.deleteRecords()
