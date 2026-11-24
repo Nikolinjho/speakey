@@ -42,25 +42,53 @@ enum SpeechEvaluationCLI {
         let useHint = ProcessInfo.processInfo.environment["SPEAKEY_SPEECH_HINT"] == "1"
         guard let bridge = WhisperBridge(modelPath: model.path, recognitionHint: useHint ? { VoiceDictionary.shared.recognitionHint() } : { nil }) else { throw Failure.modelUnavailable }
         let loadSeconds = ProcessInfo.processInfo.systemUptime - loadStart
+        bridge.deterministic = options.deterministic
+        let contextSources = try options.context.map(loadContext)
         let trace = SpeechDiagnosticTrace(samples: samples, configuration: ["scope": "isolated_whisper_bridge_no_dictionary"])
         let started = ProcessInfo.processInfo.systemUptime
-        let hypothesis = bridge.transcribe(samples: samples, language: language, diagnostics: trace)
+        let firstText = bridge.transcribe(samples: samples, language: language, diagnostics: trace)
         let elapsed = ProcessInfo.processInfo.systemUptime - started
         let snapshot = trace.snapshot(outcome: "replay")
         guard let result = snapshot.events.last(where: { $0.stage == "whisper_result" }),
               result.metadata["returnCode"] == "0" else { throw Failure.inferenceFailed }
         let configuration = snapshot.events.last(where: { $0.stage == "whisper_configuration" })
+        var hypothesis = firstText
+        var rawHypothesis = snapshot.events.last(where: { $0.stage == "whisper_raw" })?.text ?? ""
+        var contextReport: [String: Any] = [:]
+        if let contextSources {
+            // Второй проход идёт при любых кандидатах, без бюджета времени приложения: замер должен видеть эффект.
+            let candidates = ContextLexicon.candidates(for: firstText, sources: contextSources, limit: 8)
+            var secondRan = false, accepted = false
+            var secondMs = 0
+            if !candidates.isEmpty {
+                let secondTrace = SpeechDiagnosticTrace(samples: samples, configuration: ["scope": "isolated_whisper_bridge_no_dictionary"])
+                let secondStart = ProcessInfo.processInfo.systemUptime
+                let second = bridge.transcribe(samples: samples, language: language, contextWords: candidates.map { $0.word }, diagnostics: secondTrace)
+                secondMs = Int((ProcessInfo.processInfo.systemUptime - secondStart) * 1000)
+                let secondSnapshot = secondTrace.snapshot(outcome: "replay")
+                secondRan = secondSnapshot.events.last(where: { $0.stage == "whisper_result" })?.metadata["returnCode"] == "0"
+                accepted = secondRan && ContextualRedecode.accept(first: firstText, second: second, candidates: candidates)
+                if accepted {
+                    hypothesis = second
+                    rawHypothesis = secondSnapshot.events.last(where: { $0.stage == "whisper_raw" })?.text ?? rawHypothesis
+                }
+            }
+            contextReport = ["context_candidates": candidates.map { $0.word }, "second_pass": secondRan, "accepted": accepted,
+                             "first_ms": Int(elapsed * 1000), "second_ms": secondMs]
+        }
         var config = configuration?.metadata ?? [:]
         config["prompt_sha256"] = digest(Data((configuration?.text ?? "").utf8))
         config["recognition_hint"] = "disabled_explicitly"
         config["gpu"] = "true"
         config["parameter_base"] = "linked_whisper_full_default_params_greedy_with_bridge_overrides"
         config["production_configuration_equivalent"] = "false_not_captured"
+        if options.deterministic { config["deterministic"] = "temperature_inc_0" }
+        if contextSources != nil { config["second_pass_policy"] = "always_when_candidates_no_budget_limit_8" }
         // Канонизация: UTF-8 JSON, сортировка ключей, без пробелов и экранирования слешей.
         let configData = try canonicalConfiguration(config)
         let document: [String: Any] = [
             "schema": 1, "engine": "whisper", "hypothesis": hypothesis,
-            "raw_hypothesis": snapshot.events.last(where: { $0.stage == "whisper_raw" })?.text ?? "",
+            "raw_hypothesis": rawHypothesis,
             "model_sha256": modelHash, "language": language,
             "elapsed_seconds": elapsed, "model_load_seconds": loadSeconds,
             "sample_count": samples.count, "sample_rate": 16000,
@@ -69,8 +97,24 @@ enum SpeechEvaluationCLI {
             "config": config, "config_sha256": digest(configData),
             "config_sha256_format": "sorted-compact-utf8-v1"
         ]
-        let data = try JSONSerialization.data(withJSONObject: document, options: [.prettyPrinted, .sortedKeys])
+        let data = try JSONSerialization.data(withJSONObject: document.merging(contextReport) { current, _ in current },
+                                              options: [.prettyPrinted, .sortedKeys])
         try SpeechDiagnosticsExport.writeNew(data, to: options.output)
+    }
+
+    /// Файл `{"sources":[{"kind":"corpus","words":{"DPR":3}}]}`. Содержимое не печатается.
+    static func loadContext(_ url: URL) throws -> [ContextSource] {
+        let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        guard values.isRegularFile == true, let size = values.fileSize, size <= 16 * 1024 * 1024,
+              let root = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any],
+              let sources = root["sources"] as? [[String: Any]] else { throw SpeechDiagnosticsExport.Failure.invalidArguments }
+        let kinds: [String: ContextSource.Kind] = ["screen": .screen, "recentDictation": .recentDictation,
+                                                   "corpus": .corpus, "dictionary": .dictionary]
+        return try sources.map { source in
+            guard let name = source["kind"] as? String, let kind = kinds[name],
+                  let words = source["words"] as? [String: Int] else { throw SpeechDiagnosticsExport.Failure.invalidArguments }
+            return ContextSource(kind: kind, words: words)
+        }
     }
 
     private static func transcribeParakeet(_ options: SpeechCLIArguments, load: SpeechParakeetEvaluation.Loader) async throws {

@@ -18,5 +18,12 @@ for stage in ['ghost_cleanup', 'dictionary', 'output_options']:
 assert 'record("whisper_raw"' in whisper, 'raw ASR must precede echo cleanup'
 assert whisper.index('record("whisper_raw"') < whisper.index('WhisperPrompt.stripEcho(out'), 'raw stage is after echo cleanup'
 assert 'stopStamp' not in Path('Sources/Speakey/SpeechDiagnostics.swift').read_text(), 'diagnostic timing must be per dictation'
+cli = Path('Sources/Speakey/SpeechEvaluationCLI.swift').read_text()
+args = Path('Sources/Speakey/SpeechDiagnosticsExport.swift').read_text()
+assert 'temperature_inc = deterministic ? 0 : 0.2' in whisper, 'deterministic switch must only change temperature_inc'
+assert 'var deterministic = false' in whisper, 'app default must stay non-deterministic'
+assert 'bridge.deterministic = options.deterministic' in cli, 'CLI must forward --deterministic'
+assert 'ContextualRedecode.accept(' in cli and 'limit: 8' in cli, 'CLI second pass must use the app acceptance rule and limit'
+assert '"--context", "--deterministic"' in args and 'engine != "whisper"' in args, 'context flags are transcribe+whisper only'
 print('PASS: batch trace wiring and raw-before-cleanup source checks (not an ASR runtime test)')
 PY

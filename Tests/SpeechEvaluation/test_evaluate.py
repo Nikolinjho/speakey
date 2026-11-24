@@ -114,5 +114,66 @@ class EvaluateTests(unittest.TestCase):
         self.assertIsNone(aggregate['wer'])
         self.assertEqual(aggregate['silence_false_positives'], 1)
 
+    def compare_fixture(self):
+        rows = [('a', 'проверь DPR сейчас', 'проверь тпр сейчас', 'проверь DPR сейчас'),
+                ('b', 'открой Nuxt', 'открой Nuxt', 'открой Next'),
+                ('c', 'привет мир', 'привет мир', 'привет мир')]
+        manifest = self.root / 'compare-manifest.jsonl'
+        manifest.write_text(''.join(json.dumps(dict(id=ident, audio='sample.wav', reference=reference,
+            reference_confirmed=True, session_id='session-' + ident, split='test'), ensure_ascii=False) + '\n'
+            for ident, reference, _, _ in rows))
+        paths = {}
+        for name, column in (('baseline', 2), ('variant', 3)):
+            hypotheses = self.root / (name + '.jsonl')
+            hypotheses.write_text(''.join(json.dumps(dict(id=row[0], hypothesis=row[column]), ensure_ascii=False) + '\n'
+                                          for row in rows))
+            report = self.root / (name + '-report.json')
+            code, _, err = self.run_cli('evaluate', str(manifest), str(hypotheses), '--output', str(report))
+            self.assertEqual(code, 0, err)
+            paths[name] = (hypotheses, report)
+        common = self.root / 'common.json'
+        common.write_text(json.dumps(['проверь', 'сейчас', 'открой', 'привет', 'мир']))
+        return manifest, paths, common
+
+    def test_compare_считает_лучше_хуже_и_редкие_слова_без_текста(self):
+        manifest, paths, common = self.compare_fixture()
+        output = self.root / 'compare.json'
+        code, out, err = self.run_cli('compare', str(paths['baseline'][1]), str(paths['variant'][1]),
+            '--manifest', str(manifest), '--baseline-hypotheses', str(paths['baseline'][0]),
+            '--variant-hypotheses', str(paths['variant'][0]), '--common-words', str(common),
+            '--output', str(output))
+        self.assertEqual(code, 0, err)
+        report = json.loads(output.read_text())
+        self.assertEqual((report['better'], report['worse'], report['same']), (1, 1, 1))
+        self.assertEqual(report['worse_ids'], ['b'])
+        self.assertEqual(report['word_errors'], dict(baseline=1, variant=1))
+        self.assertEqual(report['rare_word_errors'], dict(reference_occurrences=2,
+            baseline_missed=1, variant_missed=1))
+        self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
+        text = output.read_text() + out + err
+        for secret in ('DPR', 'Nuxt', 'тпр', 'проверь'):
+            self.assertNotIn(secret, text)
+
+    def test_compare_без_текстов_не_считает_редкие_слова(self):
+        _, paths, _ = self.compare_fixture()
+        output = self.root / 'compare-no-rare.json'
+        code, _, err = self.run_cli('compare', str(paths['baseline'][1]), str(paths['variant'][1]),
+                                    '--output', str(output))
+        self.assertEqual(code, 0, err)
+        report = json.loads(output.read_text())
+        self.assertEqual(report['better'], 1)
+        self.assertIsNone(report['rare_word_errors'])
+
+    def test_compare_отклоняет_разные_наборы_записей(self):
+        _, paths, _ = self.compare_fixture()
+        other = json.loads(paths['variant'][1].read_text())
+        other['samples'] = other['samples'][:2]
+        broken = self.root / 'broken-report.json'
+        broken.write_text(json.dumps(other))
+        output = self.root / 'compare-bad.json'
+        code, _, _ = self.run_cli('compare', str(paths['baseline'][1]), str(broken), '--output', str(output))
+        self.assertEqual(code, 1)
+        self.assertFalse(output.exists())
+
 
 if __name__ == '__main__': unittest.main()

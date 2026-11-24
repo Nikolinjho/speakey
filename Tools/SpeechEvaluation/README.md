@@ -191,6 +191,35 @@ vendor/speech-evaluation/venv/bin/python -m Tools.SpeechEvaluation.qwen transcri
 
 Qwen загружает только проверенные локальные файлы. Hugging Face работает в офлайн-режиме, сетевые Python-сокеты блокируются на время загрузки и распознавания. Это программное ограничение внутри Python-процесса, а не системный межсетевой экран. Remote code, личные подсказки и hotwords отключены. Ответ Qwen уже нормализован библиотекой MLX Audio. Он записывается в `raw_hypothesis` и `hypothesis` с явным указанием этой границы обработки, оба значения `--stage` дают одинаковый текст.
 
+### Контекст (слой A) и сравнение прогонов
+
+Замер второго прохода Whisper с контекстом. Прогоны «как сейчас» и «с контекстом» запускай с `--deterministic` (`temperature_inc = 0`), иначе разница шумит от случайного fallback. Флаг пишется в `run.json`.
+
+```bash
+python3 -m Tools.SpeechEvaluation.context build /path/to/manifest.jsonl \
+  --output-dir /path/to/new-context [--corpus-vocabulary /path/to/vocabulary.json]
+python3 -m Tools.SpeechEvaluation.runners /path/to/manifest.jsonl --engine whisper \
+  --executable … --model … --language ru --split all --deterministic --output /path/to/new-base-run
+python3 -m Tools.SpeechEvaluation.runners /path/to/manifest.jsonl --engine whisper \
+  --executable … --model … --language ru --split all --deterministic \
+  --context-dir /path/to/new-context --output /path/to/new-context-run
+```
+
+- `context.py build` создаёт по файлу на запись: эталоны до 3 предыдущих записей той же `session_id` (по `created_at`, если он есть у всех записей сессии, иначе по порядку) как `screen`, плюс словарь корпуса `{"слово": число}` как `corpus`. Сама запись в свой контекст не входит.
+- `--context-dir` передаёт CLI `--context <файл записи>`. В CLI второй проход идёт при любых кандидатах (до 8), без бюджета времени приложения; это записано в `run.json` как `second_pass_policy`. Принимает его то же правило `ContextualRedecode.accept`. В `run.json` по каждой записи: число кандидатов, `second_pass`, `accepted`, `first_ms`, `second_ms`. Слова кандидатов хранятся только в приватном ответе CLI.
+- `--split all` берёт все записи манифеста. `--context` и `--deterministic` доступны только для Whisper.
+
+Сравнение двух отчётов `evaluate.py evaluate` по одним записям:
+
+```bash
+python3 Tools/SpeechEvaluation/evaluate.py compare base-report.json context-report.json \
+  --output /path/to/new-compare.json \
+  --manifest /path/to/manifest.jsonl --baseline-hypotheses base/hypotheses.jsonl \
+  --variant-hypotheses context/hypotheses.jsonl [--common-words words.json]
+```
+
+Отчёт: сколько записей лучше/хуже/без изменений (по числу словесных ошибок), id ухудшившихся, ошибки по словам до/после. Редкие слова (слова эталона вне `--common-words`, по умолчанию `words_ru.json` и `words_en.json`) считаются, только если переданы манифест и оба файла гипотез: отчёты оценки хранят счётчики без текста. Иначе `rare_word_errors` равен `null`. В отчёте и консоли текстов нет.
+
 ## Протокол и границы проверки
 
 Протокол сохраняет хеши executable, весов, корпуса, WAV и конфигурации, включая хеш подсказки. Для Qwen дополнительно сохраняется хеш Python-модуля. Проверяются изменения входов во время прогона. Для каждого клипа запускается отдельный процесс. Его время включает загрузку модели, время декодирования записывается отдельно. Это не измерение повторной диктовки с уже загруженными весами. Ошибка прерывает прогон и удаляет частичный каталог. Таймаут завершает созданный дочерний процесс.

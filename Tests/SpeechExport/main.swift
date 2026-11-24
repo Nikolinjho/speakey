@@ -62,6 +62,11 @@ let parsed = try SpeechCLIArguments.parse(["transcribe", "--input", "a.wav", "--
 check(parsed.command == "transcribe" && parsed.language == "ru", "CLI разбирает явные аргументы")
 rejects("Не принимает неизвестные аргументы") { _ = try SpeechCLIArguments.parse(["export", "--input", "a", "--output", "b", "--key", "secret"]) }
 rejects("Не принимает повторные аргументы") { _ = try SpeechCLIArguments.parse(["export", "--input", "a", "--input", "b", "--output", "c"]) }
+let contextual = try SpeechCLIArguments.parse(["transcribe", "--input", "a.wav", "--model", "m.bin", "--language", "ru", "--output", "o.json", "--context", "c.json", "--deterministic", "1"])
+check(contextual.context?.lastPathComponent == "c.json" && contextual.deterministic, "CLI разбирает --context и --deterministic")
+rejects("Контекст не для export") { _ = try SpeechCLIArguments.parse(["export", "--input", "a", "--output", "b", "--context", "c.json"]) }
+rejects("Контекст не для Parakeet") { _ = try SpeechCLIArguments.parse(["transcribe", "--engine", "parakeet", "--input", "a.wav", "--model", "m", "--language", "ru", "--output", "o.json", "--context", "c.json"]) }
+rejects("Неверное значение --deterministic") { _ = try SpeechCLIArguments.parse(["transcribe", "--input", "a.wav", "--model", "m.bin", "--language", "ru", "--output", "o.json", "--deterministic", "yes"]) }
 print("PASS: synthetic encrypted export, exact float32 WAV, permissions, no overwrite/partial output, read-only key and CLI validation")
 
 let fakeModel = root.appendingPathComponent("synthetic-model.bin")

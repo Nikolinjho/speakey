@@ -140,13 +140,17 @@ struct SpeechCLIArguments {
     let output: URL
     let model: URL?
     let language: String?
+    /// JSON с источниками контекста (слой A); только для `transcribe` + `whisper`.
+    let context: URL?
+    /// Детерминированное декодирование (`temperature_inc = 0`); только для `transcribe` + `whisper`.
+    let deterministic: Bool
 
     static func parse(_ arguments: [String]) throws -> Self {
         guard let command = arguments.first, ["export", "transcribe"].contains(command), arguments.count % 2 == 1 else {
             throw SpeechDiagnosticsExport.Failure.invalidArguments
         }
         let required: Set<String> = command == "export" ? ["--input", "--output"] : ["--input", "--output", "--model", "--language"]
-        let allowed = command == "export" ? required : required.union(["--engine"])
+        let allowed = command == "export" ? required : required.union(["--engine", "--context", "--deterministic"])
         var values: [String: String] = [:]
         for index in stride(from: 1, to: arguments.count, by: 2) {
             let name = arguments[index], value = arguments[index + 1]
@@ -161,7 +165,14 @@ struct SpeechCLIArguments {
         }
         let engine = values["--engine"] ?? "whisper"
         guard ["whisper", "parakeet"].contains(engine) else { throw SpeechDiagnosticsExport.Failure.invalidArguments }
+        let deterministicValue = values["--deterministic"]
+        guard deterministicValue == nil || ["0", "1"].contains(deterministicValue!) else { throw SpeechDiagnosticsExport.Failure.invalidArguments }
+        // Контекст и детерминизм относятся только к Whisper-распознаванию.
+        if (values["--context"] != nil || deterministicValue != nil) && (command != "transcribe" || engine != "whisper") {
+            throw SpeechDiagnosticsExport.Failure.invalidArguments
+        }
         return Self(command: command, engine: engine, input: URL(fileURLWithPath: input), output: URL(fileURLWithPath: output),
-                    model: values["--model"].map { URL(fileURLWithPath: $0) }, language: values["--language"])
+                    model: values["--model"].map { URL(fileURLWithPath: $0) }, language: values["--language"],
+                    context: values["--context"].map { URL(fileURLWithPath: $0) }, deterministic: deterministicValue == "1")
     }
 }

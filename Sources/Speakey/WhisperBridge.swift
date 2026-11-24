@@ -8,6 +8,10 @@ final class WhisperBridge {
     private let diagnosticModel: String
     private let recognitionHint: () -> String?
 
+    /// Только для стенда оценки: отключает temperature-fallback (`temperature_inc = 0`), чтобы два
+    /// прогона одной записи давали один и тот же текст. В приложении всегда false.
+    var deterministic = false
+
     /// Сколько потоков отдавать whisper. Считается ОДИН раз: значение не меняется в течение сессии,
     /// а sysctl в горячем пути нам ни к чему.
     ///
@@ -112,7 +116,7 @@ final class WhisperBridge {
         // Модель и качество при этом ни при чём: тяжёлую large-v3-turbo автор выбирает сознательно,
         // она лучше расставляет знаки препинания. Наша задача не отговаривать его, а не мешать
         // остальной системе. Оставляем одно P-ядро свободным.
-        params.temperature_inc = 0.2
+        params.temperature_inc = deterministic ? 0 : 0.2
         params.entropy_thold = 2.4       // повтор/гиббериш в сегменте → перезапуск (порог whisper.cpp по умолч.)
         params.no_speech_thold = 0.6
         params.n_threads = Int32(Self.transcribeThreads)

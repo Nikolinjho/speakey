@@ -14,16 +14,20 @@ import time
 
 try:
     from .audio import AudioError, audio_info
+    from .context import context_path
     from .dataset import ValidationError, validate_manifest
 except ImportError:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     from Tools.SpeechEvaluation.audio import AudioError, audio_info
+    from Tools.SpeechEvaluation.context import context_path
     from Tools.SpeechEvaluation.dataset import ValidationError, validate_manifest
 
 
 class RunError(ValueError):
     pass
 
+
+SECOND_PASS_POLICY = 'always_when_candidates_no_budget_limit_8'
 
 PARAKEET_COMPONENTS = ('Preprocessor.mlmodelc', 'Encoder.mlmodelc', 'Decoder.mlmodelc',
                        'JointDecisionv3.mlmodelc', 'parakeet_vocab.json')
@@ -88,21 +92,33 @@ def _write_private(path, value, *, jsonl=False):
 
 
 def run_corpus(manifest, *, executable, model, output, language='auto', split='test',
-               stage='raw', timeout=120, engine='whisper'):
-    """Не скачивает веса и не меняет настройки приложения. Ошибка прерывает весь прогон."""
+               stage='raw', timeout=120, engine='whisper', context_dir=None, deterministic=False):
+    """Не скачивает веса и не меняет настройки приложения. Ошибка прерывает весь прогон.
+
+    `context_dir` – каталог из `context.py build`: включает второй проход с контекстом (только Whisper).
+    `deterministic` – `temperature_inc = 0`, чтобы прогоны «как сейчас» и «с контекстом» были сравнимы.
+    `split='all'` берёт все записи манифеста."""
     output = Path(output).resolve()
     repository = Path(__file__).resolve().parents[2]
     if output == repository or repository in output.parents:
         raise RunError('Личные прогоны нужно сохранять вне репозитория')
-    if (engine not in ('whisper', 'parakeet', 'qwen') or language not in ('auto', 'ru', 'en') or split not in ('train', 'dev', 'test')
+    if (engine not in ('whisper', 'parakeet', 'qwen') or language not in ('auto', 'ru', 'en') or split not in ('train', 'dev', 'test', 'all')
             or stage not in ('raw', 'echo-cleaned') or isinstance(timeout, bool)
             or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0):
         raise RunError('Неверные параметры прогона')
+    if (context_dir is not None or deterministic) and engine != 'whisper':
+        raise RunError('Контекст и детерминизм доступны только для Whisper')
+    if not isinstance(deterministic, bool):
+        raise RunError('Неверные параметры прогона')
+    if context_dir is not None:
+        context_dir = Path(context_dir).resolve()
+        if not context_dir.is_dir():
+            raise RunError('Нет каталога контекста')
     created = False
     try:
         manifest_hash = _sha256(manifest)
         rows = validate_manifest(manifest)
-        rows = [row for row in rows if row['split'] == split]
+        rows = [row for row in rows if split == 'all' or row['split'] == split]
         if not rows:
             raise RunError('Выбранная выборка пустая')
         model_hash = model_digest(model, engine)
@@ -131,6 +147,15 @@ def run_corpus(manifest, *, executable, model, output, language='auto', split='t
                     '--model', str(model), '--language', language, '--output', str(native_path)]
                 if engine == 'parakeet':
                     command.extend(['--engine', engine])
+                context_file = None
+                if context_dir is not None:
+                    context_file = context_path(context_dir, row['id'])
+                    if not context_file.is_file():
+                        raise RunError('Запись {}: нет файла контекста'.format(index))
+                    context_hash = _sha256(context_file)
+                    command.extend(['--context', str(context_file)])
+                if deterministic:
+                    command.extend(['--deterministic', '1'])
                 completed = subprocess.run(command,
                     env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL, timeout=timeout, check=False, cwd=str(repository))
@@ -167,6 +192,22 @@ def run_corpus(manifest, *, executable, model, output, language='auto', split='t
             if (result.get('config_sha256') != config_hash
                     or result.get('config_sha256_format') != 'sorted-compact-utf8-v1'):
                 raise RunError('Запись {}: хеш конфигурации не совпадает'.format(index))
+            if deterministic and configuration.get('deterministic') != 'temperature_inc_0':
+                raise RunError('Запись {}: движок не подтвердил детерминизм'.format(index))
+            context_fields = {}
+            if context_dir is not None:
+                candidates, first_ms, second_ms = (result.get('context_candidates'),
+                                                   result.get('first_ms'), result.get('second_ms'))
+                if (not isinstance(candidates, list) or not isinstance(result.get('second_pass'), bool)
+                        or not isinstance(result.get('accepted'), bool)
+                        or configuration.get('second_pass_policy') != SECOND_PASS_POLICY
+                        or any(isinstance(v, bool) or not isinstance(v, int) or v < 0
+                               for v in (first_ms, second_ms))
+                        or _sha256(context_file) != context_hash):
+                    raise RunError('Запись {}: неверный ответ второго прохода'.format(index))
+                context_fields = dict(context_sha256=context_hash, context_candidate_count=len(candidates),
+                                      second_pass=result['second_pass'], accepted=result['accepted'],
+                                      first_ms=first_ms, second_ms=second_ms)
             config = dict(configuration)
             decode_time = result.get('elapsed_seconds')
             if (isinstance(decode_time, bool) or not isinstance(decode_time, (int, float))
@@ -176,7 +217,7 @@ def run_corpus(manifest, *, executable, model, output, language='auto', split='t
             measurements.append(dict(id=row['id'], audio_sha256=info['pcm_sha256'],
                 input_wav_sha256=input_hash, config=config, config_sha256=config_hash,
                 duration_seconds=info['duration_seconds'], wall_seconds=elapsed,
-                decode_seconds=decode_time))
+                decode_seconds=decode_time, **context_fields))
             native_path.unlink()
         # Не публикуем успешный протокол, если файл весов изменился во время прогона.
         if model_digest(model, engine) != model_hash or _sha256(executable) != executable_hash:
@@ -190,6 +231,10 @@ def run_corpus(manifest, *, executable, model, output, language='auto', split='t
             stage=stage, language=language, split=split, model_sha256=model_hash,
             executable_sha256=executable_hash, manifest_sha256=manifest_hash,
             started_at_msk=started_at, samples=measurements)
+        protocol['deterministic'] = deterministic
+        if context_dir is not None:
+            # В CLI второй проход идёт при любых кандидатах, без бюджета времени приложения.
+            protocol['context'] = dict(second_pass_policy=SECOND_PASS_POLICY, candidate_limit=8)
         if backend_hash:
             protocol['backend_code_sha256'] = backend_hash
         _write_private(output/'hypotheses.jsonl', predictions, jsonl=True)
@@ -210,15 +255,18 @@ def main(argv=None):
     parser.add_argument('--model', required=True)
     parser.add_argument('--output', required=True)
     parser.add_argument('--language', choices=('auto', 'ru', 'en'), default='auto')
-    parser.add_argument('--split', choices=('train', 'dev', 'test'), default='test')
+    parser.add_argument('--split', choices=('train', 'dev', 'test', 'all'), default='test')
     parser.add_argument('--stage', choices=('raw', 'echo-cleaned'), default='raw')
     parser.add_argument('--engine', choices=('whisper', 'parakeet', 'qwen'), default='whisper')
     parser.add_argument('--timeout', type=float, default=120)
+    parser.add_argument('--context-dir', help='Каталог из context.py build: второй проход с контекстом (Whisper)')
+    parser.add_argument('--deterministic', action='store_true', help='temperature_inc = 0 (Whisper)')
     args = parser.parse_args(argv)
     try:
         result = run_corpus(args.manifest, executable=args.executable, model=args.model,
             output=args.output, language=args.language, split=args.split, stage=args.stage,
-            timeout=args.timeout, engine=args.engine)
+            timeout=args.timeout, engine=args.engine,
+            context_dir=args.context_dir, deterministic=args.deterministic)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except RunError as error:

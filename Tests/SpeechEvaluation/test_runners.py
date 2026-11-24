@@ -46,6 +46,7 @@ if is_qwen: words=words[2:]
 sys.path.insert(0,os.getcwd())
 args=dict(zip(words[1::2],words[2::2]))
 assert words[0]=='transcribe'
+if os.environ.get('FAKE_ARGS_LOG'): pathlib.Path(os.environ['FAKE_ARGS_LOG']).write_text(json.dumps(words))
 assert os.environ['SPEAKEY_SPEECH_CLI']=='1'
 assert os.environ.get('SPEAKEY_SPEECH_DIAGNOSTICS')!='1'
 mode={mode!r}
@@ -63,6 +64,11 @@ result=dict(hypothesis='Верный текст',raw_hypothesis='Сырой те
     config=dict(prompt_sha256='a'*64,recognition_hint='disabled_explicitly',strategy='greedy',entropyThreshold='2.4',decodeLanguage='ru'))
 result['config_sha256']=hashlib.sha256(json.dumps(result['config'],sort_keys=True,ensure_ascii=False,separators=(',',':')).encode('utf8')).hexdigest()
 result['config_sha256_format']='sorted-compact-utf8-v1'
+if '--deterministic' in args: result['config']['deterministic']='temperature_inc_0'
+if '--context' in args:
+    result['config']['second_pass_policy']='always_when_candidates_no_budget_limit_8'
+    result.update(context_candidates=['DPR'],second_pass=True,accepted=True,first_ms=10,second_ms=12)
+result['config_sha256']=hashlib.sha256(json.dumps(result['config'],sort_keys=True,ensure_ascii=False,separators=(',',':')).encode('utf8')).hexdigest()
 if mode=='bad_config': result['config']['strategy']='changed'
 if mode=='bad_hash': result['model_sha256']='0'*64
 if mode=='missing_raw': del result['raw_hypothesis']
@@ -191,6 +197,57 @@ print('СЕКРЕТНЫЙ текст')
         self.assertEqual(result.returncode,1)
         self.assertNotIn('Traceback',result.stderr)
         self.assertFalse(self.output.exists())
+
+    def test_context_dir_передаёт_файл_нужной_записи_и_детерминизм(self):
+        from Tools.SpeechEvaluation import context
+        contexts = self.root / 'contexts'
+        contexts.mkdir()
+        (contexts / context.context_path(contexts, 'clip-1').name).write_text('{"sources":[]}')
+        log = self.root / 'args.json'
+        with mock.patch.dict('os.environ', {'FAKE_ARGS_LOG': str(log)}):
+            self.run_batch(context_dir=contexts, deterministic=True)
+        words = json.loads(log.read_text())
+        arguments = dict(zip(words[1::2], words[2::2]))
+        self.assertEqual(arguments['--context'], str(context.context_path(contexts.resolve(), 'clip-1')))
+        self.assertEqual(arguments['--deterministic'], '1')
+        protocol = json.loads((self.output / 'run.json').read_text())
+        self.assertTrue(protocol['deterministic'])
+        self.assertEqual(protocol['context']['second_pass_policy'], 'always_when_candidates_no_budget_limit_8')
+        sample = protocol['samples'][0]
+        self.assertEqual((sample['context_candidate_count'], sample['second_pass'], sample['accepted']), (1, True, True))
+        self.assertEqual((sample['first_ms'], sample['second_ms']), (10, 12))
+        self.assertNotIn('DPR', (self.output / 'run.json').read_text())
+
+    def test_без_context_dir_аргументы_прежние(self):
+        log = self.root / 'args.json'
+        with mock.patch.dict('os.environ', {'FAKE_ARGS_LOG': str(log)}):
+            self.run_batch()
+        self.assertNotIn('--context', json.loads(log.read_text()))
+        self.assertNotIn('--deterministic', json.loads(log.read_text()))
+
+    def test_context_dir_без_файла_записи_прерывает_прогон(self):
+        contexts = self.root / 'contexts'
+        contexts.mkdir()
+        with self.assertRaises(runners.RunError): self.run_batch(context_dir=contexts)
+        self.assertFalse(self.output.exists())
+
+    def test_контекст_и_детерминизм_только_для_whisper(self):
+        model = self.root / 'parakeet-tdt-0.6b-v3'
+        model.mkdir()
+        with self.assertRaises(runners.RunError): self.run_batch(engine='parakeet', deterministic=True)
+
+    def test_split_all_берёт_все_записи(self):
+        row = json.loads(self.manifest.read_text())
+        with wave.open(str(self.root / 'clip2.wav'), 'wb') as audio:
+            audio.setnchannels(1)
+            audio.setsampwidth(2)
+            audio.setframerate(16000)
+            audio.writeframes(b'\x01\0' * 1600)
+        other = dict(row, id='clip-2', audio='clip2.wav', reference='Другой текст', session_id='two', split='dev')
+        self.manifest.write_text(json.dumps(row) + '\n' + json.dumps(other, ensure_ascii=False) + '\n')
+        self.run_batch(split='all')
+        ids = [json.loads(line)['id'] for line in (self.output / 'hypotheses.jsonl').read_text().splitlines()]
+        self.assertEqual(ids, ['clip-1', 'clip-2'])
 
     def test_не_выдаёт_пустую_выборку_за_успех(self):
         with self.assertRaises(runners.RunError): self.run_batch(split='dev')
