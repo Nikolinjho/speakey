@@ -77,7 +77,8 @@ final class WhisperBridge {
 
     /// Транскрибировать аудио. language: "ru" / "en" / "auto".
     /// initialPrompt с примером пунктуации стабилизирует знаки.
-    func transcribe(samples: [Float], language: String, diagnostics: SpeechDiagnosticTrace? = nil) -> String {
+    /// contextWords: слова из окружения диктовки, встают в затравку раньше словаря.
+    func transcribe(samples: [Float], language: String, contextWords: [String] = [], diagnostics: SpeechDiagnosticTrace? = nil) -> String {
         diagnostics?.record("whisper_start", metadata: ["language": language, "model": diagnosticModel])
         guard let ctx, !samples.isEmpty else { return "" }
 
@@ -181,7 +182,7 @@ final class WhisperBridge {
         //  — carry_initial_prompt=true: на длинной диктовке (>30с = несколько окон) знаки не теряются на
         //    2-м+ окне; для коротких реплик это no-op, downside нет.
         // Пустой указатель и пустая подсказка для whisper означают разные вещи.
-        let prompt = punctuationPrompt(for: promptLanguage)
+        let prompt = punctuationPrompt(for: promptLanguage, contextWords: contextWords)
         let promptC = prompt.isEmpty ? nil : strdup(prompt)
         defer { if let promptC { free(promptC) } }
         if let promptC {
@@ -260,7 +261,7 @@ final class WhisperBridge {
     /// Reference: openai/whisper#194 · cookbook whisper_prompting_guide · Habr Соколов 1024634.
     ///
     /// Сколько слов было в прошлой подсказке — чтобы не писать одну строку на каждую диктовку.
-    private static var lastHintCount = -1
+    private static var lastHintCounts: [Int] = []
 
     /// Фраза-затравка для whisper: задаёт стиль вывода (со знаками препинания, с «ё») и заранее
     /// называет слова, которые в тексте встретятся. language здесь это язык ЗАТРАВКИ, его выбирает
@@ -294,7 +295,7 @@ final class WhisperBridge {
     /// для неуверенного определения. Замер 25.09.2026 по «ё» и знакам: FLEURS 100 «ё» 15 из 15 и
     /// запятые F1 91.7 и там и там, WER 3.34% против 3.50%, то есть в пределах шума. Подробности
     /// и цена на живых обрывках записаны в transcribe.
-    private func punctuationPrompt(for language: String) -> String {
+    private func punctuationPrompt(for language: String, contextWords: [String]) -> String {
         guard let (head, tail) = WhisperPrompt.blocks(for: language) else { return "" }
 
         // СЛОВАРЬ ДИКТОВКИ ДОБИРАЕТ ОСТАТОК ОКНА (задача 143). Смысл: не только править вывод, но и
@@ -304,17 +305,7 @@ final class WhisperBridge {
         // ⚠️ ДОПИСЫВАЕМ ЦЕЛОЙ ФРАЗОЙ, А НЕ СПИСКОМ ЧЕРЕЗ ЗАПЯТУЮ В ПУСТОТЕ. Прямо выше записано
         // исследование 11.07: промпт должен оставаться НАТУРАЛЬНЫМ текстом, «мешок» коротких токенов
         // — самый ненадёжный случай и умеет искажать соседние слова.
-        var dict = ""
-        if let words = recognitionHint() {
-            // В лог — только СКОЛЬКО слов подмешали, и один раз на смену состава. Сами слова это
-            // содержимое, которое человек завёл сам, а лог уезжает к нам с отзывом (принцип №2).
-            let count = words.split(separator: ",").count
-            if Self.lastHintCount != count {
-                Self.lastHintCount = count
-                kbLog("voice: в подсказку распознавания подмешано \(count) слов из словаря диктовки")
-            }
-            dict = language == "en" ? " Words that often come up: \(words)." : " Часто встречаются слова: \(words)."
-        }
+        let hintWords = recognitionHint()?.components(separatedBy: ", ") ?? []
 
         // ⚠️ ПРЕДОХРАНИТЕЛЬ ОТ ПЕРЕПОЛНЕНИЯ, И ОН НЕ ПЕРЕСТРАХОВКА. Бюджет затравки у whisper —
         // `min(n_max_text_ctx, n_text_ctx/2)`, для наших моделей это 223 токена. При переполнении
@@ -329,10 +320,19 @@ final class WhisperBridge {
         // `recognitionHint`, то есть полная затравка не превышает ~470). Это backstop на случай,
         // если этот потолок кто-то поднимет, а не ежедневная тревога.
         // Жертвуем в переполнении СЛОВАРЁМ, а не фразами: он полезен, но необязателен.
-        let full = head + dict + tail
-        if full.count <= Self.promptMaxChars { return full }
-        kbLog("voice: подсказка распознавания не влезла в затравку (\(full.count) симв.) — словарь опущен")
-        return head + tail
+        // Бюджет фразы со словами — остаток после фраз пунктуации. Не влезающие слова фраза
+        // отбрасывает с хвоста сама (сначала словарь, потом хвост контекста), фразы остаются целыми.
+        let budget = Self.promptMaxChars - head.count - tail.count
+        let dict = WhisperPrompt.wordsPhrase(contextWords: contextWords, hintWords: hintWords,
+                                             language: language, maxChars: budget)
+        // В лог — только СКОЛЬКО слов подмешали, и один раз на смену состава. Сами слова это
+        // содержимое, которое человек завёл сам, а лог уезжает к нам с отзывом (принцип №2).
+        let counts = [hintWords.count, contextWords.count]
+        if Self.lastHintCounts != counts {
+            Self.lastHintCounts = counts
+            kbLog("voice: в подсказку распознавания подмешано \(hintWords.count) слов из словаря диктовки и \(contextWords.count) слов контекста")
+        }
+        return head + dict + tail
     }
 
     /// Потолок длины затравки в символах, с запасом от настоящего предела в токенах (см. выше).

@@ -44,6 +44,34 @@ enum WhisperPrompt {
         }
     }
 
+    /// Самое длинное слово, которое берём в фразу: длиннее, как правило, мусор распознавания.
+    private static let maxWordLength = 40
+
+    /// Фраза со словами для затравки: сначала слова контекста, затем слова словаря диктовки.
+    /// Из слов вырезаются «, », : и ; (фраза должна оставаться натуральным текстом, а двоеточие
+    /// и точка с запятой ломают разбор), повторы без учёта регистра остаются первыми по порядку.
+    /// maxChars: бюджет на саму фразу вместе с префиксом и точкой. Слова берём по порядку, пока
+    /// влезают: при переполнении уходят хвостовые слова контекста, а раньше них слова словаря.
+    /// Пусто, если не осталось слов или не влезло ни одно.
+    static func wordsPhrase(contextWords: [String], hintWords: [String], language: String, maxChars: Int) -> String {
+        let prefix = language == "en" ? " Words that often come up: " : " Часто встречаются слова: "
+        var seen = Set<String>()
+        var words: [String] = []
+        for raw in contextWords + hintWords {
+            let word = String(raw.filter { !"«»:;".contains($0) })
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !word.isEmpty, word.count <= maxWordLength else { continue }
+            if seen.insert(word.lowercased()).inserted { words.append(word) }
+        }
+        var body = ""
+        for word in words {
+            let next = body.isEmpty ? word : body + ", " + word
+            if prefix.count + next.count + 1 > maxChars { break }
+            body = next
+        }
+        return body.isEmpty ? "" : prefix + body + "."
+    }
+
     /// Куски, из которых собрана затравка: блоки фраз целиком (ru, en) и всё остальное одним
     /// куском, то есть фраза словаря диктовки. Длинные идут первыми.
     static func echoPieces(_ prompt: String) -> [String] {
