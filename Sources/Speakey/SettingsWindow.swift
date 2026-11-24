@@ -3313,8 +3313,12 @@ final class DetailVC: NSViewController {
                 switchRow(L10n.t("voice.sound"), L10n.t("voice.soundSub"), settings.voiceSoundEnabled,
                           #selector(toggleVoiceSound), help: L10n.t("voice.soundHelp"), key: "voice.sound"),
                 makeVolumeBox(),
-                switchRow(L10n.t("voice.contextRefine"), L10n.t("voice.contextRefineSub"), settings.voiceContextRefine,
-                          #selector(toggleContextRefine), help: L10n.t("voice.contextRefineHelp"), key: "voice.contextRefine"),
+                // Подчинённая настройка: без контекста диктовки (автодополнение) источников слов нет,
+                // и второй проход не запустится. Гасим строку и говорим, что включить.
+                switchRow(L10n.t("voice.contextRefine"),
+                          AutocompletePrefs.dictationContext ? L10n.t("voice.contextRefineSub") : L10n.t("voice.contextRefineOff"),
+                          settings.voiceContextRefine, #selector(toggleContextRefine), enabled: AutocompletePrefs.dictationContext,
+                          help: L10n.t("voice.contextRefineHelp"), key: "voice.contextRefine"),
                 // «Как вставлять текст» больше НЕ висит отдельной ссылкой между карточкой и
                 // заголовком — она была там сиротой, без карточки и без заголовка. Теперь это
                 // обычная строка внутри «Диктовки», а четыре правила выезжают под ней.

@@ -219,11 +219,26 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
     private func display(_ document: SpeechReviewDocument) {
         hasDocument = true
         createdAt.stringValue = String(format: L10n.t("review.createdAt"), creationDateText(document.createdAt))
-        let events = document.snapshot.events.filter { $0.stage == "whisper_raw" || $0.stage == "parakeet_raw" }
-        raw.string = events.map { event in
-            let engine = event.stage == "whisper_raw" ? "Whisper" : "Parakeet"
-            return "\(engine)\n\(event.text ?? "")"
-        }.joined(separator: "\n\n")
+        // После второго прохода в трассе два сырых вывода Whisper. Всё, что Whisper записал после
+        // отметки `context_second_pass`, — второй проход (T2); вставлен ли он, говорит `context_refine`.
+        let delivered = document.snapshot.events.last(where: { $0.stage == "context_refine" })?.metadata["delivered"] == "true"
+        var secondPass = false
+        var blocks: [String] = []
+        for event in document.snapshot.events {
+            if event.stage == "context_second_pass" { secondPass = true; continue }
+            guard event.stage == "whisper_raw" || event.stage == "parakeet_raw" else { continue }
+            let engine: String
+            if event.stage == "parakeet_raw" {
+                engine = "Parakeet"
+            } else if secondPass {
+                engine = L10n.t(delivered ? "review.rawContextDelivered" : "review.rawContextRejected")
+            } else {
+                engine = "Whisper"
+            }
+            blocks.append("\(engine)\n\(event.text ?? "")")
+        }
+        let events = blocks
+        raw.string = blocks.joined(separator: "\n\n")
         if events.isEmpty { raw.string = L10n.t("review.noRaw") }
         if let correction = document.correction {
             hasCorrection = true
