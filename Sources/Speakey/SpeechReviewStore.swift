@@ -71,8 +71,8 @@ struct SpeechReviewStore {
         let correctedIDs = Set(try records(in: correctionsDirectory).map(\.id))
         return try records(in: diagnosticsDirectory).map { item in
             let corrected = correctedIDs.contains(item.id)
-            // Нечитаемый эталон в списке считаем явным: окно всё равно покажет его как сохранённый.
-            let source = corrected ? ((try? readCorrection(id: item.id))?.source ?? "explicit") : nil
+            // Источник читается по открытой метке, без ключа и без расшифровки: Keychain в списке не нужен.
+            let source = corrected ? (exists(marker(item.id)) ? "implicit" : "explicit") : nil
             return SpeechReviewItem(id: item.id, createdAt: item.createdAt, hasSavedCorrection: corrected, source: source)
         }.sorted {
             $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt
@@ -99,9 +99,12 @@ struct SpeechReviewStore {
         try save(SpeechReviewCorrection(id: id, reference: reference, editedText: editedText,
                                        sessionID: sessionID, split: split, silence: silence,
                                        createdAt: document.createdAt, source: "explicit"))
-        // Явная правка снимает прежний отказ.
-        var refused = try readRefusals()
-        if refused.remove(id) != nil { try writeRefusals(refused) }
+        // Явная правка снимает прежний отказ. Сбой отказов не должен портить уже сохранённый эталон.
+        if var refused = (try? readRefusals(quarantine: true)) ?? nil {
+            if refused.remove(id) != nil || refusalsQuarantined() { try? writeRefusals(refused) }
+        } else if refusalsQuarantined() {
+            try? writeRefusals([])
+        }
     }
 
     private static func recordedSession(_ createdAt: Date) -> String {
@@ -119,7 +122,8 @@ struct SpeechReviewStore {
         Self.lock.lock(); defer { Self.lock.unlock() }
         guard correctionsDirectory.standardizedFileURL != diagnosticsDirectory.standardizedFileURL else { throw Failure.unsafePath }
         let corrected = Set(try records(in: correctionsDirectory).map(\.id))
-        let refused = try readRefusals()
+        // Нечитаемые отказы (или карантин без нового файла) означают «отказано всем»: неявно не подтверждаем.
+        guard let refused = try readRefusals(quarantine: true), !refusalsQuarantined() else { return 0 }
         var confirmed = 0
         for item in try records(in: diagnosticsDirectory).sorted(by: { $0.createdAt < $1.createdAt }) {
             guard !corrected.contains(item.id), !refused.contains(item.id),
@@ -156,19 +160,38 @@ struct SpeechReviewStore {
         defer { try? FileManager.default.removeItem(at: staged) }
         try SpeechDiagnosticsExport.writeNew(ciphertext, to: staged)
         guard Darwin.rename(staged.path, target.path) == 0 else { throw Failure.invalidFile }
+        if correction.source == "implicit" {
+            _ = FileManager.default.createFile(atPath: marker(correction.id).path, contents: Data(), attributes: [.posixPermissions: 0o600])
+        } else {
+            try? FileManager.default.removeItem(at: marker(correction.id))
+        }
     }
 
     func removeCorrection(id: UUID) throws {
         Self.lock.lock(); defer { Self.lock.unlock() }
         try checkDirectory(correctionsDirectory, allowMissing: true)
         let target = file(id, in: correctionsDirectory)
+        // Сначала отказ, потом удаление: при сбое записи эталон остаётся, и его не воскресит неявный проход.
+        // Нечитаемый файл отказов уходит в карантин, явное удаление при этом не блокируется.
+        var refused = try readRefusals(quarantine: true) ?? []
+        if refused.insert(id).inserted || refusalsQuarantined() { try writeRefusals(refused) }
         if exists(target) {
             try regularFile(target)
             try FileManager.default.removeItem(at: target)
         }
-        // Любое удаление эталона запрещает неявно подтверждать эту запись снова.
-        var refused = try readRefusals()
-        if refused.insert(id).inserted { try writeRefusals(refused) }
+        try? FileManager.default.removeItem(at: marker(id))
+    }
+
+    /// Открытая метка неявного источника рядом с эталоном; записи records(in:) её не видят (не .enc).
+    private func marker(_ id: UUID) -> URL {
+        correctionsDirectory.appendingPathComponent(id.uuidString + ".implicit")
+    }
+
+    /// Карантинные копии нечитаемых отказов: пока рабочего файла нет, неявное подтверждение выключено.
+    private func refusalsQuarantined() -> Bool {
+        guard !exists(refusalsFile) else { return false }
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: refusalsFile.deletingLastPathComponent().path)) ?? []
+        return names.contains { $0.hasPrefix("speech-review-refusals.corrupt-") }
     }
 
     /// Отказы лежат рядом с каталогом эталонов, а не внутри: records(in:) читает только UUID.enc.
@@ -176,12 +199,22 @@ struct SpeechReviewStore {
         correctionsDirectory.deletingLastPathComponent().appendingPathComponent("speech-review-refusals.enc")
     }
 
-    private func readRefusals() throws -> Set<UUID> {
+    /// nil — файл нечитаем и перенесён в `speech-review-refusals.corrupt-<время>.enc`.
+    /// Недоступный ключ не считается порчей: ошибка пробрасывается, файл не трогаем.
+    private func readRefusals(quarantine: Bool) throws -> Set<UUID>? {
         try checkDirectory(refusalsFile.deletingLastPathComponent(), allowMissing: true)
         guard exists(refusalsFile) else { return [] }
-        let ids = try JSONDecoder().decode([UUID].self, from: decrypt(read(refusalsFile)))
-        return Set(ids)
+        let data = try read(refusalsFile)
+        _ = try key()
+        if let ids = try? JSONDecoder().decode([UUID].self, from: decrypt(data)) { return Set(ids) }
+        guard quarantine else { return nil }
+        let name = "speech-review-refusals.corrupt-\(Int(Date().timeIntervalSince1970)).enc"
+        let target = refusalsFile.deletingLastPathComponent().appendingPathComponent(name)
+        guard Darwin.rename(refusalsFile.path, target.path) == 0 else { throw Failure.invalidFile }
+        return nil
     }
+
+    private func readRefusals() throws -> Set<UUID> { try readRefusals(quarantine: true) ?? [] }
 
     private func writeRefusals(_ ids: Set<UUID>) throws {
         let directory = refusalsFile.deletingLastPathComponent()
@@ -211,6 +244,7 @@ struct SpeechReviewStore {
             } else {
                 guard errno == ENOENT else { throw Failure.unsafePath }
                 orphans.append(file(item.id, in: correctionsDirectory))
+                try? FileManager.default.removeItem(at: marker(item.id))
             }
         }
         for orphan in orphans {

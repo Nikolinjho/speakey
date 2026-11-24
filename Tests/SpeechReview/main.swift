@@ -179,6 +179,36 @@ func checkImplicitConfirmation(root: URL, key: Data) throws {
     try check(source(matured) == "explicit_user_confirmation", "Явная строка выгрузки")
     try check(source(legacyID) == "explicit_user_confirmation", "Старая строка выгрузки явная")
     try check(source(good) == "implicit_unedited", "Неявная строка выгрузки")
+    // Список не читает ключ: источник берётся из открытой метки.
+    struct NoKey: Error {}
+    let keyless = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { throw NoKey() })
+    let keylessItems = try keyless.list()
+    try check(keylessItems.first(where: { $0.id == good })?.source == "implicit", "Список без ключа показывает неявный источник")
+    try check(keylessItems.first(where: { $0.id == matured })?.source == "explicit", "Список без ключа показывает явный источник")
+    try check(keylessItems.first(where: { $0.id == legacyID })?.hasSavedCorrection == true, "Список без ключа видит сохранённые")
+
+    // Сбой записи отказа не удаляет эталон.
+    rejects("Без ключа отказ не записывается") { try keyless.removeCorrection(id: good) }
+    try check(store.load(id: good).correction?.source == "implicit", "Эталон остаётся, если отказ не записан")
+
+    // Нечитаемый файл отказов: карантин, неявное выключено, явные действия не блокируются.
+    let fresh = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "после порчи", output: nil, age: 13 * hour, now: now)
+    try Data(repeating: 9, count: 64).write(to: refusals)
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Нечитаемые отказы выключают неявное подтверждение")
+    try check(!FileManager.default.fileExists(atPath: refusals.path), "Нечитаемый файл отказов вынесен")
+    let quarantined = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("speech-review-refusals.corrupt-") }
+    try check(quarantined.count == 1, "Нечитаемый файл сохранён в карантине")
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Без нового файла отказов неявное остаётся выключенным")
+    try store.saveConfirmed(id: fresh, reference: "явно после порчи", editedText: "", silence: false)
+    try check(store.load(id: fresh).correction?.source == "explicit", "Явное сохранение не блокируется порчей отказов")
+    try check(FileManager.default.fileExists(atPath: refusals.path), "Явное действие создало новый файл отказов")
+    try store.removeCorrection(id: good)
+    try check(store.load(id: good).correction == nil, "Удаление работает после порчи отказов")
+    try Data(repeating: 9, count: 64).write(to: refusals)
+    try store.removeCorrection(id: fresh)
+    try check(store.load(id: fresh).correction == nil, "Удаление при нечитаемых отказах не блокируется")
+    _ = try store.confirmMatured(now: now, minimumAge: minimum)
+    try check(store.load(id: fresh).correction == nil, "Удалённый после порчи не воскресает")
     print("PASS: неявное подтверждение, отказы, источник эталона, повреждённые примеры, выгрузка")
 }
 let requested = CommandLine.arguments.count > 1 ? URL(fileURLWithPath: CommandLine.arguments[1]) : FileManager.default.temporaryDirectory.appendingPathComponent("speech-review-" + UUID().uuidString)
@@ -200,7 +230,7 @@ trace.record("raw", text: "секретный черновик")
 let snapshot = trace.snapshot(outcome: "ok")
 let writer = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { key })
 _ = try writer.save(snapshot)
-let listing = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })
+let listing = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { fatalError("Список не должен читать ключ") })
 try check(listing.list().map(\.id) == [trace.id], "Список читает метаданные")
 try check(store.load(id: trace.id).correction == nil, "Черновик не подтверждён")
 try check(store.audio(id: trace.id).suffix(snapshot.pcmFloat32LE.count) == snapshot.pcmFloat32LE, "WAV сохраняет PCM побайтно")
