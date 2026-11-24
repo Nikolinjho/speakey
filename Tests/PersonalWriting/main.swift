@@ -162,5 +162,16 @@ check("Запрос во время старой сборки видит очи�
 releaseOld.signal()
 buildQueue.sync {}
 check("Завершившаяся старая сборка не возвращает удалённую историю", racing.personalization(before: "старый словарь содержит", bundleID: "race", strength: 2).snippets.isEmpty)
+check("Словарь приложения считает слово как число плюс две его записи в приложении", index.vocabulary(bundleID: "mail")["RiverCache"] == 2 + 2 * 2)
+check("Без приложения словарь отдаёт просто число", index.vocabulary(bundleID: nil)["RiverCache"] == 2)
+let spellings = PersonalWritingIndex(records: [
+    sample("Reports for RiverCache are ready", "mail", 1),
+    sample("Reports for RiverCache are done", "mail", 2),
+    sample("Reports for Rivercache are late", "mail", 3)
+])
+check("Вес приложения делится между написаниями пропорционально", spellings.vocabulary(bundleID: "mail")["RiverCache"] == 2 + 4 && spellings.vocabulary(bundleID: "mail")["Rivercache"] == 1 + 2)
+check("Чужое приложение не добавляет бонус", spellings.vocabulary(bundleID: "chat")["RiverCache"] == 2)
+let emptyCorpus = PersonalCorpus(directory: directory.appendingPathComponent("none"), keyProvider: { nil })
+check("Недоступный корпус отдаёт пустой словарь", emptyCorpus.vocabulary(bundleID: "mail").isEmpty)
 print("personal writing: \(checks) checks, \(failures) failures")
 exit(failures == 0 ? 0 : 1)

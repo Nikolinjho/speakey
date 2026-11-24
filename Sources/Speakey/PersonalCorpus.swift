@@ -112,6 +112,11 @@ final class PersonalCorpus {
         return withIndex { $0.terms(limit: limit) }
     }
 
+    /// Написание → вес для подбора слов при диктовке. Корпус недоступен — пустой словарь.
+    func vocabulary(bundleID: String) -> [String: Int] {
+        withIndex { $0.vocabulary(bundleID: bundleID) }
+    }
+
     func personalization(before: String, bundleID: String, strength: Int) -> PersonalWritingIndex.Profile {
         guard strength > 0 else { return PersonalWritingIndex.Profile() }
         return withIndex { $0.profile(before: before, bundleID: bundleID, strength: strength) }

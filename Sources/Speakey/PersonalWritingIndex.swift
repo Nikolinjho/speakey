@@ -114,6 +114,21 @@ final class PersonalWritingIndex {
         }
     }
 
+    /// Написание → вес. Каждая форма слова идёт со своим счётом; с `bundleID` к нему добавляется
+    /// доля двойного числа записей в этом приложении, пропорциональная доле формы (минимум 1).
+    /// У слова с одним написанием это `count + 2 × count_в_приложении`.
+    func vocabulary(bundleID: String? = nil) -> [String: Int] {
+        var result: [String: Int] = [:]
+        for term in termStatistics.values where term.count > 0 {
+            let appCount = bundleID.flatMap { term.apps[$0] } ?? 0
+            for (form, formCount) in term.forms {
+                let bonus = appCount > 0 ? Int((Double(2 * appCount * formCount) / Double(term.count)).rounded()) : 0
+                result[form, default: 0] += max(1, formCount + bonus)
+            }
+        }
+        return result
+    }
+
     func profile(before: String, bundleID: String, strength: Int) -> Profile {
         guard strength > 0 else { return Profile() }
         let level = min(3, strength)
