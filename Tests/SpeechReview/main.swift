@@ -82,6 +82,105 @@ func checkConfirmedRetention(root: URL, key: Data) throws {
     try check(review.exportConfirmed(to: folder.appendingPathComponent("export")) == 1, "Старое подтверждённое аудио остаётся доступно для экспорта")
     print("PASS: подтверждение и исходный звук сохраняются после срока, нулевого лимита и очистки")
 }
+/// Сохраняет пример с трассой диктовки и заданным возрастом файла.
+@discardableResult
+func saveDictation(writer: SpeechDiagnosticsStore, outcome: String, dictionary: String?, output: String?,
+                   age: TimeInterval, now: Date) throws -> UUID {
+    let trace = SpeechDiagnosticTrace(samples: [0.25, -0.5], configuration: [:])
+    if let dictionary { trace.record("dictionary", text: dictionary) }
+    if let output { trace.record("output_options", text: output) }
+    let url = try writer.save(trace.snapshot(outcome: outcome))!
+    try FileManager.default.setAttributes([.creationDate: now.addingTimeInterval(-age), .modificationDate: now], ofItemAtPath: url.path)
+    return trace.id
+}
+
+func checkImplicitConfirmation(root: URL, key: Data) throws {
+    let folder = root.appendingPathComponent("implicit")
+    let diagnostics = folder.appendingPathComponent("speech-diagnostics")
+    let corrections = folder.appendingPathComponent("speech-corrections")
+    let writer = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { key })
+    let store = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })
+    let now = Date()
+    let hour: TimeInterval = 3600
+    let minimum = 12 * hour
+    let matured = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "текст диктовки", output: "Текст диктовки.", age: 13 * hour, now: now)
+    let young = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "свежая фраза", output: nil, age: 11 * hour, now: now)
+    let historyOnly = try saveDictation(writer: writer, outcome: "history_only", dictionary: "только история", output: nil, age: 20 * hour, now: now)
+    let empty = try saveDictation(writer: writer, outcome: "empty", dictionary: "пусто", output: nil, age: 20 * hour, now: now)
+    let secure = try saveDictation(writer: writer, outcome: "secure_input_history_only", dictionary: "пароль", output: nil, age: 20 * hour, now: now)
+    let blank = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "  ", output: nil, age: 20 * hour, now: now)
+    let noStage = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: nil, output: nil, age: 20 * hour, now: now)
+    try check(store.list().allSatisfy { $0.source == nil }, "До прохода ничего не подтверждено")
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 1, "Подтверждается только созревшая вставленная диктовка")
+    let document = try store.load(id: matured)
+    try check(document.correction?.reference == "текст диктовки", "Эталон неявного — текст словаря")
+    try check(document.correction?.editedText == "Текст диктовки.", "Напечатанный текст — стадия output_options")
+    try check(document.correction?.source == "implicit", "Источник неявного подтверждения")
+    try check(document.correction?.silence == false, "Неявное подтверждение — речь")
+    try check(document.correction?.split == "dev", "Неявное подтверждение попадает в dev")
+    try check(store.list().first(where: { $0.id == matured })?.source == "implicit", "Список показывает неявный источник")
+    for id in [young, historyOnly, empty, secure, blank, noStage] {
+        try check(store.load(id: id).correction == nil, "Неподходящие примеры не подтверждаются")
+        try check(store.list().first(where: { $0.id == id })?.source == nil, "Неподтверждённый пример без источника")
+    }
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Повторный проход ничего не подтверждает")
+    try check(store.confirmMatured(now: now.addingTimeInterval(2 * hour), minimumAge: minimum) == 1, "Пример подтверждается, когда созреет")
+    let fallback = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "без оформления", output: nil, age: 13 * hour, now: now)
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 1, "Проход подтверждает пример без output_options")
+    try check(store.load(id: fallback).correction?.editedText == "без оформления", "Без output_options editedText равен словарю")
+
+    try store.saveConfirmed(id: matured, reference: "исправленный текст", editedText: "Исправленный текст.", silence: false)
+    let explicit = try store.load(id: matured).correction
+    try check(explicit?.source == "explicit" && explicit?.reference == "исправленный текст", "Явная правка перезаписывает неявную")
+    try check(store.list().first(where: { $0.id == matured })?.source == "explicit", "Список показывает явный источник")
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Явная правка не затирается проходом")
+    try check(store.load(id: matured).correction?.source == "explicit", "Источник остался явным")
+
+    // Отказ: удалённая неявная не воскресает, явная правка снимает отказ.
+    let refused = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "отказная", output: nil, age: 13 * hour, now: now)
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 1, "Отказной пример сначала подтверждается")
+    try store.removeCorrection(id: refused)
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Удалённая неявная не подтверждается снова")
+    try check(store.load(id: refused).correction == nil, "После отказа эталона нет")
+    let refusals = folder.appendingPathComponent("speech-review-refusals.enc")
+    try check(FileManager.default.fileExists(atPath: refusals.path), "Отказы лежат рядом с каталогом эталонов")
+    let refusalMode = try FileManager.default.attributesOfItem(atPath: refusals.path)[.posixPermissions] as! NSNumber
+    try check(refusalMode.intValue == 0o600, "Файл отказов закрыт")
+    try check(!String(decoding: Data(contentsOf: refusals), as: UTF8.self).contains(refused.uuidString), "Отказы зашифрованы")
+    try store.saveConfirmed(id: refused, reference: "вручную", editedText: "", silence: false)
+    try check(store.load(id: refused).correction?.source == "explicit", "После отказа явная правка работает")
+    // Удаление явного эталона тоже заносит id в отказы.
+    try store.removeCorrection(id: refused)
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Любое удаление эталона заносит id в отказы")
+
+    // Старый JSON без source читается как явный.
+    let legacyID = try saveDictation(writer: writer, outcome: "history_only", dictionary: nil, output: nil, age: 0, now: now)
+    let legacy: [String: Any] = ["id": legacyID.uuidString, "reference": "старый", "editedText": "",
+                               "sessionID": "legacy", "split": "dev", "silence": false]
+    let sealed = try AES.GCM.seal(JSONSerialization.data(withJSONObject: legacy), using: SymmetricKey(data: key)).combined!
+    try sealed.write(to: corrections.appendingPathComponent(legacyID.uuidString + ".enc"))
+    try check(store.load(id: legacyID).correction?.source == "explicit", "Старый эталон без source читается как явный")
+    try check(store.list().first(where: { $0.id == legacyID })?.source == "explicit", "Список: старый эталон явный")
+
+    // Повреждённый файл не валит проход.
+    let corruptURL = diagnostics.appendingPathComponent(UUID().uuidString + ".enc")
+    try Data(repeating: 1, count: 64).write(to: corruptURL)
+    try FileManager.default.setAttributes([.creationDate: now.addingTimeInterval(-20 * hour)], ofItemAtPath: corruptURL.path)
+    let good = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "после повреждённого", output: nil, age: 14 * hour, now: now)
+    try check(store.confirmMatured(now: now, minimumAge: minimum) == 1, "Повреждённый пример пропускается, остальные подтверждены")
+    try check(store.load(id: good).correction?.source == "implicit", "Подходящий пример рядом с повреждённым подтверждён")
+
+    // Выгрузка различает источник.
+    let output = folder.appendingPathComponent("export")
+    try check(store.exportConfirmed(to: output) >= 3, "Выгрузка содержит явные и неявные")
+    let rows = try String(contentsOf: output.appendingPathComponent("manifest.jsonl"), encoding: .utf8).split(separator: "\n")
+        .map { try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any] }
+    func source(_ id: UUID) -> String? { rows.first { $0["id"] as? String == id.uuidString }?["reference_source"] as? String }
+    try check(source(matured) == "explicit_user_confirmation", "Явная строка выгрузки")
+    try check(source(legacyID) == "explicit_user_confirmation", "Старая строка выгрузки явная")
+    try check(source(good) == "implicit_unedited", "Неявная строка выгрузки")
+    print("PASS: неявное подтверждение, отказы, источник эталона, повреждённые примеры, выгрузка")
+}
 let requested = CommandLine.arguments.count > 1 ? URL(fileURLWithPath: CommandLine.arguments[1]) : FileManager.default.temporaryDirectory.appendingPathComponent("speech-review-" + UUID().uuidString)
 let physicalParent = realpath(requested.deletingLastPathComponent().path, nil)!
 defer { free(physicalParent) }
@@ -92,6 +191,7 @@ let key = Data(repeating: 7, count: 32)
 try checkConfirmedRetention(root: root, key: key)
 try checkCreationOrder(root: root, key: key)
 try checkAutomaticReview(root: root, key: key)
+try checkImplicitConfirmation(root: root, key: key)
 let diagnostics = root.appendingPathComponent("diagnostics")
 let corrections = root.appendingPathComponent("corrections")
 let store = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })
@@ -100,7 +200,7 @@ trace.record("raw", text: "секретный черновик")
 let snapshot = trace.snapshot(outcome: "ok")
 let writer = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { key })
 _ = try writer.save(snapshot)
-let listing = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { fatalError("Список не должен читать ключ") })
+let listing = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })
 try check(listing.list().map(\.id) == [trace.id], "Список читает метаданные")
 try check(store.load(id: trace.id).correction == nil, "Черновик не подтверждён")
 try check(store.audio(id: trace.id).suffix(snapshot.pcmFloat32LE.count) == snapshot.pcmFloat32LE, "WAV сохраняет PCM побайтно")

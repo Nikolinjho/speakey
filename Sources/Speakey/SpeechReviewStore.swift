@@ -6,6 +6,8 @@ struct SpeechReviewItem {
     let id: UUID
     let createdAt: Date
     var hasSavedCorrection = false
+    /// nil — эталона нет; иначе источник подтверждения: explicit или implicit.
+    var source: String?
 }
 
 struct SpeechReviewCorrection: Codable {
@@ -16,6 +18,23 @@ struct SpeechReviewCorrection: Codable {
     let split: String
     let silence: Bool
     var createdAt: Date? = nil
+    /// explicit — подтверждено в окне проверки; implicit — неисправленная диктовка созрела.
+    var source: String = "explicit"
+}
+
+extension SpeechReviewCorrection {
+    /// Старые файлы без поля источника читаются как явные.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(id: try container.decode(UUID.self, forKey: .id),
+                  reference: try container.decode(String.self, forKey: .reference),
+                  editedText: try container.decode(String.self, forKey: .editedText),
+                  sessionID: try container.decode(String.self, forKey: .sessionID),
+                  split: try container.decode(String.self, forKey: .split),
+                  silence: try container.decode(Bool.self, forKey: .silence),
+                  createdAt: try container.decodeIfPresent(Date.self, forKey: .createdAt),
+                  source: try container.decodeIfPresent(String.self, forKey: .source) ?? "explicit")
+    }
 }
 
 struct SpeechReviewDocument {
@@ -51,7 +70,10 @@ struct SpeechReviewStore {
         Self.lock.lock(); defer { Self.lock.unlock() }
         let correctedIDs = Set(try records(in: correctionsDirectory).map(\.id))
         return try records(in: diagnosticsDirectory).map { item in
-            SpeechReviewItem(id: item.id, createdAt: item.createdAt, hasSavedCorrection: correctedIDs.contains(item.id))
+            let corrected = correctedIDs.contains(item.id)
+            // Нечитаемый эталон в списке считаем явным: окно всё равно покажет его как сохранённый.
+            let source = corrected ? ((try? readCorrection(id: item.id))?.source ?? "explicit") : nil
+            return SpeechReviewItem(id: item.id, createdAt: item.createdAt, hasSavedCorrection: corrected, source: source)
         }.sorted {
             $0.createdAt == $1.createdAt ? $0.id.uuidString < $1.id.uuidString : $0.createdAt > $1.createdAt
         }
@@ -72,16 +94,48 @@ struct SpeechReviewStore {
     func saveConfirmed(id: UUID, reference: String, editedText: String, silence: Bool) throws {
         Self.lock.lock(); defer { Self.lock.unlock() }
         let document = try load(id: id)
+        let sessionID = document.correction?.sessionID ?? Self.recordedSession(document.createdAt)
+        let split = document.correction?.split ?? "dev"
+        try save(SpeechReviewCorrection(id: id, reference: reference, editedText: editedText,
+                                       sessionID: sessionID, split: split, silence: silence,
+                                       createdAt: document.createdAt, source: "explicit"))
+        // Явная правка снимает прежний отказ.
+        var refused = try readRefusals()
+        if refused.remove(id) != nil { try writeRefusals(refused) }
+    }
+
+    private static func recordedSession(_ createdAt: Date) -> String {
         let date = DateFormatter()
         date.locale = Locale(identifier: "en_US_POSIX")
         date.calendar = Calendar(identifier: .gregorian)
         date.timeZone = TimeZone(secondsFromGMT: 3 * 3600)
         date.dateFormat = "yyyy-MM-dd"
-        let sessionID = document.correction?.sessionID ?? "recorded-" + date.string(from: document.createdAt)
-        let split = document.correction?.split ?? "dev"
-        try save(SpeechReviewCorrection(id: id, reference: reference, editedText: editedText,
-                                       sessionID: sessionID, split: split, silence: silence,
-                                       createdAt: document.createdAt))
+        return "recorded-" + date.string(from: createdAt)
+    }
+
+    /// Неисправленные вставленные диктовки старше порога становятся неявно подтверждёнными.
+    /// Повреждённые и нечитаемые примеры пропускаются, личный текст никуда не пишется.
+    func confirmMatured(now: Date, minimumAge: TimeInterval) throws -> Int {
+        Self.lock.lock(); defer { Self.lock.unlock() }
+        guard correctionsDirectory.standardizedFileURL != diagnosticsDirectory.standardizedFileURL else { throw Failure.unsafePath }
+        let corrected = Set(try records(in: correctionsDirectory).map(\.id))
+        let refused = try readRefusals()
+        var confirmed = 0
+        for item in try records(in: diagnosticsDirectory).sorted(by: { $0.createdAt < $1.createdAt }) {
+            guard !corrected.contains(item.id), !refused.contains(item.id),
+                  now.timeIntervalSince(item.createdAt) >= minimumAge,
+                  let snapshot = try? readTrace(id: item.id).snapshot, snapshot.outcome == "insertion_requested",
+                  let reference = snapshot.events.last(where: { $0.stage == "dictionary" })?.text,
+                  !reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+            let printed = snapshot.events.last(where: { $0.stage == "output_options" })?.text ?? reference
+            do {
+                try save(SpeechReviewCorrection(id: item.id, reference: reference, editedText: printed,
+                                               sessionID: Self.recordedSession(item.createdAt), split: "dev", silence: false,
+                                               createdAt: item.createdAt, source: "implicit"))
+                confirmed += 1
+            } catch { continue }
+        }
+        return confirmed
     }
 
     func save(_ correction: SpeechReviewCorrection) throws {
@@ -108,9 +162,39 @@ struct SpeechReviewStore {
         Self.lock.lock(); defer { Self.lock.unlock() }
         try checkDirectory(correctionsDirectory, allowMissing: true)
         let target = file(id, in: correctionsDirectory)
-        guard exists(target) else { return }
-        try regularFile(target)
-        try FileManager.default.removeItem(at: target)
+        if exists(target) {
+            try regularFile(target)
+            try FileManager.default.removeItem(at: target)
+        }
+        // Любое удаление эталона запрещает неявно подтверждать эту запись снова.
+        var refused = try readRefusals()
+        if refused.insert(id).inserted { try writeRefusals(refused) }
+    }
+
+    /// Отказы лежат рядом с каталогом эталонов, а не внутри: records(in:) читает только UUID.enc.
+    private var refusalsFile: URL {
+        correctionsDirectory.deletingLastPathComponent().appendingPathComponent("speech-review-refusals.enc")
+    }
+
+    private func readRefusals() throws -> Set<UUID> {
+        try checkDirectory(refusalsFile.deletingLastPathComponent(), allowMissing: true)
+        guard exists(refusalsFile) else { return [] }
+        let ids = try JSONDecoder().decode([UUID].self, from: decrypt(read(refusalsFile)))
+        return Set(ids)
+    }
+
+    private func writeRefusals(_ ids: Set<UUID>) throws {
+        let directory = refusalsFile.deletingLastPathComponent()
+        try checkDirectory(directory, allowMissing: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try checkDirectory(directory)
+        let plaintext = try JSONEncoder().encode(ids.map(\.uuidString).sorted().compactMap { UUID(uuidString: $0) })
+        guard let ciphertext = try AES.GCM.seal(plaintext, using: key()).combined else { throw Failure.invalidFile }
+        if exists(refusalsFile) { try regularFile(refusalsFile) }
+        let staged = directory.appendingPathComponent(".pending-" + UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: staged) }
+        try SpeechDiagnosticsExport.writeNew(ciphertext, to: staged)
+        guard Darwin.rename(staged.path, refusalsFile.path) == 0 else { throw Failure.invalidFile }
     }
 
     /// Явная очистка эталонов, чьи исходные записи уже удалены по сроку хранения.
@@ -168,7 +252,7 @@ struct SpeechReviewStore {
                 "language": source.snapshot.configuration["language"] ?? "auto",
                 "kind": correction.silence ? "silence" : "speech",
                 "duration_seconds": Double(source.snapshot.pcmFloat32LE.count / 4) / 16000,
-                "input_wav_sha256": digest(wav), "reference_source": "explicit_user_confirmation",
+                "input_wav_sha256": digest(wav), "reference_source": correction.source == "implicit" ? "implicit_unedited" : "explicit_user_confirmation",
                 "source_trace_sha256": digest(source.ciphertext), "pcm_sha256": digest(source.snapshot.pcmFloat32LE),
                 "source_schema": source.snapshot.schema
             ]
