@@ -89,7 +89,7 @@ enum ContextLexicon {
         return lower
     }
 
-    private static func weight(_ kind: ContextSource.Kind) -> Double {
+    static func weight(_ kind: ContextSource.Kind) -> Double {
         switch kind {
         case .screen: return 3
         case .recentDictation, .dictionary: return 2
@@ -97,47 +97,76 @@ enum ContextLexicon {
         }
     }
 
-    static func candidates(for transcript: String, sources: [ContextSource], limit: Int) -> [ContextCandidate] {
+    /// Обычные слова языка (lowercase) из списков `words_ru.json` и `words_en.json` (массивы строк).
+    /// Не прочитался файл — его слова просто не попадут в набор: фильтр станет мягче, но не сломается.
+    static func loadCommonWords(urls: [URL]) -> Set<String> {
+        var result = Set<String>()
+        for url in urls {
+            guard let data = try? Data(contentsOf: url),
+                  let list = try? JSONDecoder().decode([String].self, from: data) else { continue }
+            for word in list { result.insert(word.lowercased()) }
+        }
+        return result
+    }
+
+    /// Списки из ресурсов приложения. Грузятся один раз и лениво, при первом подборе (не на main).
+    /// В проверочных сборках без ресурсов набор пустой, и фильтр обычных слов не срабатывает.
+    static let bundledCommonWords: Set<String> = loadCommonWords(urls: ["words_ru", "words_en"].compactMap {
+        Bundle.main.url(forResource: $0, withExtension: "json")
+    })
+
+    /// Подбор по «сырым» источникам: индексы строятся на месте. Для повторных вызовов с тем же
+    /// корпусом выгоднее `candidates(for:indexes:…)` с заранее построенным индексом.
+    static func candidates(for transcript: String, sources: [ContextSource], limit: Int,
+                           commonWords: Set<String> = []) -> [ContextCandidate] {
+        candidates(for: transcript, indexes: sources.map { ContextSourceIndex($0) }, limit: limit, commonWords: commonWords)
+    }
+
+    /// Кандидаты на замену слов расшифровки.
+    ///
+    /// Фильтр обычных слов (спека: «кандидат не должен быть просто более частым обычным словом
+    /// языка»). Кандидат, который сам обычное слово, не берём никогда: «что → чуть», «хорошо →
+    /// хорошие» — это замена одного обычного слова другим, и звук тут Whisper слышал верно. Если
+    /// обычное слово стоит в расшифровке, его заменяют только экран и словарь диктовки: это явный
+    /// сигнал «сейчас пишу про Nuxt», а корпус и прошлые диктовки слишком широки — в них найдётся
+    /// похожая форма почти для любого слова («Сделай → сделали»).
+    ///
+    /// Недавние диктовки — это сырой вывод Whisper, и однажды ослышанное «tpr» там уже лежит. Поэтому
+    /// они не делают слово расшифровки «известным» (иначе ошибка закрепила бы сама себя), но
+    /// кандидатов дают наравне с остальными источниками.
+    static func candidates(for transcript: String, indexes: [ContextSourceIndex], limit: Int,
+                           commonWords: Set<String> = []) -> [ContextCandidate] {
         guard limit > 0 else { return [] }
         let transcriptWords = words(in: transcript)
-        guard !transcriptWords.isEmpty, sources.contains(where: { !$0.words.isEmpty }) else { return [] }
-
-        // Ключи источников считаем один раз на форму, а не на каждое слово расшифровки.
-        struct Form { let spelling: String; let lower: String; let phonetic: String; let stem: String }
-        var known = Set<String>()
-        var formsBySource: [(ContextSource.Kind, [(Form, Int)])] = []
-        for source in sources {
-            var forms: [(Form, Int)] = []
-            for (spelling, count) in source.words {
-                let lower = spelling.lowercased()
-                known.insert(lower)
-                forms.append((Form(spelling: spelling, lower: lower, phonetic: phoneticKey(spelling), stem: stem(spelling)), count))
-            }
-            formsBySource.append((source.kind, forms))
-        }
+        guard !transcriptWords.isEmpty, indexes.contains(where: { !$0.isEmpty }) else { return [] }
+        let knownIndexes = indexes.filter { $0.kind != .recentDictation }
 
         var result: [(candidate: ContextCandidate, order: Int)] = []
         var seen = Set<String>()
         for (order, w) in transcriptWords.enumerated() {
             let wl = w.lowercased()
-            guard w.count >= 2, !known.contains(wl), seen.insert(wl).inserted else { continue }
+            guard w.count >= 2, !knownIndexes.contains(where: { $0.lowers.contains(wl) }), seen.insert(wl).inserted else { continue }
             let wKey = phoneticKey(w)
             let wStem = stem(w)
+            let wordIsCommon = commonWords.contains(wl)
 
-            // Формы одного слова (без учёта регистра) складываем между источниками.
+            // Формы одного слова (без учёта регистра) складываем между источниками. Совпадение по
+            // звуку сильнее совпадения по основе; форма, найденная обоими путями, считается раз.
             var scores: [String: Double] = [:]
             var spellingCounts: [String: [String: Int]] = [:]
-            for (kind, forms) in formsBySource {
-                for (form, count) in forms {
-                    var strength = 0.0
-                    if form.phonetic == wKey && wKey.count >= 3 {
-                        strength = 1.0
-                    } else if form.stem == wStem && wStem.count >= 4 {
-                        strength = 0.8
-                    }
-                    guard strength > 0 else { continue }
-                    scores[form.lower, default: 0] += strength * weight(kind) * log(1 + Double(count))
-                    spellingCounts[form.lower, default: [:]][form.spelling, default: 0] += count
+            for index in indexes {
+                if wordIsCommon && (index.kind == .corpus || index.kind == .recentDictation) { continue }
+                let byKey = wKey.count >= 3 ? index.byKey[wKey] ?? [] : []
+                let byStem = wStem.count >= 4 ? index.byStem[wStem] ?? [] : []
+                guard !byKey.isEmpty || !byStem.isEmpty else { continue }
+                let keyMatched = Set(byKey)
+                for (position, strength) in byKey.map({ ($0, 1.0) }) + byStem.filter({ !keyMatched.contains($0) }).map({ ($0, 0.8) }) {
+                    let form = index.forms[position]
+                    // Кандидат должен отличаться от слова расшифровки (иначе «tpr» из прошлой диктовки
+                    // перебил бы «DPR» из корпуса) и не быть обычным словом языка.
+                    guard form.lower != wl, !commonWords.contains(form.lower) else { continue }
+                    scores[form.lower, default: 0] += strength * weight(index.kind) * log(1 + Double(form.count))
+                    spellingCounts[form.lower, default: [:]][form.spelling, default: 0] += form.count
                 }
             }
             guard let best = scores.max(by: { $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key }),
@@ -147,5 +176,59 @@ enum ContextLexicon {
         }
         result.sort { $0.candidate.score != $1.candidate.score ? $0.candidate.score > $1.candidate.score : $0.order < $1.order }
         return Array(result.prefix(limit).map { $0.candidate })
+    }
+}
+
+/// Запомненные звуковой ключ и основа написания. Ключ — чистая функция слова, а считать его на
+/// каждую из десятков тысяч форм корпуса при каждой диктовке — это сотни миллисекунд. Кэш общий
+/// для всех источников и переживает пересборку корпуса: новые записи добавляют лишь новые слова.
+final class ContextKeyCache {
+    private let lock = NSLock()
+    private var keys: [String: (phonetic: String, stem: String)] = [:]
+    private let capacity: Int
+
+    init(capacity: Int = 200_000) { self.capacity = capacity }
+
+    func keys(for spelling: String) -> (phonetic: String, stem: String) {
+        lock.lock()
+        if let cached = keys[spelling] { lock.unlock(); return cached }
+        lock.unlock()
+        let computed = (ContextLexicon.phoneticKey(spelling), ContextLexicon.stem(spelling))
+        lock.lock()
+        // Переполнение — сбрасываем целиком: проще и честнее LRU для словаря, который растёт медленно.
+        if keys.count >= capacity { keys.removeAll(keepingCapacity: true) }
+        keys[spelling] = computed
+        lock.unlock()
+        return computed
+    }
+}
+
+/// Источник, разложенный для поиска: формы и их позиции по звуковому ключу и по основе. Подбор
+/// смотрит только в нужные корзины, а не перебирает все формы на каждое слово расшифровки.
+struct ContextSourceIndex {
+    struct Form { let spelling: String; let lower: String; let count: Int }
+    let kind: ContextSource.Kind
+    let forms: [Form]
+    let byKey: [String: [Int]]
+    let byStem: [String: [Int]]
+    let lowers: Set<String>
+    var isEmpty: Bool { forms.isEmpty }
+
+    init(_ source: ContextSource, keys cache: ContextKeyCache? = nil) {
+        var forms: [Form] = []
+        var byKey: [String: [Int]] = [:]
+        var byStem: [String: [Int]] = [:]
+        var lowers = Set<String>()
+        forms.reserveCapacity(source.words.count)
+        for (spelling, count) in source.words {
+            let keys = cache?.keys(for: spelling) ?? (phonetic: ContextLexicon.phoneticKey(spelling), stem: ContextLexicon.stem(spelling))
+            let lower = spelling.lowercased()
+            byKey[keys.phonetic, default: []].append(forms.count)
+            byStem[keys.stem, default: []].append(forms.count)
+            lowers.insert(lower)
+            forms.append(Form(spelling: spelling, lower: lower, count: count))
+        }
+        kind = source.kind
+        self.forms = forms; self.byKey = byKey; self.byStem = byStem; self.lowers = lowers
     }
 }
