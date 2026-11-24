@@ -8,7 +8,7 @@ import AppKit
 enum CaretLocator {
 
     /// Только один символ возле каретки. Вызывается после проверки поля, вне колбэка клавиатуры.
-    static func fontNearCaret(element: AXUIElement, range: CFRange) -> NSFont? {
+    static func fontNearCaret(element: AXUIElement, range: CFRange, renderedHeight: CGFloat? = nil) -> NSFont? {
         guard range.location >= 0 else { return nil }
         var character = CFRange(location: max(0, range.location - 1), length: 1)
         guard let argument = AXValueCreate(.cfRange, &character) else { return nil }
@@ -22,11 +22,20 @@ enum CaretLocator {
               let number = info[kAXFontSizeKey.takeUnretainedValue() as String] as? NSNumber else { return nil }
         let size = CGFloat(number.doubleValue)
         guard size.isFinite, (1...200).contains(size) else { return nil }
-        if let name = info[kAXFontNameKey.takeUnretainedValue() as String] as? String,
-           let font = NSFont(name: name, size: size) { return font }
-        if let family = info[kAXFontFamilyKey.takeUnretainedValue() as String] as? String,
-           let font = NSFont(name: family, size: size) { return font }
-        return NSFont.systemFont(ofSize: size)
+        let name = info[kAXFontNameKey.takeUnretainedValue() as String] as? String
+        let family = info[kAXFontFamilyKey.takeUnretainedValue() as String] as? String
+        let font = name.flatMap { NSFont(name: $0, size: size) }
+            ?? family.flatMap { NSFont(name: $0, size: size) }
+            ?? NSFont.systemFont(ofSize: size)
+        // Chromium возвращает размер из CSS без масштаба страницы. Геометрия каретки
+        // учитывает масштаб, но округляется и может отличаться из-за подстановки гарнитуры.
+        guard let renderedHeight else { return font }
+        let lineHeight = NSLayoutManager().defaultLineHeight(for: font)
+        let scale = renderedHeight / lineHeight
+        let renderedSize = size * scale
+        guard abs(renderedHeight - lineHeight) > 1, (0.5...3).contains(scale),
+              (1...200).contains(renderedSize) else { return font }
+        return NSFont(descriptor: font.fontDescriptor, size: renderedSize) ?? font
     }
 
     /// Границы поля в той же системе координат, что и каретка.

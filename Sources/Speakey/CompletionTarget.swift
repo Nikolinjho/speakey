@@ -113,7 +113,9 @@ struct CompletionTarget {
               let caret = CaretLocator.caretScreenRect(preferCharBefore: range.length == 0, element: element) else { return nil }
         var target = Self(element: element, pid: pid, bundleID: bid, appName: app.localizedName ?? bid, range: range,
                           before: before, selected: selected, after: after, caret: caret)
-        target.textFont = CaretLocator.fontNearCaret(element: element, range: range)
+        let usesChromium = Engine.chromiumFamily.contains(bid) || Engine.isElectronApp(app)
+        target.textFont = CaretLocator.fontNearCaret(element: element, range: range,
+                                                    renderedHeight: usesChromium && range.length == 0 ? caret.height : nil)
         if pid == getpid(), let view = NSApp?.keyWindow?.firstResponder as? NSTextView, view.isEditable {
             target.ownTextView = CompletionOwnTextView(view)
         }

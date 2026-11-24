@@ -86,8 +86,21 @@ check("Читается шрифт исходного поля", CaretLocator.fo
 check("Сохраняется размер шрифта исходного поля", CaretLocator.fontNearCaret(element: fixture, range: styleRange)?.pointSize == 20)
 styledAttributes = [NSAttributedString.Key("AXFont"): ["AXFontSize": 15]]
 check("Slack без имени шрифта сохраняет его точный размер", CaretLocator.fontNearCaret(element: fixture, range: styleRange)?.pointSize == 15)
+styledAttributes = [NSAttributedString.Key("AXFont"): ["AXFontSize": 13]]
+check("Electron при обычном масштабе сохраняет исходный размер",
+      CaretLocator.fontNearCaret(element: fixture, range: styleRange, renderedHeight: 16)?.pointSize == 13)
+check("Electron при масштабе 110% рисует подсказку близко к видимым 14,3 pt",
+      abs((CaretLocator.fontNearCaret(element: fixture, range: styleRange, renderedHeight: 18)?.pointSize ?? 0) - 14.3) < 0.5)
+check("Electron при масштабе 125% учитывает видимую высоту строки",
+      CaretLocator.fontNearCaret(element: fixture, range: styleRange, renderedHeight: 20)?.pointSize == 16.25)
+check("Отклонение высоты на один пункт сохраняет размер из AX",
+      CaretLocator.fontNearCaret(element: fixture, range: styleRange, renderedHeight: 15)?.pointSize == 13)
+check("Неправдоподобная высота не меняет размер из AX",
+      CaretLocator.fontNearCaret(element: fixture, range: styleRange, renderedHeight: 120)?.pointSize == 13)
 styledAttributes = [.font: NSFont(name: "Helvetica", size: 17)!]
 check("Нативный атрибут шрифта сохраняется", CaretLocator.fontNearCaret(element: fixture, range: styleRange)?.pointSize == 17)
+check("Геометрия не переопределяет нативный шрифт",
+      CaretLocator.fontNearCaret(element: fixture, range: styleRange, renderedHeight: 24)?.pointSize == 17)
 styledAttributes = [NSAttributedString.Key("AXFont"): ["AXFontSize": Double.nan]]
 check("Некорректный размер не создаёт шрифт", CaretLocator.fontNearCaret(element: fixture, range: styleRange) == nil)
 styledAttributes = nil

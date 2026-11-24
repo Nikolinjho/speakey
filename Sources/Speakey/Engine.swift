@@ -1069,17 +1069,20 @@ final class Engine: EventTapHandler {
 
     /// Electron-приложений становится больше, чем мы успеваем вписывать bundle id (Claude, Cursor,
     /// ChatGPT…), поэтому определяем по ФАКТУ: лежит ли внутри бандла Electron Framework. Результат
-    /// кэшируем по bundle id — обращение к файловой системе происходит один раз на приложение и
-    /// только на смене активного (в колбэке тапа такое звать нельзя).
+    /// кэшируем по bundle id — обращение к файловой системе происходит один раз на приложение.
+    /// Вызывается при смене активного приложения и чтении поля вне колбэка тапа.
+    private static let electronCacheLock = NSLock()
     private static var electronCache: [String: Bool] = [:]
     static func isElectronApp(_ app: NSRunningApplication?) -> Bool {
         guard let bid = app?.bundleIdentifier else { return false }
-        if let cached = electronCache[bid] { return cached }
-        guard let url = app?.bundleURL else { return false }
-        let fw = url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
-        let found = FileManager.default.fileExists(atPath: fw.path)
-        electronCache[bid] = found
-        return found
+        return electronCacheLock.withLock {
+            if let cached = electronCache[bid] { return cached }
+            guard let url = app?.bundleURL else { return false }
+            let fw = url.appendingPathComponent("Contents/Frameworks/Electron Framework.framework")
+            let found = FileManager.default.fileExists(atPath: fw.path)
+            electronCache[bid] = found
+            return found
+        }
     }
 
     /// Chromium/Electron: Unicode-события игнорируют (см. F6 и открытый репорт по Workflowy).
