@@ -177,6 +177,13 @@ final class AppSettings {
         get { d.object(forKey: "inlineLiveFix") == nil ? true : d.bool(forKey: "inlineLiveFix") }
         set { d.set(newValue, forKey: "inlineLiveFix") }
     }
+    /// Второй проход Whisper с «контекстными» словами: если в расшифровке есть слово, похожее на
+    /// частое слово человека (экран, недавние диктовки, словарь), фраза распознаётся ещё раз с ними
+    /// в затравке. По умолчанию включено; выключено — ни сбора источников, ни второго прохода.
+    var voiceContextRefine: Bool {
+        get { d.object(forKey: "voiceContextRefine") == nil ? true : d.bool(forKey: "voiceContextRefine") }
+        set { d.set(newValue, forKey: "voiceContextRefine") }
+    }
     /// Обучение на отмене (см. UndoLearner). Ключ читается и напрямую в UndoLearner.enabled.
     var learnOnUndoEnabled: Bool { get { d.bool(forKey: "learnOnUndoEnabled") } set { d.set(newValue, forKey: "learnOnUndoEnabled") } }
     var soundEnabled: Bool { get { d.bool(forKey: Key.sound) } set { d.set(newValue, forKey: Key.sound) } }

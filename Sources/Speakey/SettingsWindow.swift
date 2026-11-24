@@ -3313,6 +3313,8 @@ final class DetailVC: NSViewController {
                 switchRow(L10n.t("voice.sound"), L10n.t("voice.soundSub"), settings.voiceSoundEnabled,
                           #selector(toggleVoiceSound), help: L10n.t("voice.soundHelp"), key: "voice.sound"),
                 makeVolumeBox(),
+                switchRow(L10n.t("voice.contextRefine"), L10n.t("voice.contextRefineSub"), settings.voiceContextRefine,
+                          #selector(toggleContextRefine), help: L10n.t("voice.contextRefineHelp"), key: "voice.contextRefine"),
                 // «Как вставлять текст» больше НЕ висит отдельной ссылкой между карточкой и
                 // заголовком — она была там сиротой, без карточки и без заголовка. Теперь это
                 // обычная строка внутри «Диктовки», а четыре правила выезжают под ней.
@@ -4412,6 +4414,10 @@ final class DetailVC: NSViewController {
         settings.voiceMicGainLevel = v
         micGainValueLabel?.stringValue = "\(v)%"
     }
+    @objc private func toggleContextRefine(_ s: NSSwitch) {
+        settings.voiceContextRefine = (s.state == .on)
+    }
+
     @objc private func toggleMicGain(_ s: NSSwitch) {
         settings.voiceMicGain = (s.state == .on)
         DispatchQueue.main.async { [weak self] in self?.reshow() }   // строка уровня гаснет/зажигается

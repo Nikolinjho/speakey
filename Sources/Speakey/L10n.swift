@@ -204,6 +204,11 @@ enum L10n {
         // «Уровень», а не «громкость» (автор, 09.08): громкость у нас означает то, что СЛЫШНО, а это
         // настройка чувствительности входа. Слово разводит две вещи ещё до того, как человек полез
         // в подсказку.
+        "voice.contextRefine": [.ru: "Уточнять по контексту", .en: "Refine with context"],
+        "voice.contextRefineSub": [.ru: "Перепроверяю слова, похожие на ваши частые",
+                                   .en: "Double-checks words that resemble your frequent ones"],
+        "voice.contextRefineHelp": [.ru: "Если в расшифровке есть слово, похожее на ваши частые слова, фраза распознаётся ещё раз с ними. Добавляет до секунды.",
+                                    .en: "If the transcript has a word that resembles your frequent words, the phrase is recognized once more with them. Adds up to a second."],
         "voice.micGain":      [.ru: "Поднимать уровень микрофона",
                                .en: "Raise the microphone input level"],
         "voice.micGainSub":   [.ru: "Перед диктовкой выставляю системный уровень входа и оставляю его",

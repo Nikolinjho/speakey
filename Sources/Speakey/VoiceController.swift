@@ -28,6 +28,12 @@ final class VoiceController {
     private var transcribing = 0   // сколько клипов сейчас в транскрипции (для индикатора)
     private var transcribeGen = 0              // генерации задач транскрипции (main-only)
     private var liveTranscriptions = Set<Int>()  // ещё не завершившиеся генерации (main-only)
+    /// Бюджет сторожа (секунды) по поколению. Ветка whisper читает его, чтобы решить, хватит ли
+    /// времени на второй проход. Запись убирается вместе с поколением (endTranscription / сторож).
+    private var transcriptionBudgets = [Int: Double]()   // main-only
+    /// Приложение, куда пойдёт диктовка, зафиксированное в начале записи (main-only): к концу
+    /// записи фокус мог уйти, а источники контекста нужны именно от того окна.
+    private var recordingTarget: (pid: pid_t, bundleID: String)?
     /// Поколения, которые надо положить ТОЛЬКО в историю, без вставки в поле (отмена по Escape, R37).
     private var historyOnlyGens = Set<Int>()
 
@@ -262,6 +268,13 @@ final class VoiceController {
             // recorder.start(), и первые слова ушли бы с прежней громкостью. Функция выключена по
             // умолчанию и на устройствах без регулятора молча ничего не делает.
             DictationContext.prepare()   // снимок текста экрана для затравки (если включено)
+            // Куда пойдёт диктовка — фиксируем сейчас, источники слов соберём на main перед
+            // распознаванием. Выключенный переключатель: ничего не запоминаем и не собираем.
+            if settings.voiceContextRefine, let app = NSWorkspace.shared.frontmostApplication {
+                recordingTarget = (app.processIdentifier, app.bundleIdentifier ?? "")
+            } else {
+                recordingTarget = nil
+            }
             MicVolume.raiseIfEnabled()
             do {
                 try recorder.start()
@@ -437,10 +450,44 @@ final class VoiceController {
             return
         }
         // whisper — строго по одному (serial queue): новая ЗАПИСЬ при этом не блокируется.
+        // Источники слов для второго прохода собираем ЗДЕСЬ, на main (AX/кэши экрана main-only), до
+        // ухода в transcribeQueue. Переключатель выключен — `recordingTarget` пуст, ничего не
+        // собираем, и поведение прежнее. Бюджет сторожа берём из словаря, а не пересчитываем.
+        let contextTarget = recordingTarget
+        recordingTarget = nil
+        let contextSources: [ContextSource] = contextTarget.map { DictationContext.sources(pid: $0.pid, bundleID: $0.bundleID) } ?? []
+        let watchdogBudget = transcriptionBudgets[gen] ?? 15
         transcribeQueue.async { [weak self] in
             guard let self else { return }
             let modelReady = self.whisper != nil
-            let text = self.whisper?.transcribe(samples: samples, language: lang, diagnostics: diagnostics) ?? ""
+            var text = ""
+            if let w = self.whisper {
+                let t1Start = CFAbsoluteTimeGetCurrent()
+                let first = w.transcribe(samples: samples, language: lang, diagnostics: diagnostics) ?? ""
+                text = first
+                if !contextSources.isEmpty {
+                    let firstSeconds = CFAbsoluteTimeGetCurrent() - t1Start
+                    let candidates = ContextLexicon.candidates(for: first, sources: contextSources, limit: 8)
+                    let run = ContextualRedecode.shouldRunSecondPass(firstPassSeconds: firstSeconds, timeoutSeconds: watchdogBudget, candidateCount: candidates.count)
+                    var accepted = false
+                    var secondMs = 0
+                    if run {
+                        // Второй проход с найденными словами в затравке. Принимаем его, только если
+                        // `accept` подтвердил, что он правит ровно кандидатов, а не переписал фразу.
+                        let t2Start = CFAbsoluteTimeGetCurrent()
+                        let second = w.transcribe(samples: samples, language: lang, contextWords: candidates.map { $0.word }, diagnostics: diagnostics) ?? ""
+                        secondMs = Int((CFAbsoluteTimeGetCurrent() - t2Start) * 1000)
+                        accepted = ContextualRedecode.accept(first: first, second: second, candidates: candidates)
+                        if accepted { text = second }
+                    }
+                    let firstMs = Int(firstSeconds * 1000)
+                    // Только числа и флаги — ни слов, ни текста (ни в лог, ни в диагностику).
+                    diagnostics?.record("context_refine", metadata: [
+                        "candidates": String(candidates.count), "secondPass": String(run), "accepted": String(accepted),
+                        "firstMs": String(firstMs), "secondMs": String(secondMs)])
+                    kbLog("voice: context_refine candidates=\(candidates.count) secondPass=\(run) accepted=\(accepted) firstMs=\(firstMs) secondMs=\(secondMs)")
+                }
+            }
             kbLog("voice: whisper(модель=\(modelReady ? "ок" : "НЕТ"), \(lang)) → \(text.count) симв.")
             let clip = VoiceClips.save(samples: samples)   // фон, не главный поток (см. ветку parakeet)
             DispatchQueue.main.async {
@@ -463,8 +510,10 @@ final class VoiceController {
         liveTranscriptions.insert(gen)
         var timeout = min(90, max(15, duration * 1.5))   // Parakeet/ANE — секунды; whisper растёт с длиной клипа
         if coldLoad { timeout += 60 }                    // +бюджет на холодную загрузку модели с диска
+        transcriptionBudgets[gen] = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
             guard let self, self.liveTranscriptions.remove(gen) != nil else { return }
+            self.transcriptionBudgets[gen] = nil
             diagnostics?.record("watchdog_timeout", metadata: ["timeoutSeconds": String(timeout)])
             SpeechDiagnostics.finish(diagnostics, outcome: "timeout")
             self.transcribing -= 1
@@ -482,6 +531,7 @@ final class VoiceController {
 
     /// true = задача ещё живая (сторож не срабатывал) — результат можно доставлять.
     private func endTranscription(_ gen: Int) -> Bool {
+        transcriptionBudgets[gen] = nil
         guard liveTranscriptions.remove(gen) != nil else { return false }
         transcribing -= 1
         return true
