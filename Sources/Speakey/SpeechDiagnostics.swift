@@ -269,14 +269,18 @@ enum SpeechDiagnostics {
         }
     }
 
-    /// Только на `queue`. В лог — лишь число подтверждённых или «failed», без текста диктовок.
+    /// Только на `queue`. В лог — лишь счётчики (подтверждено, пропущено, нечитаемо) или «failed», без текста диктовок.
     private static func confirmMaturedNow(now: Date, force: Bool) {
         guard enabled else { return }
         if !force, let last = lastConfirmPass, now.timeIntervalSince(last) < 3600 { return }
         do {
-            let count = try reviewStore().confirmMatured(now: now, minimumAge: 12 * 3600)
+            let pass = try reviewStore().confirmMatured(now: now, minimumAge: 12 * 3600)
             lastConfirmPass = now   // метка только после успеха: при сбое следующий триггер повторит проход
-            if count > 0 { NSLog("Speakey speech review: implicitly confirmed %d", count) }
+            if pass.paused { NSLog("Speakey speech review: implicit confirmation paused, refusals quarantined") }
+            if pass.confirmed + pass.skipped + pass.unreadableCorrections > 0 {
+                NSLog("Speakey speech review: implicitly confirmed %d, skipped %d, unreadable corrections %d",
+                      pass.confirmed, pass.skipped, pass.unreadableCorrections)
+            }
         } catch { NSLog("Speakey speech review: implicit confirmation failed") }
     }
 
