@@ -250,8 +250,33 @@ enum SpeechDiagnostics {
                 _ = try store.save(snapshot, authorizePublication: { publish in
                     try policy.performIfCurrent(generation, publish)
                 })
+                // Новый пример мог дозреть вместе с остальными; троттлинг — не чаще раза в час.
+                confirmMaturedNow(now: Date(), force: false)
             } catch { NSLog("Speakey speech diagnostics: persistence failed") }
         }
+    }
+
+    /// Время прошлого прохода неявного подтверждения. Читается и пишется только на `queue`.
+    private static var lastConfirmPass: Date?
+
+    /// Неявное подтверждение созревших примеров. Асинхронно на `queue`; `completion` вызывается
+    /// после прохода (или пропуска) на той же очереди — выгрузка ждёт его, не блокируя главный поток.
+    static func confirmMaturedIfDue(now: Date = Date(), force: Bool = false, completion: (() -> Void)? = nil) {
+        queue.async {
+            confirmMaturedNow(now: now, force: force)
+            completion?()
+        }
+    }
+
+    /// Только на `queue`. В лог — лишь число подтверждённых или «failed», без текста диктовок.
+    private static func confirmMaturedNow(now: Date, force: Bool) {
+        guard enabled else { return }
+        if !force, let last = lastConfirmPass, now.timeIntervalSince(last) < 3600 { return }
+        lastConfirmPass = now
+        do {
+            let count = try reviewStore().confirmMatured(now: now, minimumAge: 12 * 3600)
+            if count > 0 { NSLog("Speakey speech review: implicitly confirmed %d", count) }
+        } catch { NSLog("Speakey speech review: implicit confirmation failed") }
     }
 
     static func deleteCollected(policy: SpeechCollectionPolicy, completion: @escaping (Bool) -> Void) {

@@ -990,6 +990,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+
+        // Неявное подтверждение созревших диктовок (12 ч без правки): на старте, вне главного потока.
+        SpeechDiagnostics.confirmMaturedIfDue(force: true)
     }
 
     /// Повторный запуск уже работающего приложения (двойной клик по .app, пока оно

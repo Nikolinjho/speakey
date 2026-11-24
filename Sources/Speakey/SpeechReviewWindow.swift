@@ -164,8 +164,11 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
         let item = items[row]
         let label = NSTextField(wrappingLabelWithString: "\(creationDateText(item.createdAt))\n\(item.id.uuidString)")
         label.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        let badge = NSTextField(labelWithString: item.hasSavedCorrection
-            ? "✓ " + L10n.t("review.badgeSaved") : L10n.t("review.badgePending"))
+        let badgeText: String
+        if !item.hasSavedCorrection { badgeText = L10n.t("review.badgePending") }
+        else if item.source == "implicit" { badgeText = L10n.t("review.badgeAuto") }
+        else { badgeText = "✓ " + L10n.t("review.badgeSaved") }
+        let badge = NSTextField(labelWithString: badgeText)
         badge.font = .systemFont(ofSize: 11, weight: .medium)
         badge.textColor = item.hasSavedCorrection ? .systemGreen : .secondaryLabelColor
         let row = NSStackView(views: [label, badge])
@@ -231,14 +234,16 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
             edited.string = correction.editedText
             silence.state = correction.silence ? .on : .off
         }
-        status.stringValue = L10n.t(hasCorrection ? "review.saved" : "review.unconfirmed")
-        updateSavedBadge(id: document.snapshot.id, saved: hasCorrection)
+        let isAuto = document.correction?.source == "implicit"
+        status.stringValue = L10n.t(hasCorrection ? (isAuto ? "review.savedAuto" : "review.saved") : "review.unconfirmed")
+        updateSavedBadge(id: document.snapshot.id, saved: hasCorrection, source: document.correction?.source)
         updateControls()
     }
 
-    private func updateSavedBadge(id: UUID, saved: Bool) {
+    private func updateSavedBadge(id: UUID, saved: Bool, source: String? = nil) {
         guard let index = items.firstIndex(where: { $0.id == id }) else { return }
         items[index].hasSavedCorrection = saved
+        items[index].source = saved ? source : nil
         table.reloadData(forRowIndexes: IndexSet(integer: index), columnIndexes: IndexSet(integer: 0))
     }
 
@@ -322,7 +327,7 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
             try store.saveConfirmed(id: id, reference: text, editedText: editedText, silence: isSilence)
         } completion: { [weak self] in
             self?.hasCorrection = true
-            self?.updateSavedBadge(id: id, saved: true)
+            self?.updateSavedBadge(id: id, saved: true, source: "explicit")
         }
     }
 
@@ -386,6 +391,10 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
             self.busy = true
             self.updateControls()
             self.worker.async { [weak self, store = self.store] in
+                // Перед выгрузкой — принудительный проход подтверждения; ждём его на воркере, не на главном потоке.
+                let passDone = DispatchSemaphore(value: 0)
+                SpeechDiagnostics.confirmMaturedIfDue(force: true) { passDone.signal() }
+                passDone.wait()
                 let result = Result { try store.exportConfirmed(to: output) }
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == token else { return }
@@ -420,13 +429,5 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
         clearDocument()
         items = []
         table.reloadData()
-    }
-}
-
-extension SpeechDiagnostics {
-    static func reviewStore() -> SpeechReviewStore {
-        SpeechReviewStore(diagnosticsDirectory: reviewDirectory,
-                          correctionsDirectory: reviewDirectory.deletingLastPathComponent().appendingPathComponent("speech-corrections", isDirectory: true),
-                          keyProvider: existingKeyForExport)
     }
 }

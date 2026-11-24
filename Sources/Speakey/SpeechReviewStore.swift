@@ -424,3 +424,11 @@ struct SpeechReviewStore {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }
+
+extension SpeechDiagnostics {
+    static func reviewStore() -> SpeechReviewStore {
+        SpeechReviewStore(diagnosticsDirectory: reviewDirectory,
+                          correctionsDirectory: reviewDirectory.deletingLastPathComponent().appendingPathComponent("speech-corrections", isDirectory: true),
+                          keyProvider: existingKeyForExport)
+    }
+}
