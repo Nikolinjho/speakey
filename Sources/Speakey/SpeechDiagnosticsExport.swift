@@ -136,7 +136,8 @@ enum SpeechFloatWAV {
 struct SpeechCLIArguments {
     let command: String
     let engine: String
-    let input: URL
+    /// Вход есть у `export` и `transcribe`; у `vocabulary` его нет (словарь берётся из корпуса).
+    let input: URL?
     let output: URL
     let model: URL?
     let language: String?
@@ -145,19 +146,29 @@ struct SpeechCLIArguments {
     /// Детерминированное декодирование (`temperature_inc = 0`); только для `transcribe` + `whisper`.
     let deterministic: Bool
 
+    func requireInput() throws -> URL {
+        guard let input else { throw SpeechDiagnosticsExport.Failure.invalidArguments }
+        return input
+    }
+
     static func parse(_ arguments: [String]) throws -> Self {
-        guard let command = arguments.first, ["export", "transcribe"].contains(command), arguments.count % 2 == 1 else {
+        guard let command = arguments.first, ["export", "transcribe", "vocabulary"].contains(command), arguments.count % 2 == 1 else {
             throw SpeechDiagnosticsExport.Failure.invalidArguments
         }
-        let required: Set<String> = command == "export" ? ["--input", "--output"] : ["--input", "--output", "--model", "--language"]
-        let allowed = command == "export" ? required : required.union(["--engine", "--context", "--deterministic"])
+        let required: Set<String>
+        switch command {
+        case "export": required = ["--input", "--output"]
+        case "vocabulary": required = ["--output"]   // словарь корпуса для стенда: только куда писать
+        default: required = ["--input", "--output", "--model", "--language"]
+        }
+        let allowed = command == "transcribe" ? required.union(["--engine", "--context", "--deterministic"]) : required
         var values: [String: String] = [:]
         for index in stride(from: 1, to: arguments.count, by: 2) {
             let name = arguments[index], value = arguments[index + 1]
             guard allowed.contains(name), values[name] == nil, !value.isEmpty else { throw SpeechDiagnosticsExport.Failure.invalidArguments }
             values[name] = value
         }
-        guard required.isSubset(of: Set(values.keys)), let input = values["--input"], let output = values["--output"] else {
+        guard required.isSubset(of: Set(values.keys)), let output = values["--output"] else {
             throw SpeechDiagnosticsExport.Failure.invalidArguments
         }
         if command == "transcribe", !["ru", "en", "auto"].contains(values["--language"] ?? "") {
@@ -171,7 +182,7 @@ struct SpeechCLIArguments {
         if (values["--context"] != nil || deterministicValue != nil) && (command != "transcribe" || engine != "whisper") {
             throw SpeechDiagnosticsExport.Failure.invalidArguments
         }
-        return Self(command: command, engine: engine, input: URL(fileURLWithPath: input), output: URL(fileURLWithPath: output),
+        return Self(command: command, engine: engine, input: values["--input"].map { URL(fileURLWithPath: $0) }, output: URL(fileURLWithPath: output),
                     model: values["--model"].map { URL(fileURLWithPath: $0) }, language: values["--language"],
                     context: values["--context"].map { URL(fileURLWithPath: $0) }, deterministic: deterministicValue == "1")
     }

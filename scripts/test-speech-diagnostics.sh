@@ -23,7 +23,10 @@ args = Path('Sources/Speakey/SpeechDiagnosticsExport.swift').read_text()
 assert 'temperature_inc = deterministic ? 0 : 0.2' in whisper, 'deterministic switch must only change temperature_inc'
 assert 'var deterministic = false' in whisper, 'app default must stay non-deterministic'
 assert 'bridge.deterministic = options.deterministic' in cli, 'CLI must forward --deterministic'
-assert 'ContextualRedecode.accept(' in cli and 'limit: 8' in cli, 'CLI second pass must use the app acceptance rule and limit'
+assert 'ContextualRedecode.shouldDeliver(' in cli and 'limit: 8' in cli, 'CLI second pass must use the app delivery rule and limit'
+assert 'ContextualRedecode.shouldDeliver(' in controller, 'app must deliver T2 only via the shared rule'
+assert cli.count('ContextLexicon.bundledCommonWords') == 1 and 'ContextLexicon.bundledCommonWords' in controller, 'app and CLI must share the common-word filter'
+assert 'record("context_second_pass"' in controller, 'second pass must be marked in the trace before T2'
 assert '"--context", "--deterministic"' in args and 'engine != "whisper"' in args, 'context flags are transcribe+whisper only'
 print('PASS: batch trace wiring and raw-before-cleanup source checks (not an ASR runtime test)')
 PY

@@ -195,6 +195,15 @@ Qwen загружает только проверенные локальные �
 
 Замер второго прохода Whisper с контекстом. Прогоны «как сейчас» и «с контекстом» запускай с `--deterministic` (`temperature_inc = 0`), иначе разница шумит от случайного fallback. Флаг пишется в `run.json`.
 
+Словарь личного корпуса выгружает проверочная сборка Speakey. Корпус зашифрован, ключ читается из Keychain без диалога:
+
+```bash
+SPEAKEY_SPEECH_CLI=1 /private/tmp/Speakey_speech_evaluation.app/Contents/MacOS/Speakey \
+  vocabulary --output /path/to/private/vocabulary.json
+```
+
+Получится новый файл `{"слово": число}` с правами `0600`, без надбавки за приложение. Существующий файл не перезаписывается. Путь внутри репозитория Speakey или любого другого git-репозитория отклоняется. В stdout печатается только число слов. Без файла корпуса команда завершается ошибкой и не создаёт ключ в Keychain.
+
 ```bash
 python3 -m Tools.SpeechEvaluation.context build /path/to/manifest.jsonl \
   --output-dir /path/to/new-context [--corpus-vocabulary /path/to/vocabulary.json]
@@ -206,7 +215,7 @@ python3 -m Tools.SpeechEvaluation.runners /path/to/manifest.jsonl --engine whisp
 ```
 
 - `context.py build` создаёт по файлу на запись: эталоны до 3 предыдущих записей той же `session_id` (по `created_at`, если он есть у всех записей сессии, иначе по порядку) как `screen`, плюс словарь корпуса `{"слово": число}` как `corpus`. Сама запись в свой контекст не входит.
-- `--context-dir` передаёт CLI `--context <файл записи>`. В CLI второй проход идёт при любых кандидатах (до 8), без бюджета времени приложения; это записано в `run.json` как `second_pass_policy`. Принимает его то же правило `ContextualRedecode.accept`. В `run.json` по каждой записи: число кандидатов, `second_pass`, `accepted`, `first_ms`, `second_ms`. Слова кандидатов хранятся только в приватном ответе CLI.
+- `--context-dir` передаёт CLI `--context <файл записи>`. В CLI второй проход идёт при любых кандидатах (до 8), без бюджета времени приложения; это записано в `run.json` как `second_pass_policy`. Принимает его то же правило, что в приложении (`ContextualRedecode.shouldDeliver`): правка только на кандидатов и хотя бы одно изменённое слово. T2 с теми же словами в другом оформлении не принимается. Кандидаты, которые сами обычные слова языка (`words_ru.json`, `words_en.json` из ресурсов сборки), отбрасываются так же, как в приложении. В `run.json` по каждой записи: число кандидатов, `second_pass`, `accepted`, `first_ms`, `second_ms`. Слова кандидатов хранятся только в приватном ответе CLI.
 - `--split all` берёт все записи манифеста. `--context` и `--deterministic` доступны только для Whisper.
 
 Сравнение двух отчётов `evaluate.py evaluate` по одним записям:

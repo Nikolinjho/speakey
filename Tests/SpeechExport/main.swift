@@ -126,6 +126,49 @@ let callsBeforeEmpty = WhisperBridge.calls
 check(await SpeechEvaluationCLI.run(arguments: emptyArgs) == 0 && WhisperBridge.calls == callsBeforeEmpty + 1, "Без кандидатов второго прохода нет")
 let emptyDoc = try JSONSerialization.jsonObject(with: Data(contentsOf: emptyOut)) as! [String: Any]
 check(emptyDoc["second_pass"] as? Bool == false && emptyDoc["accepted"] as? Bool == false && (emptyDoc["context_candidates"] as? [String])?.isEmpty == true, "Пустой контекст: второго прохода нет")
+// T2 с теми же словами (другой регистр/пунктуация) не подменяет T1: уточнение меняет слова, не оформление.
+WhisperBridge.secondText = "результат."
+let sameWordsOut = root.appendingPathComponent("same-words.json")
+var sameWordsArgs = contextArgs
+sameWordsArgs[sameWordsArgs.firstIndex(of: contextOut.path)!] = sameWordsOut.path
+try Data(#"{"sources":[{"kind":"corpus","words":{"Результаты":3}}]}"#.utf8).write(to: contextFile, options: .atomic)
+check(await SpeechEvaluationCLI.run(arguments: sameWordsArgs) == 0, "CLI с T2 без изменённых слов отрабатывает")
+let sameWordsDoc = try JSONSerialization.jsonObject(with: Data(contentsOf: sameWordsOut)) as! [String: Any]
+check(sameWordsDoc["second_pass"] as? Bool == true && sameWordsDoc["accepted"] as? Bool == false
+      && sameWordsDoc["hypothesis"] as? String == "Результат", "T2 без изменённых слов не принимается, гипотеза — T1")
+WhisperBridge.secondText = "Результаты"
+
+// vocabulary: словарь корпуса для context.py, только в новый файл 0600 вне репозитория.
+let vocabularyArgs = try SpeechCLIArguments.parse(["vocabulary", "--output", "v.json"])
+check(vocabularyArgs.command == "vocabulary" && vocabularyArgs.input == nil && vocabularyArgs.output.lastPathComponent == "v.json", "CLI разбирает vocabulary")
+rejects("vocabulary без --output") { _ = try SpeechCLIArguments.parse(["vocabulary"]) }
+rejects("vocabulary не принимает --input") { _ = try SpeechCLIArguments.parse(["vocabulary", "--output", "v.json", "--input", "a"]) }
+rejects("vocabulary не принимает --context") { _ = try SpeechCLIArguments.parse(["vocabulary", "--output", "v.json", "--context", "c.json"]) }
+rejects("transcribe без --input") { _ = try SpeechCLIArguments.parse(["transcribe", "--output", "o.json", "--model", "m.bin", "--language", "ru"]) }
+let unavailableOut = root.appendingPathComponent("vocabulary-unavailable.json")
+check(await SpeechEvaluationCLI.run(arguments: ["vocabulary", "--output", unavailableOut.path]) == 1
+      && !FileManager.default.fileExists(atPath: unavailableOut.path), "Нет корпуса — ошибка без файла")
+SpeechEvaluationCLI.vocabularyProvider = { ["DPR": 3, "подборок": 4] }
+let vocabularyOut = root.appendingPathComponent("vocabulary.json")
+check(await SpeechEvaluationCLI.run(arguments: ["vocabulary", "--output", vocabularyOut.path]) == 0, "vocabulary пишет словарь")
+let vocabularyDoc = try JSONSerialization.jsonObject(with: Data(contentsOf: vocabularyOut)) as? [String: Int]
+check(vocabularyDoc == ["DPR": 3, "подборок": 4], "Словарь в формате context.py: слово → число")
+let vocabularyAttributes = try FileManager.default.attributesOfItem(atPath: vocabularyOut.path)
+check((vocabularyAttributes[.posixPermissions] as! NSNumber).intValue == 0o600, "Права словаря 600")
+check(await SpeechEvaluationCLI.run(arguments: ["vocabulary", "--output", vocabularyOut.path]) == 1, "vocabulary не перезаписывает файл")
+let inRepository = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("vocabulary-\(UUID().uuidString).json")
+check(await SpeechEvaluationCLI.run(arguments: ["vocabulary", "--output", inRepository.path]) == 1
+      && !FileManager.default.fileExists(atPath: inRepository.path), "vocabulary не пишет в репозиторий")
+let fakeRepository = root.appendingPathComponent("fake-repository")
+try FileManager.default.createDirectory(at: fakeRepository.appendingPathComponent(".git"), withIntermediateDirectories: true)
+try FileManager.default.createDirectory(at: fakeRepository.appendingPathComponent("nested"), withIntermediateDirectories: true)
+let inFakeRepository = fakeRepository.appendingPathComponent("nested/vocabulary.json")
+check(await SpeechEvaluationCLI.run(arguments: ["vocabulary", "--output", inFakeRepository.path]) == 1
+      && !FileManager.default.fileExists(atPath: inFakeRepository.path), "vocabulary не пишет внутрь git-репозитория")
+check(SpeechEvaluationCLI.isInsideRepository(URL(fileURLWithPath: "/private/tmp/new-vocabulary.json"), repository: fakeRepository) == false,
+      "Путь вне репозиториев разрешён")
+print("PASS: vocabulary command arguments, 0600 private file, no overwrite, refuses repositories")
+
 WhisperBridge.fail = true
 let failedReplay = root.appendingPathComponent("failed.json")
 var failedArgs = replayArgs

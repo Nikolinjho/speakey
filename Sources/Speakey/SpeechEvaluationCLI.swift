@@ -4,14 +4,16 @@ import CryptoKit
 /// Локальный повтор через тот же WhisperBridge, с явным отсутствием личного словаря.
 /// Это ASR + удаление эха затравки, без VoiceController и дальнейших исправлений текста.
 enum SpeechEvaluationCLI {
-    enum Failure: Error { case modelUnavailable, inferenceFailed }
+    enum Failure: Error { case modelUnavailable, inferenceFailed, corpusUnavailable, outputInRepository }
 
     static func run(arguments: [String], parakeetLoad: SpeechParakeetEvaluation.Loader = SpeechParakeetEvaluation.loadLocal) async -> Int32 {
         do {
             let options = try SpeechCLIArguments.parse(arguments)
             if options.command == "export" {
-                try SpeechDiagnosticsExport.export(encrypted: options.input, output: options.output,
+                try SpeechDiagnosticsExport.export(encrypted: try options.requireInput(), output: options.output,
                                                    keyProvider: SpeechDiagnostics.existingKeyForExport)
+            } else if options.command == "vocabulary" {
+                try exportVocabulary(to: options.output)
             } else if options.engine == "parakeet" {
                 try await transcribeParakeet(options, load: parakeetLoad)
             } else {
@@ -29,10 +31,11 @@ enum SpeechEvaluationCLI {
         guard !FileManager.default.fileExists(atPath: options.output.path) else { throw SpeechDiagnosticsExport.Failure.outputExists }
         guard let model = options.model, let language = options.language,
               try model.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile == true else { throw Failure.modelUnavailable }
-        let audioFile = try options.input.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        let inputURL = try options.requireInput()
+        let audioFile = try inputURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard audioFile.isRegularFile == true, let fileSize = audioFile.fileSize,
               fileSize <= SpeechFloatWAV.maximumByteCount else { throw SpeechDiagnosticsExport.Failure.invalidAudio }
-        let input = try Data(contentsOf: options.input)
+        let input = try Data(contentsOf: inputURL)
         let samples = try SpeechFloatWAV.read(input)
         guard samples.count <= Int(Int32.max) else { throw SpeechDiagnosticsExport.Failure.invalidAudio }
         let modelHash = try sha256(file: model)
@@ -57,7 +60,9 @@ enum SpeechEvaluationCLI {
         var contextReport: [String: Any] = [:]
         if let contextSources {
             // Второй проход идёт при любых кандидатах, без бюджета времени приложения: замер должен видеть эффект.
-            let candidates = ContextLexicon.candidates(for: firstText, sources: contextSources, limit: 8)
+            // Фильтр обычных слов — те же списки из ресурсов сборки, что в приложении.
+            let candidates = ContextLexicon.candidates(for: firstText, sources: contextSources, limit: 8,
+                                                       commonWords: ContextLexicon.bundledCommonWords)
             var secondRan = false, accepted = false
             var secondMs = 0
             if !candidates.isEmpty {
@@ -67,7 +72,9 @@ enum SpeechEvaluationCLI {
                 secondMs = Int((ProcessInfo.processInfo.systemUptime - secondStart) * 1000)
                 let secondSnapshot = secondTrace.snapshot(outcome: "replay")
                 secondRan = secondSnapshot.events.last(where: { $0.stage == "whisper_result" })?.metadata["returnCode"] == "0"
-                accepted = secondRan && ContextualRedecode.accept(first: firstText, second: second, candidates: candidates)
+                // `accepted` здесь — то же, что доставка в приложении: правило приёма и хотя бы одно
+                // изменённое слово. T2 с теми же словами не подменяет оформление T1.
+                accepted = secondRan && ContextualRedecode.shouldDeliver(first: firstText, second: second, candidates: candidates)
                 if accepted {
                     hypothesis = second
                     rawHypothesis = secondSnapshot.events.last(where: { $0.stage == "whisper_raw" })?.text ?? rawHypothesis
@@ -102,6 +109,48 @@ enum SpeechEvaluationCLI {
         try SpeechDiagnosticsExport.writeNew(data, to: options.output)
     }
 
+    /// Откуда CLI берёт словарь корпуса. В проверочной сборке тестов корпуса нет — тест подставляет свой.
+    #if SPEAKEY_SPEECH_TEST
+    static var vocabularyProvider: () throws -> [String: Int] = { throw Failure.corpusUnavailable }
+    #else
+    static var vocabularyProvider: () throws -> [String: Int] = {
+        // Без файла корпуса не трогаем Keychain: `PersonalCorpus` создал бы там новый ключ.
+        guard PersonalCorpus.defaultCorpusExists else { throw Failure.corpusUnavailable }
+        let words = PersonalCorpus.shared.vocabulary(bundleID: nil)
+        guard !words.isEmpty else { throw Failure.corpusUnavailable }
+        return words
+    }
+    #endif
+
+    /// Репозиторий, из которого собран CLI: туда личные файлы не пишем никогда.
+    static let sourceRepository = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+
+    /// Путь внутри репозитория сборки или любого git-репозитория (есть `.git` у предка).
+    static func isInsideRepository(_ output: URL, repository: URL = sourceRepository) -> Bool {
+        let parent = output.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+        let root = repository.resolvingSymlinksInPath().standardizedFileURL.path
+        if parent.path == root || parent.path.hasPrefix(root + "/") { return true }
+        var directory = parent
+        while directory.path != "/" {
+            if FileManager.default.fileExists(atPath: directory.appendingPathComponent(".git").path) { return true }
+            directory.deleteLastPathComponent()
+        }
+        return false
+    }
+
+    /// `vocabulary --output <файл>`: словарь корпуса `{"слово": число}` для `context.py build
+    /// --corpus-vocabulary`. Без надбавки приложения. Файл новый, `0600`, вне репозитория. В stdout —
+    /// только число слов, сами слова не печатаются нигде.
+    static func exportVocabulary(to output: URL) throws {
+        guard !isInsideRepository(output) else { throw Failure.outputInRepository }
+        guard !FileManager.default.fileExists(atPath: output.path) else { throw SpeechDiagnosticsExport.Failure.outputExists }
+        let words = try vocabularyProvider()
+        let data = try JSONSerialization.data(withJSONObject: words, options: [.sortedKeys])
+        try SpeechDiagnosticsExport.writeNew(data, to: output)
+        print("{\"words\":\(words.count)}")
+    }
+
     /// Файл `{"sources":[{"kind":"corpus","words":{"DPR":3}}]}`. Содержимое не печатается.
     static func loadContext(_ url: URL) throws -> [ContextSource] {
         let values = try url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
@@ -120,10 +169,11 @@ enum SpeechEvaluationCLI {
     private static func transcribeParakeet(_ options: SpeechCLIArguments, load: SpeechParakeetEvaluation.Loader) async throws {
         guard !FileManager.default.fileExists(atPath: options.output.path) else { throw SpeechDiagnosticsExport.Failure.outputExists }
         guard let directory = options.model, let language = options.language else { throw Failure.modelUnavailable }
-        let audioFile = try options.input.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        let inputURL = try options.requireInput()
+        let audioFile = try inputURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
         guard audioFile.isRegularFile == true, let fileSize = audioFile.fileSize,
               fileSize <= SpeechFloatWAV.maximumByteCount else { throw SpeechDiagnosticsExport.Failure.invalidAudio }
-        let input = try Data(contentsOf: options.input)
+        let input = try Data(contentsOf: inputURL)
         let samples = try SpeechFloatWAV.read(input)
         let replay = try await SpeechParakeetEvaluation.transcribe(samples: samples, language: language, directory: directory, load: load)
         var config = replay.configuration
