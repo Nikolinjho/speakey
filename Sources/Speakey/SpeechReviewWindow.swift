@@ -396,9 +396,12 @@ final class SpeechReviewWindowController: NSWindowController, NSWindowDelegate, 
                 SpeechDiagnostics.confirmMaturedIfDue(force: true) { passDone.signal() }
                 passDone.wait()
                 let result = Result { try store.exportConfirmed(to: output) }
+                // Проход мог подтвердить строки: перечитываем метки, не сбрасывая выбор и редактор.
+                let listed = try? store.list()
                 DispatchQueue.main.async { [weak self] in
                     guard let self, self.generation == token else { return }
                     self.busy = false
+                    for item in listed ?? [] { self.updateSavedBadge(id: item.id, saved: item.hasSavedCorrection, source: item.source) }
                     switch result {
                     case .success(let count): self.status.stringValue = String(format: L10n.t("review.exported"), count)
                     case .failure(let error): self.status.stringValue = self.errorMessage(error, fallback: "review.exportFailed")
