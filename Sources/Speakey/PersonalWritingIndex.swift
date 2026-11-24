@@ -30,6 +30,11 @@ final class PersonalWritingIndex {
         var count = 0
         var forms: [String: Int] = [:]
         var apps: [String: Int] = [:]
+        mutating func add(form: String, app: String) {
+            count += 1
+            forms[form, default: 0] += 1
+            apps[app, default: 0] += 1
+        }
     }
     private let documents: [Document]
     private let byID: [UUID: Int]
@@ -37,6 +42,13 @@ final class PersonalWritingIndex {
     private let wordDocuments: [String: Set<Int>]
     private let vocabulary: [String]
     private let termStatistics: [String: Term]
+    /// Слова из 2–3 знаков (DPR, API, SSR) — только для словаря диктовки (`vocabulary`). В частые
+    /// термины автодополнения они не идут: там порог в 4 знака держит выдачу от мусора.
+    private let shortTermStatistics: [String: Term]
+    /// Разложенный для подбора словарь по приложению. Индекс неизменяем, поэтому кэш живёт ровно
+    /// одну версию корпуса: новая версия — новый `PersonalWritingIndex` с пустым кэшем.
+    private let contextLock = NSLock()
+    private var contextIndexes: [String: ContextSourceIndex] = [:]
     private let globalTerms: [String]
     private let appTerms: [String: [String]]
     private static let locale = Locale(identifier: "en_US_POSIX")
@@ -50,6 +62,7 @@ final class PersonalWritingIndex {
         var occurrences: [String: [Occurrence]] = [:]
         var inverted: [String: Set<Int>] = [:]
         var statistics: [String: Term] = [:]
+        var shortStatistics: [String: Term] = [:]
         for record in records {
             let document: Document
             if let old = previous, let position = old.byID[record.id], old.documents[position].record.text.utf8.elementsEqual(record.text.utf8) {
@@ -65,16 +78,20 @@ final class PersonalWritingIndex {
             for word in document.words { inverted[word, default: []].insert(index) }
             for (position, token) in document.tokens.enumerated() {
                 occurrences[token.key, default: []].append(Occurrence(document: index, token: position))
-                guard token.key.count >= 4, Self.significant(token.key) else { continue }
-                var term = statistics[token.key] ?? Term()
-                term.count += 1
-                term.forms[String(record.text[token.range]), default: 0] += 1
-                term.apps[record.bundleID, default: 0] += 1
-                statistics[token.key] = term
+                let form = String(record.text[token.range])
+                if token.key.count >= 4, Self.significant(token.key) {
+                    statistics[token.key, default: Term()].add(form: form, app: record.bundleID)
+                } else if (2...3).contains(token.key.count), !Self.stopWords.contains(token.key),
+                          token.key.contains(where: \.isLetter) {
+                    // Короткие слова отдельно: обычные «на», «мы» отсеет фильтр обычных слов при
+                    // подборе, а аббревиатуры вроде DPR иначе не попали бы в словарь вовсе.
+                    shortStatistics[token.key, default: Term()].add(form: form, app: record.bundleID)
+                }
             }
         }
         documents = docs; byID = ids; postings = occurrences
         wordDocuments = inverted; vocabulary = occurrences.keys.sorted(); termStatistics = statistics
+        shortTermStatistics = shortStatistics
         let eligible = statistics.filter { $0.value.count >= 2 }
         globalTerms = eligible.keys.sorted {
             let a = eligible[$0]!.count, b = eligible[$1]!.count
@@ -117,9 +134,10 @@ final class PersonalWritingIndex {
     /// Написание → вес. Каждая форма слова идёт со своим счётом; с `bundleID` к нему добавляется
     /// доля двойного числа записей в этом приложении, пропорциональная доле формы (минимум 1).
     /// У слова с одним написанием это `count + 2 × count_в_приложении`.
+    /// Сюда же идут короткие слова (2–3 знака), которых нет в `terms`.
     func vocabulary(bundleID: String? = nil) -> [String: Int] {
         var result: [String: Int] = [:]
-        for term in termStatistics.values where term.count > 0 {
+        for term in Array(termStatistics.values) + Array(shortTermStatistics.values) where term.count > 0 {
             let appCount = bundleID.flatMap { term.apps[$0] } ?? 0
             for (form, formCount) in term.forms {
                 let bonus = appCount > 0 ? Int((Double(2 * appCount * formCount) / Double(term.count)).rounded()) : 0
@@ -127,6 +145,20 @@ final class PersonalWritingIndex {
             }
         }
         return result
+    }
+
+    /// Словарь приложения, разложенный для `ContextLexicon`. Считается один раз на версию корпуса и
+    /// приложение; повторная диктовка в том же окне берёт готовое.
+    func contextSource(bundleID: String, keys: ContextKeyCache? = nil) -> ContextSourceIndex {
+        contextLock.lock()
+        if let cached = contextIndexes[bundleID] { contextLock.unlock(); return cached }
+        contextLock.unlock()
+        let built = ContextSourceIndex(ContextSource(kind: .corpus, words: vocabulary(bundleID: bundleID)), keys: keys)
+        contextLock.lock(); defer { contextLock.unlock() }
+        // Приложений немного, но держать индекс на каждое за всю жизнь версии незачем.
+        if contextIndexes.count >= 8 { contextIndexes.removeAll() }
+        contextIndexes[bundleID] = built
+        return built
     }
 
     func profile(before: String, bundleID: String, strength: Int) -> Profile {

@@ -113,8 +113,20 @@ final class PersonalCorpus {
     }
 
     /// Написание → вес для подбора слов при диктовке. Корпус недоступен — пустой словарь.
-    func vocabulary(bundleID: String) -> [String: Int] {
+    /// Без `bundleID` — общий словарь без надбавки приложения (выгрузка для стенда).
+    func vocabulary(bundleID: String?) -> [String: Int] {
         withIndex { $0.vocabulary(bundleID: bundleID) }
+    }
+
+    /// Словарь приложения, готовый для подбора (кэш на версию корпуса). Тяжёлое — не с main.
+    func contextSource(bundleID: String, keys: ContextKeyCache? = nil) -> ContextSourceIndex {
+        withIndex { $0.contextSource(bundleID: bundleID, keys: keys) }
+    }
+
+    /// Есть ли зашифрованный корпус на диске. Нужен CLI, чтобы не создать ключ в Keychain там,
+    /// где корпуса нет (см. `resolveKey`).
+    static var defaultCorpusExists: Bool {
+        FileManager.default.fileExists(atPath: defaultDirectory.appendingPathComponent("corpus.bin").path)
     }
 
     func personalization(before: String, bundleID: String, strength: Int) -> PersonalWritingIndex.Profile {

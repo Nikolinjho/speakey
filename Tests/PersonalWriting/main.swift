@@ -173,5 +173,19 @@ check("Вес приложения делится между написания�
 check("Чужое приложение не добавляет бонус", spellings.vocabulary(bundleID: "chat")["RiverCache"] == 2)
 let emptyCorpus = PersonalCorpus(directory: directory.appendingPathComponent("none"), keyProvider: { nil })
 check("Недоступный корпус отдаёт пустой словарь", emptyCorpus.vocabulary(bundleID: "mail").isEmpty)
+let short = PersonalWritingIndex(records: [
+    sample("Проверь DPR у фоток в подборках", "chat", 1),
+    sample("Снова DPR и API на странице подборок", "chat", 2),
+    sample("на мы 42", "chat", 3)
+])
+check("Корпус даёт короткий термин DPR в словарь диктовки", short.vocabulary(bundleID: nil)["DPR"] == 2)
+check("Короткий термин API в словаре", short.vocabulary(bundleID: "chat")["API"] == 1 + 2)
+check("Короткие слова не попадают в частые термины автодополнения", !short.terms(limit: 50).contains("DPR"))
+check("Числа без букв не становятся словами", short.vocabulary(bundleID: nil)["42"] == nil)
+let shortSource = short.contextSource(bundleID: "chat")
+check("Индекс словаря содержит короткий термин", shortSource.lowers.contains("dpr") && shortSource.kind == .corpus)
+check("Индекс словаря из кэша тот же", short.contextSource(bundleID: "chat").forms.count == shortSource.forms.count)
+check("Из корпуса tpr находит DPR", ContextLexicon.candidates(for: "какое tpr", indexes: [shortSource], limit: 8).first?.word == "DPR")
+check("Корпус отдаёт готовый индекс", corpus.contextSource(bundleID: "chat").kind == .corpus)
 print("personal writing: \(checks) checks, \(failures) failures")
 exit(failures == 0 ? 0 : 1)
