@@ -111,7 +111,7 @@ func checkImplicitConfirmation(root: URL, key: Data) throws {
     let blank = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "  ", output: nil, age: 20 * hour, now: now)
     let noStage = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: nil, output: nil, age: 20 * hour, now: now)
     try check(store.list().allSatisfy { $0.source == nil }, "До прохода ничего не подтверждено")
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 1, "Подтверждается только созревшая вставленная диктовка")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 1, "Подтверждается только созревшая вставленная диктовка")
     let document = try store.load(id: matured)
     try check(document.correction?.reference == "текст диктовки", "Эталон неявного — текст словаря")
     try check(document.correction?.editedText == "Текст диктовки.", "Напечатанный текст — стадия output_options")
@@ -123,24 +123,24 @@ func checkImplicitConfirmation(root: URL, key: Data) throws {
         try check(store.load(id: id).correction == nil, "Неподходящие примеры не подтверждаются")
         try check(store.list().first(where: { $0.id == id })?.source == nil, "Неподтверждённый пример без источника")
     }
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Повторный проход ничего не подтверждает")
-    try check(store.confirmMatured(now: now.addingTimeInterval(2 * hour), minimumAge: minimum) == 1, "Пример подтверждается, когда созреет")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 0, "Повторный проход ничего не подтверждает")
+    try check(store.confirmMatured(now: now.addingTimeInterval(2 * hour), minimumAge: minimum).confirmed == 1, "Пример подтверждается, когда созреет")
     let fallback = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "без оформления", output: nil, age: 13 * hour, now: now)
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 1, "Проход подтверждает пример без output_options")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 1, "Проход подтверждает пример без output_options")
     try check(store.load(id: fallback).correction?.editedText == "без оформления", "Без output_options editedText равен словарю")
 
     try store.saveConfirmed(id: matured, reference: "исправленный текст", editedText: "Исправленный текст.", silence: false)
     let explicit = try store.load(id: matured).correction
     try check(explicit?.source == "explicit" && explicit?.reference == "исправленный текст", "Явная правка перезаписывает неявную")
     try check(store.list().first(where: { $0.id == matured })?.source == "explicit", "Список показывает явный источник")
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Явная правка не затирается проходом")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 0, "Явная правка не затирается проходом")
     try check(store.load(id: matured).correction?.source == "explicit", "Источник остался явным")
 
     // Отказ: удалённая неявная не воскресает, явная правка снимает отказ.
     let refused = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "отказная", output: nil, age: 13 * hour, now: now)
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 1, "Отказной пример сначала подтверждается")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 1, "Отказной пример сначала подтверждается")
     try store.removeCorrection(id: refused)
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Удалённая неявная не подтверждается снова")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 0, "Удалённая неявная не подтверждается снова")
     try check(store.load(id: refused).correction == nil, "После отказа эталона нет")
     let refusals = folder.appendingPathComponent("speech-review-refusals.enc")
     try check(FileManager.default.fileExists(atPath: refusals.path), "Отказы лежат рядом с каталогом эталонов")
@@ -151,7 +151,7 @@ func checkImplicitConfirmation(root: URL, key: Data) throws {
     try check(store.load(id: refused).correction?.source == "explicit", "После отказа явная правка работает")
     // Удаление явного эталона тоже заносит id в отказы.
     try store.removeCorrection(id: refused)
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Любое удаление эталона заносит id в отказы")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 0, "Любое удаление эталона заносит id в отказы")
 
     // Старый JSON без source читается как явный.
     let legacyID = try saveDictation(writer: writer, outcome: "history_only", dictionary: nil, output: nil, age: 0, now: now)
@@ -167,7 +167,7 @@ func checkImplicitConfirmation(root: URL, key: Data) throws {
     try Data(repeating: 1, count: 64).write(to: corruptURL)
     try FileManager.default.setAttributes([.creationDate: now.addingTimeInterval(-20 * hour)], ofItemAtPath: corruptURL.path)
     let good = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "после повреждённого", output: nil, age: 14 * hour, now: now)
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 1, "Повреждённый пример пропускается, остальные подтверждены")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 1, "Повреждённый пример пропускается, остальные подтверждены")
     try check(store.load(id: good).correction?.source == "implicit", "Подходящий пример рядом с повреждённым подтверждён")
 
     // Выгрузка различает источник.
@@ -194,11 +194,11 @@ func checkImplicitConfirmation(root: URL, key: Data) throws {
     // Нечитаемый файл отказов: карантин, неявное выключено, явные действия не блокируются.
     let fresh = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "после порчи", output: nil, age: 13 * hour, now: now)
     try Data(repeating: 9, count: 64).write(to: refusals)
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Нечитаемые отказы выключают неявное подтверждение")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 0, "Нечитаемые отказы выключают неявное подтверждение")
     try check(!FileManager.default.fileExists(atPath: refusals.path), "Нечитаемый файл отказов вынесен")
     let quarantined = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("speech-review-refusals.corrupt-") }
     try check(quarantined.count == 1, "Нечитаемый файл сохранён в карантине")
-    try check(store.confirmMatured(now: now, minimumAge: minimum) == 0, "Без нового файла отказов неявное остаётся выключенным")
+    try check(store.confirmMatured(now: now, minimumAge: minimum).confirmed == 0, "Без нового файла отказов неявное остаётся выключенным")
     try store.saveConfirmed(id: fresh, reference: "явно после порчи", editedText: "", silence: false)
     try check(store.load(id: fresh).correction?.source == "explicit", "Явное сохранение не блокируется порчей отказов")
     try check(FileManager.default.fileExists(atPath: refusals.path), "Явное действие создало новый файл отказов")
@@ -211,6 +211,130 @@ func checkImplicitConfirmation(root: URL, key: Data) throws {
     try check(store.load(id: fresh).correction == nil, "Удалённый после порчи не воскресает")
     print("PASS: неявное подтверждение, отказы, источник эталона, повреждённые примеры, выгрузка")
 }
+/// Ключ с конечным числом выдач: имитирует сбой Keychain посреди операции и считает обращения.
+final class CountingKey {
+    struct Unavailable: Error {}
+    let key: Data
+    var calls = 0
+    var remaining = Int.max
+    init(_ key: Data) { self.key = key }
+    func next() throws -> Data {
+        calls += 1
+        guard remaining > 0 else { throw Unavailable() }
+        remaining -= 1
+        return key
+    }
+}
+
+func quarantinedRefusals(_ folder: URL) throws -> [String] {
+    try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix("speech-review-refusals.corrupt-") }
+}
+
+func checkImplicitPassCost(root: URL, key: Data) throws {
+    let folder = root.appendingPathComponent("implicit-cost")
+    let diagnostics = folder.appendingPathComponent("speech-diagnostics")
+    let corrections = folder.appendingPathComponent("speech-corrections")
+    let writer = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { key })
+    let plain = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })
+    let counter = CountingKey(key)
+    let store = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: counter.next)
+    let now = Date()
+    let hour: TimeInterval = 3600
+    for index in 0..<30 {
+        let id = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "фраза \(index)", output: nil, age: 20 * hour, now: now)
+        try plain.saveConfirmed(id: id, reference: "правка \(index)", editedText: "", silence: false)
+    }
+    try plain.removeCorrection(id: UUID())
+    var fresh: [UUID] = []
+    for index in 0..<3 {
+        fresh.append(try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "новая \(index)", output: nil, age: 13 * hour, now: now))
+    }
+    for _ in 0..<5 { try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "молодая", output: nil, age: hour, now: now) }
+    // Нечитаемый эталон не блокирует проход: пропускается и считается.
+    try Data(repeating: 3, count: 64).write(to: corrections.appendingPathComponent(UUID().uuidString + ".enc"))
+    let pass = try store.confirmMatured(now: now, minimumAge: 12 * hour)
+    try check(pass.confirmed == 3, "Нечитаемый эталон не мешает подтверждать остальные")
+    try check(pass.unreadableCorrections == 1, "Нечитаемые эталоны посчитаны")
+    try check(fresh.allSatisfy { (try? plain.load(id: $0).correction?.source) == "implicit" }, "Созревшие подтверждены неявно")
+    try check(counter.calls <= 2 + pass.confirmed, "Ключ читается ограниченное число раз за проход (\(counter.calls))")
+    counter.calls = 0
+    let idle = try store.confirmMatured(now: now, minimumAge: 12 * hour)
+    try check(idle.confirmed == 0 && counter.calls <= 2, "Холостой проход не расшифровывает эталоны (\(counter.calls))")
+    print("PASS: проход неявного подтверждения читает ключ ограниченно и терпит нечитаемые эталоны")
+}
+
+func checkRefusalsKeyFailure(root: URL, key: Data) throws {
+    let folder = root.appendingPathComponent("refusals-key")
+    let diagnostics = folder.appendingPathComponent("speech-diagnostics")
+    let corrections = folder.appendingPathComponent("speech-corrections")
+    let refusals = folder.appendingPathComponent("speech-review-refusals.enc")
+    let writer = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { key })
+    let plain = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })
+    let counter = CountingKey(key)
+    let flaky = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: counter.next)
+    let now = Date()
+    let hour: TimeInterval = 3600
+    // Старый формат отказов — массив id — продолжает читаться.
+    let refused = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "отказ", output: nil, age: 20 * hour, now: now)
+    try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+    let legacy = try AES.GCM.seal(JSONEncoder().encode([refused]), using: SymmetricKey(data: key)).combined!
+    try legacy.write(to: refusals)
+    let target = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "цель", output: nil, age: 20 * hour, now: now)
+    try plain.saveConfirmed(id: target, reference: "цель", editedText: "", silence: false)
+
+    // Ключ выдан один раз, затем Keychain недоступен: файл отказов не уходит в карантин.
+    counter.remaining = 1
+    rejects("Без ключа отказ не записывается") { try flaky.removeCorrection(id: target) }
+    try check(FileManager.default.fileExists(atPath: refusals.path), "Сбой ключа не выносит файл отказов")
+    try check(quarantinedRefusals(folder).isEmpty, "Сбой ключа не создаёт карантин")
+    try check(plain.load(id: target).correction != nil, "Эталон остаётся при сбое ключа")
+    counter.remaining = 0
+    rejects("Проход без ключа падает, а не пропускает отказы") { _ = try flaky.confirmMatured(now: now, minimumAge: 12 * hour) }
+    try check(quarantinedRefusals(folder).isEmpty, "Недоступный ключ не карантинит отказы при проходе")
+    counter.remaining = 1
+    _ = try? flaky.confirmMatured(now: now, minimumAge: 12 * hour)
+    try check(quarantinedRefusals(folder).isEmpty && FileManager.default.fileExists(atPath: refusals.path), "Проход с одной выдачей ключа не карантинит отказы")
+    _ = try plain.confirmMatured(now: now, minimumAge: 12 * hour)
+    try check(plain.load(id: refused).correction == nil, "Отказ из старого файла соблюдается")
+    try check(quarantinedRefusals(folder).isEmpty, "Старый формат отказов читается без карантина")
+    print("PASS: сбой ключа не уничтожает отказы, старый формат отказов читается")
+}
+
+func checkRefusalsWatermark(root: URL, key: Data) throws {
+    let folder = root.appendingPathComponent("refusals-watermark")
+    let diagnostics = folder.appendingPathComponent("speech-diagnostics")
+    let corrections = folder.appendingPathComponent("speech-corrections")
+    let refusals = folder.appendingPathComponent("speech-review-refusals.enc")
+    let writer = SpeechDiagnosticsStore(directory: diagnostics, enabled: true, keyProvider: { key })
+    let store = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })
+    let now = Date()
+    let hour: TimeInterval = 3600
+    let old = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "до порчи", output: nil, age: 13 * hour, now: now)
+    try store.removeCorrection(id: UUID())
+    try Data(repeating: 9, count: 64).write(to: refusals)
+    let paused = try store.confirmMatured(now: now, minimumAge: 12 * hour)
+    try check(paused.confirmed == 0 && paused.paused, "Карантин отказов приостанавливает проход")
+    try store.removeCorrection(id: UUID())
+    try check(FileManager.default.fileExists(atPath: refusals.path), "Явное действие создало новый файл отказов")
+    try check(store.confirmMatured(now: now, minimumAge: 12 * hour).confirmed == 0, "Примеры до карантина не подтверждаются неявно")
+    try check(store.load(id: old).correction == nil, "Старый пример не подтверждён после карантина")
+    let later = try saveDictation(writer: writer, outcome: "insertion_requested", dictionary: "после порчи", output: nil, age: 0, now: now)
+    // Время создания после отметки: сначала сдвигаем изменение, иначе система ограничит создание им.
+    let laterURL = diagnostics.appendingPathComponent(later.uuidString + ".enc")
+    try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(120)], ofItemAtPath: laterURL.path)
+    try FileManager.default.setAttributes([.creationDate: now.addingTimeInterval(60)], ofItemAtPath: laterURL.path)
+    try check(store.confirmMatured(now: now.addingTimeInterval(13 * hour), minimumAge: 12 * hour).confirmed == 1, "Новые примеры после карантина подтверждаются")
+    try check(store.load(id: later).correction?.source == "implicit", "Пример после отметки подтверждён неявно")
+    try check(store.load(id: old).correction == nil, "Отметка карантина переживает следующие проходы")
+    // Отметка сохраняется при последующих записях отказов.
+    try store.removeCorrection(id: UUID())
+    try check(store.confirmMatured(now: now.addingTimeInterval(13 * hour), minimumAge: 12 * hour).confirmed == 0, "Отметка не теряется при перезаписи отказов")
+    try check(store.load(id: old).correction == nil, "Старый пример остаётся неподтверждённым")
+    let names = try quarantinedRefusals(folder)
+    try check(names.count == 1 && names[0].count > "speech-review-refusals.corrupt-.enc".count + 36, "Имя карантина уникально (UUID)")
+    print("PASS: отметка карантина отказов блокирует неявное подтверждение старых примеров")
+}
+
 let requested = CommandLine.arguments.count > 1 ? URL(fileURLWithPath: CommandLine.arguments[1]) : FileManager.default.temporaryDirectory.appendingPathComponent("speech-review-" + UUID().uuidString)
 let physicalParent = realpath(requested.deletingLastPathComponent().path, nil)!
 defer { free(physicalParent) }
@@ -222,6 +346,9 @@ try checkConfirmedRetention(root: root, key: key)
 try checkCreationOrder(root: root, key: key)
 try checkAutomaticReview(root: root, key: key)
 try checkImplicitConfirmation(root: root, key: key)
+try checkImplicitPassCost(root: root, key: key)
+try checkRefusalsKeyFailure(root: root, key: key)
+try checkRefusalsWatermark(root: root, key: key)
 let diagnostics = root.appendingPathComponent("diagnostics")
 let corrections = root.appendingPathComponent("corrections")
 let store = SpeechReviewStore(diagnosticsDirectory: diagnostics, correctionsDirectory: corrections, keyProvider: { key })

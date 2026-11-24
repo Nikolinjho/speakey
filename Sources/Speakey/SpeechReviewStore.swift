@@ -63,6 +63,16 @@ struct SpeechReviewStore {
     let diagnosticsDirectory: URL
     let correctionsDirectory: URL
     let keyProvider: () throws -> Data
+    /// Итог прохода неявного подтверждения: только счётчики, без текстов.
+    struct ImplicitPass {
+        var confirmed = 0
+        /// Подходящие по возрасту примеры, которые не удалось прочитать или записать.
+        var skipped = 0
+        /// Нечитаемые эталоны: пропущены при сверке выборок, проход не блокируют.
+        var unreadableCorrections = 0
+        /// Отказы в карантине без нового файла: проход ничего не подтверждает.
+        var paused = false
+    }
     private static var lock: NSRecursiveLock { SpeechDiagnostics.reviewLock }
     private static let maximumCiphertextBytes = 256 * 1024 * 1024
 
@@ -101,9 +111,9 @@ struct SpeechReviewStore {
                                        createdAt: document.createdAt, source: "explicit"))
         // Явная правка снимает прежний отказ. Сбой отказов не должен портить уже сохранённый эталон.
         if var refused = (try? readRefusals(quarantine: true)) ?? nil {
-            if refused.remove(id) != nil || refusalsQuarantined() { try? writeRefusals(refused) }
+            if refused.ids.remove(id) != nil || refusalsQuarantined() { try? writeRefusals(refused) }
         } else if refusalsQuarantined() {
-            try? writeRefusals([])
+            try? writeRefusals(Refusals())
         }
     }
 
@@ -118,28 +128,52 @@ struct SpeechReviewStore {
 
     /// Неисправленные вставленные диктовки старше порога становятся неявно подтверждёнными.
     /// Повреждённые и нечитаемые примеры пропускаются, личный текст никуда не пишется.
-    func confirmMatured(now: Date, minimumAge: TimeInterval) throws -> Int {
+    /// Ключ читается один раз на проход, эталоны расшифровываются один раз для карты выборок:
+    /// эталонов становится почти столько же, сколько диктовок, и проход не должен расти квадратично.
+    func confirmMatured(now: Date, minimumAge: TimeInterval) throws -> ImplicitPass {
         Self.lock.lock(); defer { Self.lock.unlock() }
         guard correctionsDirectory.standardizedFileURL != diagnosticsDirectory.standardizedFileURL else { throw Failure.unsafePath }
-        let corrected = Set(try records(in: correctionsDirectory).map(\.id))
+        let key = try self.key()
         // Нечитаемые отказы (или карантин без нового файла) означают «отказано всем»: неявно не подтверждаем.
-        guard let refused = try readRefusals(quarantine: true), !refusalsQuarantined() else { return 0 }
-        var confirmed = 0
+        guard let refusals = try readRefusals(quarantine: true, key: key), !refusalsQuarantined() else { return ImplicitPass(paused: true) }
+        var pass = ImplicitPass()
+        var corrected = Set<UUID>()
+        var splits: [String: String] = [:]
+        for item in try records(in: correctionsDirectory) {
+            corrected.insert(item.id)
+            guard let existing = (try? readCorrection(id: item.id, key: key)) ?? nil else { pass.unreadableCorrections += 1; continue }
+            if splits[existing.sessionID] == nil { splits[existing.sessionID] = existing.split }
+        }
         for item in try records(in: diagnosticsDirectory).sorted(by: { $0.createdAt < $1.createdAt }) {
-            guard !corrected.contains(item.id), !refused.contains(item.id),
-                  now.timeIntervalSince(item.createdAt) >= minimumAge,
-                  let snapshot = try? readTrace(id: item.id).snapshot, snapshot.outcome == "insertion_requested",
+            guard !corrected.contains(item.id), !refusals.ids.contains(item.id),
+                  now.timeIntervalSince(item.createdAt) >= minimumAge else { continue }
+            // Примеры старше карантина отказов могли быть отклонены: их история потеряна.
+            if let notBefore = refusals.notBefore, item.createdAt < notBefore { continue }
+            guard let snapshot = try? readTrace(id: item.id, key: key).snapshot else { pass.skipped += 1; continue }
+            guard snapshot.outcome == "insertion_requested",
                   let reference = snapshot.events.last(where: { $0.stage == "dictionary" })?.text,
                   !reference.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
             let printed = snapshot.events.last(where: { $0.stage == "output_options" })?.text ?? reference
+            let session = Self.recordedSession(item.createdAt)
+            // Неявные всегда идут в dev; сессия, уже отданная в другую выборку, не смешивается.
+            if let split = splits[session], split != "dev" { pass.skipped += 1; continue }
             do {
-                try save(SpeechReviewCorrection(id: item.id, reference: reference, editedText: printed,
-                                               sessionID: Self.recordedSession(item.createdAt), split: "dev", silence: false,
-                                               createdAt: item.createdAt, source: "implicit"))
-                confirmed += 1
-            } catch { continue }
+                try writeImplicit(SpeechReviewCorrection(id: item.id, reference: reference, editedText: printed,
+                                                         sessionID: session, split: "dev", silence: false,
+                                                         createdAt: item.createdAt, source: "implicit"), key: key)
+                splits[session] = "dev"
+                pass.confirmed += 1
+            } catch { pass.skipped += 1 }
         }
-        return confirmed
+        return pass
+    }
+
+    /// Запись неявного эталона без повторной сверки всех эталонов: проход уже построил карту выборок.
+    /// Существующий эталон (явный или нет) не перезаписывается никогда.
+    private func writeImplicit(_ correction: SpeechReviewCorrection, key: SymmetricKey) throws {
+        try validate(correction)
+        guard !exists(file(correction.id, in: correctionsDirectory)) else { throw Failure.invalidCorrection }
+        try write(correction, key: key)
     }
 
     func save(_ correction: SpeechReviewCorrection) throws {
@@ -151,8 +185,12 @@ struct SpeechReviewStore {
             guard let existing = try readCorrection(id: item.id) else { throw Failure.invalidCorrection }
             if existing.sessionID == correction.sessionID, existing.split != correction.split { throw Failure.conflictingSplit }
         }
+        try write(correction, key: key())
+    }
+
+    private func write(_ correction: SpeechReviewCorrection, key: SymmetricKey) throws {
         let plaintext = try JSONEncoder().encode(correction)
-        guard let ciphertext = try AES.GCM.seal(plaintext, using: key()).combined else { throw Failure.invalidFile }
+        guard let ciphertext = try AES.GCM.seal(plaintext, using: key).combined else { throw Failure.invalidFile }
         try prepareCorrectionsDirectory()
         let target = file(correction.id, in: correctionsDirectory)
         if exists(target) { try regularFile(target) }
@@ -173,8 +211,8 @@ struct SpeechReviewStore {
         let target = file(id, in: correctionsDirectory)
         // Сначала отказ, потом удаление: при сбое записи эталон остаётся, и его не воскресит неявный проход.
         // Нечитаемый файл отказов уходит в карантин, явное удаление при этом не блокируется.
-        var refused = try readRefusals(quarantine: true) ?? []
-        if refused.insert(id).inserted || refusalsQuarantined() { try writeRefusals(refused) }
+        var refused = try readRefusals(quarantine: true) ?? Refusals()
+        if refused.ids.insert(id).inserted || refusalsQuarantined() { try writeRefusals(refused) }
         if exists(target) {
             try regularFile(target)
             try FileManager.default.removeItem(at: target)
@@ -199,29 +237,49 @@ struct SpeechReviewStore {
         correctionsDirectory.deletingLastPathComponent().appendingPathComponent("speech-review-refusals.enc")
     }
 
-    /// nil — файл нечитаем и перенесён в `speech-review-refusals.corrupt-<время>.enc`.
-    /// Недоступный ключ не считается порчей: ошибка пробрасывается, файл не трогаем.
-    private func readRefusals(quarantine: Bool) throws -> Set<UUID>? {
+    /// Отказы и отметка карантина: примеры, созданные раньше `notBefore`, неявно не подтверждаются —
+    /// их отказы могли пропасть вместе с нечитаемым файлом.
+    private struct Refusals: Codable {
+        var ids: Set<UUID> = []
+        var notBefore: Date? = nil
+    }
+
+    /// nil — файл нечитаем и перенесён в `speech-review-refusals.corrupt-<время>-<UUID>.enc`.
+    /// Недоступный ключ не считается порчей: ключ читается один раз, его ошибка пробрасывается, файл не трогаем.
+    private func readRefusals(quarantine: Bool, key: SymmetricKey? = nil) throws -> Refusals? {
         try checkDirectory(refusalsFile.deletingLastPathComponent(), allowMissing: true)
-        guard exists(refusalsFile) else { return [] }
+        guard exists(refusalsFile) else { return Refusals() }
         let data = try read(refusalsFile)
-        _ = try key()
-        if let ids = try? JSONDecoder().decode([UUID].self, from: decrypt(data)) { return Set(ids) }
+        let key = try key ?? self.key()
+        if let plaintext = try? AES.GCM.open(AES.GCM.SealedBox(combined: data), using: key) {
+            if let refusals = try? JSONDecoder().decode(Refusals.self, from: plaintext) { return refusals }
+            // Прежний формат — массив id без отметки.
+            if let ids = try? JSONDecoder().decode([UUID].self, from: plaintext) { return Refusals(ids: Set(ids)) }
+        }
         guard quarantine else { return nil }
-        let name = "speech-review-refusals.corrupt-\(Int(Date().timeIntervalSince1970)).enc"
+        let name = "speech-review-refusals.corrupt-\(Int(Date().timeIntervalSince1970))-\(UUID().uuidString).enc"
         let target = refusalsFile.deletingLastPathComponent().appendingPathComponent(name)
         guard Darwin.rename(refusalsFile.path, target.path) == 0 else { throw Failure.invalidFile }
+        NSLog("Speakey speech review: refusals quarantined, %d copies", quarantineCount())
         return nil
     }
 
-    private func readRefusals() throws -> Set<UUID> { try readRefusals(quarantine: true) ?? [] }
+    private func quarantineCount() -> Int {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: refusalsFile.deletingLastPathComponent().path)) ?? []
+        return names.filter { $0.hasPrefix("speech-review-refusals.corrupt-") }.count
+    }
 
-    private func writeRefusals(_ ids: Set<UUID>) throws {
+    /// Новый файл после карантина получает отметку: всё, что создано раньше, неявно не подтверждается.
+    private func writeRefusals(_ refusals: Refusals) throws {
+        var refusals = refusals
+        if refusals.notBefore == nil, refusalsQuarantined() { refusals.notBefore = Date() }
         let directory = refusalsFile.deletingLastPathComponent()
         try checkDirectory(directory, allowMissing: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try checkDirectory(directory)
-        let plaintext = try JSONEncoder().encode(ids.map(\.uuidString).sorted().compactMap { UUID(uuidString: $0) })
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let plaintext = try encoder.encode(refusals)
         guard let ciphertext = try AES.GCM.seal(plaintext, using: key()).combined else { throw Failure.invalidFile }
         if exists(refusalsFile) { try regularFile(refusalsFile) }
         let staged = directory.appendingPathComponent(".pending-" + UUID().uuidString)
@@ -298,21 +356,21 @@ struct SpeechReviewStore {
         return items.count
     }
 
-    private func readTrace(id: UUID) throws -> (snapshot: SpeechDiagnosticTrace.Snapshot, ciphertext: Data) {
+    private func readTrace(id: UUID, key: SymmetricKey? = nil) throws -> (snapshot: SpeechDiagnosticTrace.Snapshot, ciphertext: Data) {
         try checkDirectory(diagnosticsDirectory)
         let ciphertext = try read(file(id, in: diagnosticsDirectory))
-        let snapshot = try JSONDecoder().decode(SpeechDiagnosticTrace.Snapshot.self, from: decrypt(ciphertext))
+        let snapshot = try JSONDecoder().decode(SpeechDiagnosticTrace.Snapshot.self, from: decrypt(ciphertext, key: key))
         guard snapshot.id == id, snapshot.schema == 1, snapshot.sampleRate == 16000, snapshot.channels == 1,
               snapshot.pcmFormat == "IEEE754-float32-little-endian" else { throw Failure.invalidTrace }
         _ = try SpeechFloatWAV.encode(pcm: snapshot.pcmFloat32LE)
         return (snapshot, ciphertext)
     }
 
-    private func readCorrection(id: UUID) throws -> SpeechReviewCorrection? {
+    private func readCorrection(id: UUID, key: SymmetricKey? = nil) throws -> SpeechReviewCorrection? {
         try checkDirectory(correctionsDirectory, allowMissing: true)
         let target = file(id, in: correctionsDirectory)
         guard exists(target) else { return nil }
-        let correction = try JSONDecoder().decode(SpeechReviewCorrection.self, from: decrypt(read(target)))
+        let correction = try JSONDecoder().decode(SpeechReviewCorrection.self, from: decrypt(read(target), key: key))
         guard correction.id == id else { throw Failure.invalidCorrection }
         try validate(correction)
         return correction
@@ -331,8 +389,9 @@ struct SpeechReviewStore {
         return SymmetricKey(data: data)
     }
 
-    private func decrypt(_ data: Data) throws -> Data {
-        try AES.GCM.open(AES.GCM.SealedBox(combined: data), using: key())
+    /// Переданный ключ избавляет от повторного обращения к Keychain на каждый файл.
+    private func decrypt(_ data: Data, key: SymmetricKey? = nil) throws -> Data {
+        try AES.GCM.open(AES.GCM.SealedBox(combined: data), using: key ?? self.key())
     }
 
     private func file(_ id: UUID, in directory: URL) -> URL {
