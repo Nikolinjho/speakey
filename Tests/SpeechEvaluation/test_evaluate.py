@@ -114,5 +114,64 @@ class EvaluateTests(unittest.TestCase):
         self.assertIsNone(aggregate['wer'])
         self.assertEqual(aggregate['silence_false_positives'], 1)
 
+    def write_sources_manifest(self):
+        rows = [dict(id='explicit-1', audio='sample.wav', reference='Явный текст', reference_confirmed=True,
+                     session_id='s1', split='test', reference_source='explicit_user_confirmation'),
+                dict(id='legacy-1', audio='sample.wav', reference='Старый текст', reference_confirmed=True,
+                     session_id='s2', split='test'),
+                dict(id='implicit-1', audio='sample.wav', reference='Неявный текст', reference_confirmed=True,
+                     session_id='s3', split='test', reference_source='implicit_unedited')]
+        self.manifest.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+
+    def write_hypotheses(self, ids):
+        self.predictions.write_text(''.join(json.dumps(dict(id=i, hypothesis='Текст')) + '\n' for i in ids))
+
+    def test_источник_эталона_фильтрует_выборку_оценки(self):
+        self.write_sources_manifest()
+        cases = [('all', {'explicit-1', 'legacy-1', 'implicit-1'}, 3),
+                 ('explicit', {'explicit-1', 'legacy-1'}, 2),
+                 ('implicit', {'implicit-1'}, 1)]
+        for source, ids, samples in cases:
+            with self.subTest(source=source):
+                self.write_hypotheses(ids)
+                self.output = self.root / ('report-' + source + '.json')
+                code, _, err = self.run_cli('evaluate', str(self.manifest), str(self.predictions),
+                                            '--reference-source', source, '--output', str(self.output))
+                self.assertEqual(code, 0, err)
+                self.assertEqual(json.loads(self.output.read_text())['aggregate']['samples'], samples)
+
+    def test_по_умолчанию_оценивается_весь_источник(self):
+        self.write_sources_manifest()
+        self.write_hypotheses({'explicit-1', 'legacy-1', 'implicit-1'})
+        code, _, err = self.run_cli('evaluate', str(self.manifest), str(self.predictions), '--output', str(self.output))
+        self.assertEqual(code, 0, err)
+        self.assertEqual(json.loads(self.output.read_text())['aggregate']['samples'], 3)
+
+    def test_гипотезы_должны_совпадать_с_отфильтрованной_выборкой(self):
+        self.write_sources_manifest()
+        self.write_hypotheses({'explicit-1', 'legacy-1', 'implicit-1'})
+        code, _, _ = self.run_cli('evaluate', str(self.manifest), str(self.predictions),
+                                  '--reference-source', 'implicit', '--output', str(self.output))
+        self.assertEqual(code, 1)
+        self.assertFalse(self.output.exists())
+
+    def test_пустая_выборка_после_фильтра_источника_отклоняется(self):
+        row = json.loads(self.manifest.read_text())
+        row['reference_source'] = 'implicit_unedited'
+        self.manifest.write_text(json.dumps(row) + '\n')
+        code, _, _ = self.run_cli('evaluate', str(self.manifest), str(self.predictions),
+                                  '--reference-source', 'explicit', '--output', str(self.output))
+        self.assertEqual(code, 1)
+        self.assertFalse(self.output.exists())
+
+    def test_неизвестный_источник_эталона_отклоняется_при_фильтре(self):
+        row = json.loads(self.manifest.read_text())
+        row['reference_source'] = 'guessed'
+        self.manifest.write_text(json.dumps(row) + '\n')
+        code, _, _ = self.run_cli('evaluate', str(self.manifest), str(self.predictions),
+                                  '--reference-source', 'explicit', '--output', str(self.output))
+        self.assertEqual(code, 1)
+        self.assertFalse(self.output.exists())
+
 
 if __name__ == '__main__': unittest.main()

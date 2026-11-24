@@ -18,6 +18,21 @@ except ImportError:
     from metrics import NormalizationPolicy, score
 
 
+def select_reference_source(rows, source):
+    """explicit – явное подтверждение или поле отсутствует; implicit – неявный эталон; all – без фильтра."""
+    if source == 'all':
+        return rows
+    wanted = 'implicit_unedited' if source == 'implicit' else 'explicit_user_confirmation'
+    selected = []
+    for row in rows:
+        value = row.get('reference_source', 'explicit_user_confirmation')
+        if value not in ('explicit_user_confirmation', 'implicit_unedited'):
+            raise ValidationError('Неверное поле reference_source')
+        if value == wanted:
+            selected.append(row)
+    return selected
+
+
 def _critical_counts(reference, hypothesis, terms):
     expected = actual = 0
     reference = ' '.join(unicodedata.normalize('NFC', reference).split())
@@ -110,6 +125,7 @@ def main(argv=None):
     evaluate.add_argument('manifest')
     evaluate.add_argument('hypotheses')
     evaluate.add_argument('--split', choices=('train', 'dev', 'test', 'all'), default='test')
+    evaluate.add_argument('--reference-source', choices=('all', 'explicit', 'implicit'), default='all')
     evaluate.add_argument('--output', required=True)
     args = parser.parse_args(argv)
     try:
@@ -119,6 +135,7 @@ def main(argv=None):
             print(json.dumps(dict(valid=True, samples=len(rows), splits=counts)))
         else:
             selected = [row for row in rows if args.split == 'all' or row['split'] == args.split]
+            selected = select_reference_source(selected, args.reference_source)
             if not selected:
                 raise ValidationError('Выбранная выборка пустая')
             report = evaluate_rows(selected, read_jsonl(args.hypotheses))

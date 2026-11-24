@@ -87,15 +87,31 @@ def _write_private(path, value, *, jsonl=False):
             target.write('\n')
 
 
+def select_reference_source(rows, source):
+    """explicit – явное подтверждение или поле отсутствует; implicit – неявный эталон; all – без фильтра."""
+    if source == 'all':
+        return rows
+    wanted = 'implicit_unedited' if source == 'implicit' else 'explicit_user_confirmation'
+    selected = []
+    for row in rows:
+        value = row.get('reference_source', 'explicit_user_confirmation')
+        if value not in ('explicit_user_confirmation', 'implicit_unedited'):
+            raise RunError('Неверное поле reference_source')
+        if value == wanted:
+            selected.append(row)
+    return selected
+
+
 def run_corpus(manifest, *, executable, model, output, language='auto', split='test',
-               stage='raw', timeout=120, engine='whisper'):
+               stage='raw', timeout=120, engine='whisper', reference_source='all'):
     """Не скачивает веса и не меняет настройки приложения. Ошибка прерывает весь прогон."""
     output = Path(output).resolve()
     repository = Path(__file__).resolve().parents[2]
     if output == repository or repository in output.parents:
         raise RunError('Личные прогоны нужно сохранять вне репозитория')
     if (engine not in ('whisper', 'parakeet', 'qwen') or language not in ('auto', 'ru', 'en') or split not in ('train', 'dev', 'test')
-            or stage not in ('raw', 'echo-cleaned') or isinstance(timeout, bool)
+            or stage not in ('raw', 'echo-cleaned') or reference_source not in ('all', 'explicit', 'implicit')
+            or isinstance(timeout, bool)
             or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0):
         raise RunError('Неверные параметры прогона')
     created = False
@@ -103,6 +119,7 @@ def run_corpus(manifest, *, executable, model, output, language='auto', split='t
         manifest_hash = _sha256(manifest)
         rows = validate_manifest(manifest)
         rows = [row for row in rows if row['split'] == split]
+        rows = select_reference_source(rows, reference_source)
         if not rows:
             raise RunError('Выбранная выборка пустая')
         model_hash = model_digest(model, engine)
@@ -187,7 +204,8 @@ def run_corpus(manifest, *, executable, model, output, language='auto', split='t
             raise RunError('Код Qwen изменился во время прогона')
         protocol = dict(schema_version=1, backend='speakey-{}-cli'.format(engine),
             process_mode='fresh-process-per-record', recognition_mode='isolated-{}-defaults'.format(engine),
-            stage=stage, language=language, split=split, model_sha256=model_hash,
+            stage=stage, language=language, split=split, reference_source=reference_source,
+            model_sha256=model_hash,
             executable_sha256=executable_hash, manifest_sha256=manifest_hash,
             started_at_msk=started_at, samples=measurements)
         if backend_hash:
@@ -211,6 +229,7 @@ def main(argv=None):
     parser.add_argument('--output', required=True)
     parser.add_argument('--language', choices=('auto', 'ru', 'en'), default='auto')
     parser.add_argument('--split', choices=('train', 'dev', 'test'), default='test')
+    parser.add_argument('--reference-source', choices=('all', 'explicit', 'implicit'), default='all')
     parser.add_argument('--stage', choices=('raw', 'echo-cleaned'), default='raw')
     parser.add_argument('--engine', choices=('whisper', 'parakeet', 'qwen'), default='whisper')
     parser.add_argument('--timeout', type=float, default=120)
@@ -218,7 +237,7 @@ def main(argv=None):
     try:
         result = run_corpus(args.manifest, executable=args.executable, model=args.model,
             output=args.output, language=args.language, split=args.split, stage=args.stage,
-            timeout=args.timeout, engine=args.engine)
+            timeout=args.timeout, engine=args.engine, reference_source=args.reference_source)
         print(json.dumps(result, ensure_ascii=False))
         return 0
     except RunError as error:

@@ -196,5 +196,56 @@ print('СЕКРЕТНЫЙ текст')
         with self.assertRaises(runners.RunError): self.run_batch(split='dev')
         self.assertFalse(self.output.exists())
 
+    def write_sources_manifest(self):
+        rows=[dict(id='explicit-1', audio='clip.wav', reference='Явный текст', reference_confirmed=True,
+                   session_id='s1', split='test', reference_source='explicit_user_confirmation'),
+              dict(id='legacy-1', audio='clip.wav', reference='Старый текст', reference_confirmed=True,
+                   session_id='s2', split='test'),
+              dict(id='implicit-1', audio='clip.wav', reference='Неявный текст', reference_confirmed=True,
+                   session_id='s3', split='test', reference_source='implicit_unedited')]
+        self.manifest.write_text(''.join(json.dumps(row)+'\n' for row in rows))
+
+    def test_фильтрует_эталоны_по_источнику(self):
+        self.write_sources_manifest()
+        expected={'all':{'explicit-1','legacy-1','implicit-1'},'explicit':{'explicit-1','legacy-1'},
+                  'implicit':{'implicit-1'}}
+        for source, ids in expected.items():
+            with self.subTest(source=source):
+                self.output=self.root/('run-'+source)
+                result=self.run_batch(reference_source=source)
+                hypotheses=[json.loads(line) for line in (self.output/'hypotheses.jsonl').read_text().splitlines()]
+                self.assertEqual({row['id'] for row in hypotheses}, ids)
+                self.assertEqual(result['samples'], len(ids))
+                protocol=json.loads((self.output/'run.json').read_text())
+                self.assertEqual({sample['id'] for sample in protocol['samples']}, ids)
+
+    def test_по_умолчанию_берутся_все_эталоны(self):
+        self.write_sources_manifest()
+        self.run_batch()
+        hypotheses=(self.output/'hypotheses.jsonl').read_text().splitlines()
+        self.assertEqual(len(hypotheses), 3)
+
+    def test_пустая_выборка_после_фильтра_источника_не_выдаётся_за_успех(self):
+        row=json.loads(self.manifest.read_text())
+        row['reference_source']='implicit_unedited'
+        self.manifest.write_text(json.dumps(row)+'\n')
+        with self.assertRaises(runners.RunError): self.run_batch(reference_source='explicit')
+        self.assertFalse(self.output.exists())
+
+    def test_неизвестный_источник_эталона_отклоняется_при_фильтре(self):
+        row=json.loads(self.manifest.read_text())
+        row['reference_source']='guessed'
+        self.manifest.write_text(json.dumps(row)+'\n')
+        with self.assertRaises(runners.RunError): self.run_batch(reference_source='implicit')
+        self.assertFalse(self.output.exists())
+
+    def test_cli_принимает_флаг_источника_эталона(self):
+        self.write_sources_manifest()
+        with contextlib.redirect_stdout(io.StringIO()):
+            code=runners.main([str(self.manifest),'--executable',str(self.executable),'--model',str(self.model),
+                '--output',str(self.output),'--language','ru','--reference-source','implicit'])
+        self.assertEqual(code,0)
+        self.assertEqual(len((self.output/'hypotheses.jsonl').read_text().splitlines()), 1)
+
 
 if __name__=='__main__': unittest.main()
