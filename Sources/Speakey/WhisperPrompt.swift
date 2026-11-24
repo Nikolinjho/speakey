@@ -48,8 +48,8 @@ enum WhisperPrompt {
     private static let maxWordLength = 40
 
     /// Фраза со словами для затравки: сначала слова контекста, затем слова словаря диктовки.
-    /// Из слов вырезаются «, », : и ; (фраза должна оставаться натуральным текстом, а двоеточие
-    /// и точка с запятой ломают разбор), повторы без учёта регистра остаются первыми по порядку.
+    /// Из слов контекста вырезаются «, », : и ; (фраза должна оставаться натуральным текстом, а двоеточие
+    /// и точка с запятой ломают разбор), повторы без учёта регистра убираются. Слова словаря не трогаем.
     /// maxChars: бюджет на саму фразу вместе с префиксом и точкой. Слова берём по порядку, пока
     /// влезают: при переполнении уходят хвостовые слова контекста, а раньше них слова словаря.
     /// Пусто, если не осталось слов или не влезло ни одно.
@@ -57,11 +57,18 @@ enum WhisperPrompt {
         let prefix = language == "en" ? " Words that often come up: " : " Часто встречаются слова: "
         var seen = Set<String>()
         var words: [String] = []
-        for raw in contextWords + hintWords {
+        // Слова контекста чистим и режем по длине. Слова словаря идут как есть, ровно как их
+        // отдаёт recognitionHint (без чистки, лимита и своего дедупа): без контекста затравка
+        // байт-в-байт прежняя. Слово словаря выпадает, только если совпало со словом контекста.
+        for raw in contextWords {
             let word = String(raw.filter { !"«»:;".contains($0) })
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !word.isEmpty, word.count <= maxWordLength else { continue }
             if seen.insert(word.lowercased()).inserted { words.append(word) }
+        }
+        let contextKeys = seen
+        for word in hintWords where !word.isEmpty && !contextKeys.contains(word.lowercased()) {
+            words.append(word)
         }
         var body = ""
         for word in words {

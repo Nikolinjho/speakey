@@ -42,5 +42,14 @@ let echoPrompt = WhisperPrompt.ru + merged
 check("stripEcho срезает эхо новой фразы целиком",
       WhisperPrompt.stripEcho(echoPrompt + " текст", prompt: echoPrompt).text == "текст")
 
+check("Пустой контекст: слова словаря как есть",
+      WhisperPrompt.wordsPhrase(contextWords: [], hintWords: ["Speakey", "speakey", "a:b"], language: "ru", maxChars: 600)
+        == " Часто встречаются слова: Speakey, speakey, a:b.")
+check("Контекст чистится от «",
+      WhisperPrompt.wordsPhrase(contextWords: ["x«y"], hintWords: [], language: "ru", maxChars: 600).contains("xy"))
+let hint41 = String(repeating: "я", count: 41)
+check("Длинное слово словаря сохраняется",
+      WhisperPrompt.wordsPhrase(contextWords: [], hintWords: [hint41], language: "ru", maxChars: 600).contains(hint41))
+
 print("\(checks - failures)/\(checks) passed")
 exit(failures == 0 ? 0 : 1)
