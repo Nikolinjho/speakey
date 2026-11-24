@@ -696,6 +696,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { NSApp.terminate(nil) }
             }
         }
+
+        // Неявное подтверждение созревших диктовок (12 ч без правки): на старте, вне главного потока.
+        SpeechDiagnostics.confirmMaturedIfDue(force: true)
     }
 
     /// Сторож живости: раз в 2 секунды сверяет «мы думаем, что работаем» с «движок реально жив».
@@ -990,9 +993,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
-
-        // Неявное подтверждение созревших диктовок (12 ч без правки): на старте, вне главного потока.
-        SpeechDiagnostics.confirmMaturedIfDue(force: true)
     }
 
     /// Повторный запуск уже работающего приложения (двойной клик по .app, пока оно

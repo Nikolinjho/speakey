@@ -246,12 +246,13 @@ enum SpeechDiagnostics {
         queue.async {
             do {
                 guard policy.performIfCurrent(generation, {}) else { return }
+                // Подтверждение — раньше prune внутри save, иначе созревающие примеры могут быть вытеснены.
+                // Троттлинг — не чаще раза в час.
+                confirmMaturedNow(now: Date(), force: false)
                 let store = SpeechDiagnosticsStore(directory: directory, enabled: true, keyProvider: key)
                 _ = try store.save(snapshot, authorizePublication: { publish in
                     try policy.performIfCurrent(generation, publish)
                 })
-                // Новый пример мог дозреть вместе с остальными; троттлинг — не чаще раза в час.
-                confirmMaturedNow(now: Date(), force: false)
             } catch { NSLog("Speakey speech diagnostics: persistence failed") }
         }
     }
@@ -272,9 +273,9 @@ enum SpeechDiagnostics {
     private static func confirmMaturedNow(now: Date, force: Bool) {
         guard enabled else { return }
         if !force, let last = lastConfirmPass, now.timeIntervalSince(last) < 3600 { return }
-        lastConfirmPass = now
         do {
             let count = try reviewStore().confirmMatured(now: now, minimumAge: 12 * 3600)
+            lastConfirmPass = now   // метка только после успеха: при сбое следующий триггер повторит проход
             if count > 0 { NSLog("Speakey speech review: implicitly confirmed %d", count) }
         } catch { NSLog("Speakey speech review: implicit confirmation failed") }
     }
