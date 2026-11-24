@@ -29,31 +29,52 @@ enum DictationContext {
             maxChars: 240)
     }
 
-    /// Источники слов для исправления расшифровки: экран, недавние диктовки, корпус, словарь.
-    /// Выключено `AutocompletePrefs.dictationContext` — пусто. Пустые источники пропускаем.
-    /// Зовётся с главного потока.
-    static func sources(pid: pid_t, bundleID: String) -> [ContextSource] {
-        guard AutocompletePrefs.dictationContext else { return [] }
-        var result: [ContextSource] = []
-        func add(_ kind: ContextSource.Kind, _ words: [String: Int]) {
-            if !words.isEmpty { result.append(ContextSource(kind: kind, words: words)) }
-        }
+    /// Общий кэш звуковых ключей: переживает пересборку корпуса и смену экрана.
+    static let keyCache = ContextKeyCache()
 
-        // Экран — только если разрешён и приложение включено (как в prepare()).
-        if AutocompletePrefs.useScreen, AutocompleteAppStore.shared.isEnabled(bundleID),
-           let screen = ScreenContextProvider.shared.text(for: pid) {
-            add(.screen, frequencies(of: [screen]))
-        }
+    /// Что нужно для подбора слов. Снимается на main из того, что живёт только там и стоит дёшево
+    /// (история диктовок, словарь, настройки); экран и корпус берутся позже, в фоне.
+    struct SourceRequest {
+        let pid: pid_t
+        let bundleID: String
+        let screenAllowed: Bool
+        let recent: [String: Int]
+        let dictionary: [String: Int]
+    }
 
+    /// Зовётся с главного потока: только main-only и дешёвое. Выключено
+    /// `AutocompletePrefs.dictationContext` — nil, ничего не собираем.
+    static func sourceRequest(pid: pid_t, bundleID: String) -> SourceRequest? {
+        guard AutocompletePrefs.dictationContext else { return nil }
         // Диктовки в истории не хранят приложение, поэтому берём все за последние 2 часа, не больше 20.
         let since = Date().addingTimeInterval(-2 * 3600)
         let recent = VoiceHistory.shared.all()
             .filter { $0.resolvedKind == .dictation && $0.date >= since }
             .suffix(20)
-        add(.recentDictation, frequencies(of: recent.map { $0.text }))
+        return SourceRequest(
+            pid: pid, bundleID: bundleID,
+            // Экран — только если разрешён и приложение включено (как в prepare()).
+            screenAllowed: AutocompletePrefs.useScreen && AutocompleteAppStore.shared.isEnabled(bundleID),
+            recent: frequencies(of: recent.map { $0.text }),
+            dictionary: frequencies(of: VoiceDictionary.shared.pairs().map { $0.1 }))
+    }
 
-        add(.corpus, PersonalCorpus.shared.vocabulary(bundleID: bundleID))
-        add(.dictionary, frequencies(of: VoiceDictionary.shared.pairs().map { $0.1 }))
+    /// Источники слов для исправления расшифровки: экран, недавние диктовки, корпус, словарь.
+    /// ⚠️ НЕ С ГЛАВНОГО ПОТОКА. Корпус при первом обращении расшифровывается и строит индекс целиком
+    /// (секунды на большом корпусе), а main держит runloop нашего event-tap. Зовётся на
+    /// `transcribeQueue`, после первого прохода и только если он что-то распознал. Пустые пропускаем.
+    static func sources(_ request: SourceRequest) -> [ContextSourceIndex] {
+        var result: [ContextSourceIndex] = []
+        func add(_ kind: ContextSource.Kind, _ words: [String: Int]) {
+            if !words.isEmpty { result.append(ContextSourceIndex(ContextSource(kind: kind, words: words), keys: keyCache)) }
+        }
+        if request.screenAllowed, let screen = ScreenContextProvider.shared.text(for: request.pid) {
+            add(.screen, frequencies(of: [screen]))
+        }
+        add(.recentDictation, request.recent)
+        let corpus = PersonalCorpus.shared.contextSource(bundleID: request.bundleID, keys: keyCache)
+        if !corpus.isEmpty { result.append(corpus) }
+        add(.dictionary, request.dictionary)
         return result
     }
 

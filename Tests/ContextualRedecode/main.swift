@@ -16,11 +16,25 @@ check("вставка слова", !ContextualRedecode.accept(first: t1, second:
 check("больше 30%", !ContextualRedecode.accept(first: "tpr подбора", second: "DPR подборок", candidates: c)) // 2 изменения при лимите max(1, floor(0.6)) = 1
 check("пустой T2", !ContextualRedecode.accept(first: t1, second: "", candidates: c))
 check("регистр и точка", ContextualRedecode.accept(first: t1, second: t1.lowercased().replacingOccurrences(of: ".", with: ""), candidates: c))
-check("нет кандидатов", !ContextualRedecode.shouldRunSecondPass(firstPassSeconds: 0.5, timeoutSeconds: 15, candidateCount: 0))
-check("бюджет ок", ContextualRedecode.shouldRunSecondPass(firstPassSeconds: 0.9, timeoutSeconds: 15, candidateCount: 2))
-check("бюджет превышен", !ContextualRedecode.shouldRunSecondPass(firstPassSeconds: 4.6, timeoutSeconds: 15, candidateCount: 2))
+check("нет кандидатов", !ContextualRedecode.shouldRunSecondPass(elapsedSeconds: 0.5, firstPassSeconds: 0.5, timeoutSeconds: 15, candidateCount: 0, waitingTranscriptions: 0))
+check("бюджет ок", ContextualRedecode.shouldRunSecondPass(elapsedSeconds: 0.9, firstPassSeconds: 0.9, timeoutSeconds: 15, candidateCount: 2, waitingTranscriptions: 0))
+check("бюджет превышен", !ContextualRedecode.shouldRunSecondPass(elapsedSeconds: 4.6, firstPassSeconds: 4.6, timeoutSeconds: 15, candidateCount: 2, waitingTranscriptions: 0))
+// Сторож считает от начала транскрипции: ожидание очереди и загрузка модели входят в бюджет.
+check("ожидание очереди съело бюджет", !ContextualRedecode.shouldRunSecondPass(elapsedSeconds: 8.5, firstPassSeconds: 1, timeoutSeconds: 15, candidateCount: 2, waitingTranscriptions: 0))
+check("ровно на границе 60%", ContextualRedecode.shouldRunSecondPass(elapsedSeconds: 8, firstPassSeconds: 1, timeoutSeconds: 15, candidateCount: 2, waitingTranscriptions: 0))
+check("прошедшее меньше T1 не делает бюджет щедрее", !ContextualRedecode.shouldRunSecondPass(elapsedSeconds: 0, firstPassSeconds: 4.6, timeoutSeconds: 15, candidateCount: 2, waitingTranscriptions: 0))
+check("очередь ждёт — второго прохода нет", !ContextualRedecode.shouldRunSecondPass(elapsedSeconds: 0.5, firstPassSeconds: 0.5, timeoutSeconds: 15, candidateCount: 2, waitingTranscriptions: 1))
 check("фото не форма фоток", !ContextualRedecode.accept(first: "tpr", second: "фото", candidates: [ContextCandidate(word: "фоток", replaces: "tpr", score: 1)]))
 check("замена не на свой replaces", !ContextualRedecode.accept(first: "подбора", second: "DPR", candidates: c))
+
+
+// Доставка: T2 заменяет T1, только если поменял хотя бы одно слово (оформление не трогаем).
+check("изменённых слов: пример Ники", ContextualRedecode.changedWordCount(first: t1, second: "Посмотри на этой странице на мобилке, какое DPR у фоток подборок.") == 2)
+check("регистр и пунктуация — не изменение", ContextualRedecode.changedWordCount(first: t1, second: t1.lowercased().replacingOccurrences(of: ".", with: "")) == 0)
+check("разное число слов — не сравниваем", ContextualRedecode.changedWordCount(first: "a b", second: "a b c") == nil)
+check("доставка: пример Ники", ContextualRedecode.shouldDeliver(first: t1, second: "Посмотри на этой странице на мобилке, какое DPR у фоток подборок.", candidates: c))
+check("доставки нет: только оформление", !ContextualRedecode.shouldDeliver(first: t1, second: t1.lowercased().replacingOccurrences(of: ".", with: ""), candidates: c))
+check("доставки нет: не принят", !ContextualRedecode.shouldDeliver(first: t1, second: "Посмотри на этой странице на мобилке, какое TPR у фото подборок.", candidates: c))
 
 print("\(checks - failures)/\(checks) passed")
 exit(failures == 0 ? 0 : 1)

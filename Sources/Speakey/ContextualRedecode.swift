@@ -11,10 +11,35 @@ enum ContextualRedecode {
     static let minSharedStemPrefix = 5
 
     /// Второй проход нужен, если есть кандидаты и он уложится в бюджет времени.
-    /// Вторую расшифровку оцениваем как первую, поэтому требуем `2 * first <= 0.6 * timeout`.
-    static func shouldRunSecondPass(firstPassSeconds: Double, timeoutSeconds: Double, candidateCount: Int) -> Bool {
-        guard candidateCount > 0 else { return false }
-        return firstPassSeconds * 2 <= budgetShare * timeoutSeconds
+    ///
+    /// Сторож транскрипции считает от `beginTranscription`, а не от начала T1: до T1 диктовка могла
+    /// ждать очередь (предыдущая диктовка, импорт) и загрузку модели. Поэтому `elapsedSeconds` —
+    /// сколько прошло от начала транскрипции до конца T1, а вторую расшифровку оцениваем как первую:
+    /// `elapsed + first <= 0.6 * timeout`. Если `elapsed` вдруг меньше T1 (часы разных потоков),
+    /// берём T1 — бюджет от этого не станет щедрее прежнего `2 * first`.
+    ///
+    /// Если в очереди ждёт другая транскрипция, второго прохода нет: её сторож уже идёт, и наш T2
+    /// отнял бы у неё время. T1 приоритетнее всегда.
+    static func shouldRunSecondPass(elapsedSeconds: Double, firstPassSeconds: Double, timeoutSeconds: Double,
+                                    candidateCount: Int, waitingTranscriptions: Int) -> Bool {
+        guard candidateCount > 0, waitingTranscriptions == 0 else { return false }
+        return max(elapsedSeconds, firstPassSeconds) + firstPassSeconds <= budgetShare * timeoutSeconds
+    }
+
+    /// Сколько слов T2 отличается от T1 (без учёта регистра и пунктуации). nil — число слов разное.
+    static func changedWordCount(first: String, second: String) -> Int? {
+        let firstWords = ContextLexicon.words(in: first)
+        let secondWords = ContextLexicon.words(in: second)
+        guard firstWords.count == secondWords.count else { return nil }
+        return zip(firstWords, secondWords).filter { $0.lowercased() != $1.lowercased() }.count
+    }
+
+    /// Отдать T2 вместо T1: прошёл `accept` и поменял хотя бы одно слово. Уточнение меняет слова,
+    /// а не оформление (не цель спеки), поэтому T2 с теми же словами не заменяет пунктуацию и
+    /// регистр T1. Одно правило для приложения и стенда.
+    static func shouldDeliver(first: String, second: String, candidates: [ContextCandidate]) -> Bool {
+        guard let changed = changedWordCount(first: first, second: second), changed > 0 else { return false }
+        return accept(first: first, second: second, candidates: candidates)
     }
 
     /// Принять вторую расшифровку, только если она отличается от первой заменами на кандидатов:

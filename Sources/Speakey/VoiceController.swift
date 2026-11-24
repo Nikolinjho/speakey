@@ -28,9 +28,14 @@ final class VoiceController {
     private var transcribing = 0   // сколько клипов сейчас в транскрипции (для индикатора)
     private var transcribeGen = 0              // генерации задач транскрипции (main-only)
     private var liveTranscriptions = Set<Int>()  // ещё не завершившиеся генерации (main-only)
-    /// Бюджет сторожа (секунды) по поколению. Ветка whisper читает его, чтобы решить, хватит ли
-    /// времени на второй проход. Запись убирается вместе с поколением (endTranscription / сторож).
-    private var transcriptionBudgets = [Int: Double]()   // main-only
+    /// Бюджет второго прохода по поколению: базовый таймаут сторожа (без надбавки на холодную
+    /// загрузку) и момент `beginTranscription` по монотонным часам. Сторож считает от этого момента,
+    /// поэтому и второй проход меряет прошедшее от него же, а не от начала T1. Запись убирается
+    /// вместе с поколением (endTranscription / сторож).
+    private var transcriptionBudgets = [Int: (secondPassTimeout: Double, startedAt: UInt64)]()   // main-only
+    /// Сколько транскрипций стоит в `transcribeQueue` и ещё не началось. Второй проход не идёт,
+    /// пока кто-то ждёт: его сторож уже тикает.
+    private let waitingTranscriptions = WaitingCounter()
     /// Приложение, куда пойдёт диктовка, зафиксированное в начале записи (main-only): к концу
     /// записи фокус мог уйти, а источники контекста нужны именно от того окна.
     private var recordingTarget: (pid: pid_t, bundleID: String)?
@@ -152,6 +157,11 @@ final class VoiceController {
         // платил бы ПЕРВЫЙ buildEngine на main. Только lookup — capture-объектов не создаёт, TCC-промпт
         // не триггерит (инвариант «ничего до requestAccess» цел).
         DispatchQueue.global(qos: .utility).async { _ = AVCaptureDevice.default(for: .audio) }
+        // Списки обычных слов для уточнения по контексту — тоже в фоне заранее: иначе их чтение
+        // (несколько МБ JSON) легло бы на первую диктовку и съело бюджет второго прохода.
+        if settings.voiceContextRefine, AutocompletePrefs.dictationContext {
+            DispatchQueue.global(qos: .utility).async { _ = ContextLexicon.bundledCommonWords }
+        }
         // Человек сам попросил не держать модель в памяти между диктовками: прогрев со старта
         // положил бы её туда до первой же диктовки, то есть сделал бы ровно то, от чего он отказался.
         if settings.voiceUnloadAfterDictation {
@@ -412,8 +422,10 @@ final class VoiceController {
                     // тянуть их за человека без спроса нельзя: это его трафик и его диск.
                     if await MainActor.run(body: { self.modelInstalled }) {
                         text = await withCheckedContinuation { (c: CheckedContinuation<String, Never>) in
+                            self.waitingTranscriptions.enter()
                             self.transcribeQueue.async { [weak self] in
                                 guard let self else { return c.resume(returning: "") }
+                                self.waitingTranscriptions.leave()
                                 self.loadModelIfNeeded()
                                 let t = self.whisper?.transcribe(samples: samples, language: lang, diagnostics: diagnostics) ?? ""
                                 kbLog("voice: parakeet отказал — доканчиваю whisper'ом, \(t.count) симв.")
@@ -450,42 +462,31 @@ final class VoiceController {
             return
         }
         // whisper — строго по одному (serial queue): новая ЗАПИСЬ при этом не блокируется.
-        // Источники слов для второго прохода собираем ЗДЕСЬ, на main (AX/кэши экрана main-only), до
-        // ухода в transcribeQueue. Переключатель выключен — `recordingTarget` пуст, ничего не
-        // собираем, и поведение прежнее. Бюджет сторожа берём из словаря, а не пересчитываем.
+        // На main снимаем только main-only и дешёвое (история диктовок, словарь, настройки); экран и
+        // корпус соберём уже в transcribeQueue — корпус при первом обращении расшифровывается и
+        // строит индекс, а main держит runloop event-tap. Переключатель выключен — `recordingTarget`
+        // пуст, ничего не собираем, и поведение прежнее.
         let contextTarget = recordingTarget
         recordingTarget = nil
-        let contextSources: [ContextSource] = contextTarget.map { DictationContext.sources(pid: $0.pid, bundleID: $0.bundleID) } ?? []
-        let watchdogBudget = transcriptionBudgets[gen] ?? 15
+        let contextRequest = contextTarget.flatMap { DictationContext.sourceRequest(pid: $0.pid, bundleID: $0.bundleID) }
+        let budget = transcriptionBudgets[gen]
+        waitingTranscriptions.enter()
         transcribeQueue.async { [weak self] in
             guard let self else { return }
+            self.waitingTranscriptions.leave()
             let modelReady = self.whisper != nil
             var text = ""
             if let w = self.whisper {
-                let t1Start = CFAbsoluteTimeGetCurrent()
-                let first = w.transcribe(samples: samples, language: lang, diagnostics: diagnostics) ?? ""
+                let t1Start = DispatchTime.now().uptimeNanoseconds
+                let first = w.transcribe(samples: samples, language: lang, diagnostics: diagnostics)
+                let t1End = DispatchTime.now().uptimeNanoseconds
                 text = first
-                if !contextSources.isEmpty {
-                    let firstSeconds = CFAbsoluteTimeGetCurrent() - t1Start
-                    let candidates = ContextLexicon.candidates(for: first, sources: contextSources, limit: 8)
-                    let run = ContextualRedecode.shouldRunSecondPass(firstPassSeconds: firstSeconds, timeoutSeconds: watchdogBudget, candidateCount: candidates.count)
-                    var accepted = false
-                    var secondMs = 0
-                    if run {
-                        // Второй проход с найденными словами в затравке. Принимаем его, только если
-                        // `accept` подтвердил, что он правит ровно кандидатов, а не переписал фразу.
-                        let t2Start = CFAbsoluteTimeGetCurrent()
-                        let second = w.transcribe(samples: samples, language: lang, contextWords: candidates.map { $0.word }, diagnostics: diagnostics) ?? ""
-                        secondMs = Int((CFAbsoluteTimeGetCurrent() - t2Start) * 1000)
-                        accepted = ContextualRedecode.accept(first: first, second: second, candidates: candidates)
-                        if accepted { text = second }
+                if let contextRequest, let budget {
+                    let sources = DictationContext.sources(contextRequest)
+                    if !sources.isEmpty {
+                        self.refineWithContext(first: first, t1Start: t1Start, t1End: t1End, budget: budget, sources: sources,
+                                               samples: samples, language: lang, whisper: w, diagnostics: diagnostics, text: &text)
                     }
-                    let firstMs = Int(firstSeconds * 1000)
-                    // Только числа и флаги — ни слов, ни текста (ни в лог, ни в диагностику).
-                    diagnostics?.record("context_refine", metadata: [
-                        "candidates": String(candidates.count), "secondPass": String(run), "accepted": String(accepted),
-                        "firstMs": String(firstMs), "secondMs": String(secondMs)])
-                    kbLog("voice: context_refine candidates=\(candidates.count) secondPass=\(run) accepted=\(accepted) firstMs=\(firstMs) secondMs=\(secondMs)")
                 }
             }
             kbLog("voice: whisper(модель=\(modelReady ? "ок" : "НЕТ"), \(lang)) → \(text.count) симв.")
@@ -499,6 +500,52 @@ final class VoiceController {
         }
     }
 
+    /// Второй проход Whisper с найденными словами в затравке (слой A). Только на `transcribeQueue`.
+    /// T1 приоритетнее всегда: второй проход идёт, лишь если по прикидке успевает в 60% бюджета
+    /// сторожа от начала транскрипции и никто не ждёт очередь. T2 доставляется, только если `accept`
+    /// подтвердил, что он правит ровно кандидатов, и поменял хоть одно слово.
+    private func refineWithContext(first: String, t1Start: UInt64, t1End: UInt64,
+                                   budget: (secondPassTimeout: Double, startedAt: UInt64), sources: [ContextSourceIndex],
+                                   samples: [Float], language: String, whisper w: WhisperBridge,
+                                   diagnostics: SpeechDiagnosticTrace?, text: inout String) {
+        let candidates = ContextLexicon.candidates(for: first, indexes: sources, limit: 8, commonWords: ContextLexicon.bundledCommonWords)
+        // Прошедшее меряем ПОСЛЕ подбора: сбор корпуса и поиск тоже съедают время сторожа.
+        let now = DispatchTime.now().uptimeNanoseconds
+        let firstSeconds = Double(t1End - t1Start) / 1e9
+        let elapsed = Double(now &- budget.startedAt) / 1e9
+        let waiting = waitingTranscriptions.count
+        let run = ContextualRedecode.shouldRunSecondPass(elapsedSeconds: elapsed, firstPassSeconds: firstSeconds,
+                                                         timeoutSeconds: budget.secondPassTimeout,
+                                                         candidateCount: candidates.count, waitingTranscriptions: waiting)
+        if !candidates.isEmpty {
+            // Слова кандидатов — ТОЛЬКО в трассу диагностики: она есть лишь при включённом сборе
+            // примеров и сохраняется зашифрованной, как сырые расшифровки рядом. Нужна, чтобы новую
+            // диктовку можно было прогнать на стенде с тем же контекстом (спека, §0).
+            let list = candidates.map { ["word": $0.word, "replaces": $0.replaces] }
+            let json = (try? JSONSerialization.data(withJSONObject: list, options: [.sortedKeys])).map { String(decoding: $0, as: UTF8.self) }
+            diagnostics?.record("context_candidates", text: json, metadata: ["count": String(candidates.count)])
+        }
+        var accepted = false, delivered = false
+        var secondMs = 0
+        if run {
+            // Отметка в трассе: всё, что Whisper запишет дальше, относится ко второму проходу.
+            diagnostics?.record("context_second_pass", metadata: ["candidates": String(candidates.count)])
+            let t2Start = DispatchTime.now().uptimeNanoseconds
+            let second = w.transcribe(samples: samples, language: language, contextWords: candidates.map { $0.word }, diagnostics: diagnostics)
+            secondMs = Int(Double(DispatchTime.now().uptimeNanoseconds - t2Start) / 1e6)
+            accepted = ContextualRedecode.accept(first: first, second: second, candidates: candidates)
+            delivered = ContextualRedecode.shouldDeliver(first: first, second: second, candidates: candidates)
+            if delivered { text = second }
+        }
+        let firstMs = Int(firstSeconds * 1000), elapsedMs = Int(elapsed * 1000)
+        // Только числа и флаги — ни слов, ни текста в лог.
+        diagnostics?.record("context_refine", metadata: [
+            "candidates": String(candidates.count), "secondPass": String(run), "accepted": String(accepted),
+            "delivered": String(delivered), "firstMs": String(firstMs), "secondMs": String(secondMs),
+            "elapsedMs": String(elapsedMs), "waiting": String(waiting)])
+        kbLog("voice: context_refine candidates=\(candidates.count) secondPass=\(run) accepted=\(accepted) delivered=\(delivered) firstMs=\(firstMs) secondMs=\(secondMs) elapsedMs=\(elapsedMs) waiting=\(waiting)")
+    }
+
     /// СТОРОЖ ТРАНСКРИПЦИИ (репорт пользователя 23.07.2026: «Распознаю» зависла навечно, Speakey
     /// не закрывался — пришлось перезагружать Мак). Инференс без таймаута = вечная плашка. По
     /// таймауту задачу БРОСАЕМ: счётчик/индикатор чинятся, поздний результат отбрасывается по
@@ -508,9 +555,12 @@ final class VoiceController {
         transcribeGen += 1
         let gen = transcribeGen
         liveTranscriptions.insert(gen)
-        var timeout = min(90, max(15, duration * 1.5))   // Parakeet/ANE — секунды; whisper растёт с длиной клипа
+        let baseTimeout = min(90, max(15, duration * 1.5))   // Parakeet/ANE — секунды; whisper растёт с длиной клипа
+        var timeout = baseTimeout
         if coldLoad { timeout += 60 }                    // +бюджет на холодную загрузку модели с диска
-        transcriptionBudgets[gen] = timeout
+        // Надбавка на холодную загрузку — для самой загрузки, а не для второго прохода: после
+        // холодного старта T2 скорее всего пропустится, и это правильно (T1 важнее).
+        transcriptionBudgets[gen] = (baseTimeout, DispatchTime.now().uptimeNanoseconds)
         DispatchQueue.main.asyncAfter(deadline: .now() + timeout) { [weak self] in
             guard let self, self.liveTranscriptions.remove(gen) != nil else { return }
             self.transcriptionBudgets[gen] = nil
@@ -1078,8 +1128,10 @@ final class VoiceController {
         }
         guard await MainActor.run(body: { self.modelInstalled }) else { return nil }
         return await withCheckedContinuation { (c: CheckedContinuation<String?, Never>) in
+            waitingTranscriptions.enter()
             transcribeQueue.async { [weak self] in
                 guard let self else { return c.resume(returning: nil) }
+                self.waitingTranscriptions.leave()
                 self.loadModelIfNeeded()
                 guard let w = self.whisper else { return c.resume(returning: nil) }
                 c.resume(returning: w.transcribe(samples: samples, language: lang))
@@ -1111,4 +1163,14 @@ final class VoiceController {
             kbLog("voice: транскрипция висит — выходим, не дожидаясь выгрузки модели")
         }
     }
+}
+
+/// Счётчик ожидающих в `transcribeQueue` транскрипций. Растёт при постановке (с любого потока),
+/// падает, когда задача началась. Читается из очереди перед вторым проходом.
+private final class WaitingCounter {
+    private let lock = NSLock()
+    private var value = 0
+    func enter() { lock.lock(); value += 1; lock.unlock() }
+    func leave() { lock.lock(); value -= 1; lock.unlock() }
+    var count: Int { lock.lock(); defer { lock.unlock() }; return value }
 }
