@@ -505,7 +505,7 @@ final class AutocompleteController {
         let range = NSRange(location: 0, length: (word as NSString).length)
         let guesses = checker.guesses(forWordRange: range, in: word, language: lang, inSpellDocumentWithTag: 0) ?? []
         let close = guesses.filter { $0.lowercased() != word && Self.editDistance($0.lowercased(), word) == 1 }
-        guard close.count == 1, let fix = close.first else { return nil }
+        guard close.count == 1, let fix = close.first, CompletionText.isSupportedLanguage(fix) else { return nil }
         if corpus.topTerms(limit: 200).contains(where: { $0.lowercased() == word }) { return nil }
         return (word, fix)
     }

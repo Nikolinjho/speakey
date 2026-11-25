@@ -14,9 +14,11 @@ PY
 swiftc -O -swift-version 5 -module-cache-path "$task_tmp/module-cache" \
   Sources/Speakey/CompletionEngine.swift Sources/Speakey/CompletionModels.swift \
   Sources/Speakey/CompletionText.swift Sources/Speakey/CompletionPrompt.swift \
+  Sources/Speakey/LayoutData.swift Sources/Speakey/ExtraWords.swift \
   Sources/Speakey/PersonalWritingIndex.swift Sources/Speakey/PersonalCorpus.swift \
   "$task_tmp/BaselinePersonalCorpus.swift" Tests/PersonalWritingEvaluation/main.swift \
   -o "$task_tmp/evaluate"
 SPEAKEY_WRITING_EVAL_DIR="$task_tmp/corpus" SPEAKEY_COMPLETE_TEST_DIR="$task_tmp/runtime" \
+  SPEAKEY_DATA_DIR="$PWD/Sources/Speakey/Resources" \
   SPEAKEY_COMPLETE_BIN="${SPEAKEY_COMPLETE_BIN:-$PWD/vendor/llama.cpp/build-speakey/bin/llama-server}" \
   "$task_tmp/evaluate" "$output"

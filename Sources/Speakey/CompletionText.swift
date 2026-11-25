@@ -11,7 +11,7 @@ enum CompletionText {
 
     /// Обрезать на первом \n, убрать повтор хвоста `before`, ограничить maxWords словами; "" если пусто/мусор.
     static func clean(_ raw: String, before: String, maxWords: Int,
-                      stopPhrases: [String] = [], singleSentence: Bool = false) -> String {
+                      stopPhrases: [String] = [], singleSentence: Bool = false, continuingWord: Bool = true) -> String {
         guard maxWords > 0 else { return "" }
         var s = raw
         // Всё после первого служебного токена — мусор.
@@ -64,7 +64,36 @@ enum CompletionText {
                 inWord = true
             }
         }
-        return trimTrailing(String(s[..<cut]))
+        let suggestion = trimTrailing(String(s[..<cut]))
+        let continuesWord = continuingWord && suggestion.first?.isLetter == true && before.last?.isLetter == true
+        let wordPrefix = continuesWord ? lastWord(before) : ""
+        return isSupportedLanguage(wordPrefix + suggestion) ? suggestion : ""
+    }
+
+    private static let supportedLanguages: Set<NLLanguage> = [.russian, .english]
+    private static let russianLetters = CharacterSet(charactersIn: "АБВГДЕЁЖЗИЙКЛМНОПРСТУФХЦЧШЩЪЫЬЭЮЯабвгдеёжзийклмнопрстуфхцчшщъыьэюя")
+    private static let englishLetters = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz")
+    private static let supportedLetters = russianLetters.union(englishLetters)
+
+    static func isSupportedLanguage(_ text: String) -> Bool {
+        let normalized = text.precomposedStringWithCanonicalMapping
+        let letters = normalized.unicodeScalars.filter { $0.properties.isAlphabetic }
+        guard letters.allSatisfy(supportedLetters.contains) else { return false }
+        guard letters.count >= 2 else { return true }
+
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(normalized)
+        let scores = recognizer.languageHypotheses(withMaximum: 5)
+        let supportedScore = supportedLanguages.compactMap { scores[$0] }.max() ?? 0
+        let otherScore = scores.filter { !supportedLanguages.contains($0.key) }.values.max() ?? 0
+        guard otherScore >= 0.30, otherScore >= supportedScore * 0.85 else { return true }
+
+        // Для одного слова на кириллице вероятностей часто недостаточно. Сверяем его со словарём Speakey.
+        let words = normalized.split { !$0.isLetter }
+        if words.count == 1, letters.allSatisfy(russianLetters.contains), LayoutData.shared.isLoaded {
+            return LayoutData.shared.wordsRu.contains(words[0].lowercased())
+        }
+        return supportedScore >= 0.25 || (supportedScore > 0 && otherScore < 0.55)
     }
 
     /// Следующий кусок для Tab: ведущие пробелы + непрерывный не-пробельный ран (пунктуация входит).

@@ -42,10 +42,18 @@ expect(CompletionText.clean("\t \t", before: "x", maxWords: 6) == "", "толь�
 expect(CompletionText.clean(" a  b   c d", before: "x", maxWords: 2) == " a  b", "лимит слов сохраняет внутренние пробелы")
 expect(CompletionText.clean(" дела,  ", before: "как", maxWords: 6) == " дела,", "хвостовые пробелы срезаны")
 expect(CompletionText.clean(" hello world", before: "Say", maxWords: 6) == " hello world", "английский")
-expect(CompletionText.clean(" 你好 世界", before: "我说", maxWords: 6) == " 你好 世界", "китайский")
-expect(CompletionText.clean(" ça va très bien", before: "Salut", maxWords: 2) == " ça va", "французский с диакритикой")
+expect(CompletionText.clean(" 你好 世界", before: "Привет", maxWords: 6).isEmpty, "китайская подсказка отклоняется")
+expect(CompletionText.clean(" ça va très bien", before: "Say", maxWords: 2).isEmpty, "французская подсказка с диакритикой отклоняется")
+expect(CompletionText.clean(" ceci est une phrase", before: "Say", maxWords: 6).isEmpty, "французская подсказка на базовой латинице отклоняется")
+expect(CompletionText.clean(" esto es muy bueno", before: "Say", maxWords: 6).isEmpty, "испанская подсказка на базовой латинице отклоняется")
+expect(CompletionText.clean(" можемо зробити це завтра", before: "Давай", maxWords: 6).isEmpty, "украинская подсказка буквами русского алфавита отклоняется")
+expect(CompletionText.clean("також", before: "Ещё ", maxWords: 1).isEmpty, "украинская подсказка из одного слова отклоняется")
+expect(CompletionText.clean("це", before: "Проверь ", maxWords: 1).isEmpty, "двухбуквенная украинская подсказка отклоняется")
+expect(CompletionText.clean("Привет", before: "Скажи ", maxWords: 1) == "Привет", "короткая русская подсказка сохраняется")
+expect(CompletionText.clean(" GitHub Actions для проекта", before: "Настроим", maxWords: 6) == " GitHub Actions для проекта", "русская подсказка с английским названием сохраняется")
 expect(CompletionText.clean(" 😀 ок 👍", before: "привет", maxWords: 2) == " 😀 ок", "emoji как слово")
 expect(CompletionText.clean("🙂", before: "ок ", maxWords: 6) == "🙂", "ответ из одного emoji")
+expect(CompletionText.clean("☀️ 1️⃣", before: "ок ", maxWords: 6) == "☀️ 1️⃣", "emoji с вариационным селектором сохраняются")
 expect(CompletionText.clean(" 😀", before: "привет 😀", maxWords: 6) == " 😀", "emoji в конце before не считается повтором слова")
 let longBefore = String(repeating: "слово ", count: 100) + "как"
 expect(CompletionText.clean("как дела", before: longBefore, maxWords: 6) == " дела", "повтор при длинном before")
@@ -150,6 +158,9 @@ let full = CompletionContext(
     globalInstruction: "Пиши кратко", appInstruction: "Деловой тон",
     snippets: ["Пример один.", "Пример два."], terms: ["GitLab", "Speakey"])
 let fp = CompletionPrompt.build(full)
+let languageContext = CompletionContext(appName: "Pult", before: "Давай", screenText: "Доброго дня! Підкажіть, як перевірити налаштування.")
+expect(CompletionPrompt.cleanContinuation("розглянемо ваше повідомлення детальніше.", before: "Давай ", context: languageContext, maxWords: 6).isEmpty, "украинское продолжение из фонового контекста скрывается")
+expect(CompletionPrompt.cleanContinuation("разберём ваше сообщение.", before: "Давай ", context: languageContext, maxWords: 6) == "разберём ваше сообщение.", "русское продолжение с иностранным фоном сохраняется")
 expect(fp.hasSuffix("Коллеги, пушу в"), "before в конце при полном контексте")
 for part in ["#### Author instructions\nПиши кратко", "#### Application instructions\nДеловой тон", "#### Screen text\nДеплой Speakey",
              "#### Clipboard\nhttps://", "#### Author text examples\nПример один.\nПример два.", "#### Author vocabulary\nGitLab, Speakey",

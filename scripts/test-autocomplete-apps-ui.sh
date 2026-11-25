@@ -7,6 +7,7 @@ swiftc -swift-version 5 -module-cache-path "$task_tmp/module-cache" \
   Sources/Speakey/SettingsDesign.swift Sources/Speakey/L10n.swift \
   Sources/Speakey/AutocompleteControls.swift Sources/Speakey/AutocompleteSettings.swift \
   Sources/Speakey/CompletionText.swift Sources/Speakey/PersonalWritingIndex.swift Sources/Speakey/PersonalCorpus.swift \
+  Sources/Speakey/LayoutData.swift Sources/Speakey/ExtraWords.swift \
   Sources/Speakey/AutocompleteAppsView.swift Sources/Speakey/PersonalCorpusWindow.swift \
   Tests/AutocompleteAppsUI/Dependencies.swift Tests/AutocompleteAppsUI/main.swift \
   -o "$task_tmp/apps-ui-tests"

@@ -25,7 +25,7 @@ enum CompletionEditing {
 
     static func insertion(_ raw: String, before: String, after: String, continuingWord: Bool = false) -> String {
         if let left = before.last, let right = after.first, isWord(left), isWord(right) { return "" }
-        var text = CompletionText.clean(raw, before: before, maxWords: 10)
+        var text = CompletionText.clean(raw, before: before, maxWords: 10, continuingWord: continuingWord)
         let right = before.last?.isWhitespace == true ? String(after.drop(while: { $0.isWhitespace })) : after
         let candidate = Array(text), suffix = Array(right)
         if !candidate.isEmpty, !suffix.isEmpty {
@@ -51,6 +51,7 @@ enum CompletionEditing {
             && !text.unicodeScalars.contains { CharacterSet.newlines.contains($0) || $0 == "\u{FFFC}" }
             && text.allSatisfy { isWord($0) || $0.isWhitespace }
             && text.contains(where: { $0.isLetter })
+            && CompletionText.isSupportedLanguage(text)
     }
 
     static func synonyms(_ raw: String, original: String) -> [String] {
