@@ -41,5 +41,27 @@ enum BufferTests: DiagnosticSuite {
         let prior = buffer.currentOccurrenceID
         buffer.softContextReset()
         tests.check("Мягкий сброс сохраняет текст и меняет идентичность контекста", buffer.currentWord == "word" && buffer.currentOccurrenceID != prior && resets == 2)
+
+        let interrupted = KeystrokeBuffer()
+        interrupted.append("d")
+        interrupted.boundary(" ")
+        interrupted.applyCompletedConversion(converted: "в")
+        interrupted.append("ф")
+        if !interrupted.confirmsTypingAfterReplacement(at: 0, converted: "в", screenEndsWith: { $0 == "в ф" }) {
+            interrupted.clear()
+        }
+        interrupted.append("з")
+        interrupted.append("з")
+        interrupted.boundary(" ")
+        tests.check("На границе остаётся полное слово после быстрой смены раскладки",
+                    interrupted.wordForConversion(completedOnly: true)?.word == "фзз")
+        tests.check("Проверка учитывает следующее слово, которое уже завершилось",
+                    interrupted.confirmsTypingAfterReplacement(at: 0, converted: "в", screenEndsWith: { $0 == "в фзз " }))
+        tests.check("Без совпадения с полем буфер считается недостоверным",
+                    !interrupted.confirmsTypingAfterReplacement(at: 0, converted: "в", screenEndsWith: { $0 == "фв зз " }))
+        tests.check("Если поле недоступно, подтверждения нет",
+                    !interrupted.confirmsTypingAfterReplacement(at: 0, converted: "в", screenEndsWith: { _ in nil }))
+        tests.check("Без исходной замены проверка не читает поле",
+                    !interrupted.confirmsTypingAfterReplacement(at: 1, converted: "в", screenEndsWith: { _ in true }))
     }
 }

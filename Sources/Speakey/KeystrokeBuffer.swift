@@ -256,6 +256,21 @@ final class KeystrokeBuffer {
         if !sessionWords.isEmpty { sessionWords[sessionWords.count - 1].word = converted }
     }
 
+    /// Проверяем заменённое слово вместе с новым вводом: совпадение одной буквы у каретки
+    /// не доказывает, что она уцелела после серии Backspace.
+    func confirmsTypingAfterReplacement(at index: Int, converted: String, screenEndsWith: (String) -> Bool?) -> Bool {
+        guard sessionWords.indices.contains(index), sessionWords[index].word == converted,
+              index < sessionWords.count - 1 || !currentWord.isEmpty else { return false }
+        var suffix = ""
+        let limit = 128
+        for (word, tail) in sessionWords[index...] {
+            guard suffix.utf16.count + word.utf16.count + tail.utf16.count <= limit else { return false }
+            suffix += word + tail
+        }
+        guard suffix.utf16.count + currentWord.utf16.count <= limit else { return false }
+        return screenEndsWith(suffix + currentWord) == true
+    }
+
     /// Boundary-конверсия перепечатала хвост той же длины (например, `  ` → `. `). Модель обязана
     /// повторить экран, иначе поздний хоткей/групповая конверсия вернёт два пробела обратно.
     func applyCompletedTail(_ tail: String) {

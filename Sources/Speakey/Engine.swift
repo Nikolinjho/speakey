@@ -208,9 +208,8 @@ final class Engine: EventTapHandler {
         didSet { if muted { mutedAt = ProcessInfo.processInfo.systemUptime; inFlightRealKeys = 0 } }
     }
     /// Реальные печатные клавиши, вклинившиеся В ПОЛЁТ нашей синтетики (аудит, Fence B).
-    /// Клавиша легла на экран ВНУТРИ зоны замены (между backspace'ами и ретайпом), а в модели —
-    /// после неё: буфер после такого полёта недостоверен («gприветhello»). Отменить нельзя,
-    /// но можно НЕ распространять: буфер чистим, следующая конверсия начинает с чистого листа.
+    /// Клавиша могла попасть между Backspace и заменой, когда порядок в буфере уже отличается
+    /// от поля. Она могла прийти и после замены, пока ещё шёл дренаж.
     private var inFlightRealKeys = 0
 
     /// macOS воспринимает два быстрых пробела как точку. Читаем официальный глобальный флаг AppKit
@@ -222,11 +221,15 @@ final class Engine: EventTapHandler {
     }
 
     /// Единая точка завершения полёта синтетики (все completion'ы конверсий).
-    private func endSyntheticFlight() {
+    private func endSyntheticFlight(verifyBuffer: () -> Bool = { false }) {
         if inFlightRealKeys > 0 {
-            kbLog("⚠️ в полёт синтетики вклинились реальные клавиши (\(inFlightRealKeys)) — буфер очищен (страховка)")
             liveFixLast = ""
-            buffer.clear()
+            if verifyBuffer() {
+                kbLog("ввод во время замены: поле подтвердило буфер, сохраняю")
+            } else {
+                kbLog("⚠️ в полёт синтетики вклинились реальные клавиши (\(inFlightRealKeys)) — буфер очищен (страховка)")
+                buffer.clear()
+            }
             inFlightRealKeys = 0
         }
         muted = false
@@ -2161,6 +2164,8 @@ final class Engine: EventTapHandler {
         // Снятие muted — в completion (после async-постинга), а не фикс-таймером (см. live-fix выше).
         let diagnosticOccurrence = manual ? (buffer.currentOccurrenceID ?? buffer.lastOccurrenceID) : buffer.lastOccurrenceID
         let diagnosticContext = diagnostics.controller.contextID
+        let replacementWordIndex = manual ? nil : buffer.sessionWords.indices.last
+        let flightStartedAt = mutedAt
         let diagnosticEvent = manual ? nil : recordDecision(word: word, proposed: converted, path: .boundary,
             reason: autoProp?.rescue == true ? .mixedRescue : .detectorConvert, action: .replace, completed: true, neuralRequest: neuralRequest)
         neural.changed()
@@ -2172,10 +2177,22 @@ final class Engine: EventTapHandler {
                 self.diagnostics.controller.manualConverted(occurrenceID: occurrence, contextID: diagnosticContext,
                     from: word, to: converted, submitted: submitted)
             }
-        }) { [weak self] in
-            guard let self else { return }
-            DispatchQueue.main.asyncAfter(deadline: .now() + self.muteDrain) { self.endSyntheticFlight() }
-        }
+            DispatchQueue.main.asyncAfter(deadline: .now() + self.muteDrain) { [weak self] in
+                guard let self, self.muted, self.mutedAt == flightStartedAt else { return }
+                self.endSyntheticFlight {
+                    guard submitted, let replacementWordIndex,
+                          self.diagnostics.controller.contextID == diagnosticContext,
+                          !self.pendingContextClear, !self.pendingSoftReset,
+                          !Pause.active, !self.secureInputWasOn else { return false }
+                    return self.buffer.confirmsTypingAfterReplacement(at: replacementWordIndex, converted: converted) { suffix in
+                        guard !TextReplacer.secureInputActive,
+                              let app = NSWorkspace.shared.frontmostApplication,
+                              app.bundleIdentifier == self.frontAppBID else { return nil }
+                        return AXScreenCheck.caretEndsWith(suffix, pid: app.processIdentifier, timeout: 0.01)
+                    }
+                }
+            }
+        })
         let tailT0 = CACurrentMediaTime()
         if manual { buffer.applyConversion(converted: converted) }
         else {

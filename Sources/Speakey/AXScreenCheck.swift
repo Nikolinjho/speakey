@@ -16,18 +16,18 @@ import Foundation
 enum AXScreenCheck {
     /// Последние maxLen символов до каретки; nil = экран не читается (нет фокуса / AX не отвечает /
     /// есть выделение — тогда «текст до каретки» неоднозначен).
-    static func textBeforeCaret(maxLen: Int) -> String? {
-        let sys = AXUIElementCreateSystemWide()
+    static func textBeforeCaret(maxLen: Int, pid: pid_t? = nil, timeout: Float = 0.05) -> String? {
+        let root = pid.map(AXUIElementCreateApplication) ?? AXUIElementCreateSystemWide()
         // ЖЁСТКИЙ ТАЙМАУТ 50мс (ревью research 24.07): AXUIElementCopy* — синхронный IPC, который
         // обслуживает main-цикл ЦЕЛЕВОГО приложения. Занято оно спиннером — мы бы висели секунды
         // на СВОЁМ main, где живёт event tap → kCGEventTapDisabledByTimeout → «ввод не работает
         // нигде» (класс инцидента 21.07). С таймаутом худший случай — 2×50мс и честный nil.
-        AXUIElementSetMessagingTimeout(sys, 0.05)
+        AXUIElementSetMessagingTimeout(root, timeout)
         var focusedRef: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(sys, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
+        guard AXUIElementCopyAttributeValue(root, kAXFocusedUIElementAttribute as CFString, &focusedRef) == .success,
               let focusedAny = focusedRef, CFGetTypeID(focusedAny) == AXUIElementGetTypeID() else { return nil }
         let el = unsafeDowncast(focusedAny as AnyObject, to: AXUIElement.self)
-        AXUIElementSetMessagingTimeout(el, 0.05)
+        AXUIElementSetMessagingTimeout(el, timeout)
         var rangeRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &rangeRef) == .success,
               let rangeAny = rangeRef, CFGetTypeID(rangeAny) == AXValueGetTypeID() else { return nil }
@@ -77,9 +77,9 @@ enum AXScreenCheck {
 
     /// Текст до каретки уже заканчивается этим суффиксом? nil = не знаем (AX молчит) — тогда
     /// вызывающий действует как раньше. Пробельный хвост сравниваем без придирок к \u{00A0}.
-    static func caretEndsWith(_ suffix: String) -> Bool? {
+    static func caretEndsWith(_ suffix: String, pid: pid_t? = nil, timeout: Float = 0.05) -> Bool? {
         guard !suffix.isEmpty else { return nil }
-        guard let tail = textBeforeCaret(maxLen: suffix.count + 8) else { return nil }
+        guard let tail = textBeforeCaret(maxLen: suffix.utf16.count + 8, pid: pid, timeout: timeout) else { return nil }
         let norm = { (s: String) in s.replacingOccurrences(of: "\u{00A0}", with: " ") }
         return norm(tail).hasSuffix(norm(suffix))
     }
