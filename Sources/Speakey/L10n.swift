@@ -1593,7 +1593,7 @@ extension L10n {
         let values: [String: (String, String)] = [
             "title": ("Автодополнение", "Autocomplete"),
             "main": ("Дописывать текст при наборе", "Complete text as you type"),
-            "mainSub": ("Серая подсказка у каретки. Tab принимает слово, ⌥Tab даёт обычный Tab, Esc скрывает подсказку.", "Grey suggestion at the caret. Tab accepts a word, ⌥Tab gives a regular Tab, Esc hides it."),
+            "mainSub": ("Серая подсказка у каретки. Tab принимает её целиком, → – одно слово, ⌥Tab даёт обычный Tab, Esc скрывает подсказку.", "Grey suggestion at the caret. Tab accepts all of it, → accepts one word, ⌥Tab gives a regular Tab, Esc hides it."),
             "modelTitle": ("Модель", "Model"),
             "model": ("Модель", "Model"),
             "download": ("Скачать", "Download"),

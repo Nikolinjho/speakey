@@ -200,7 +200,8 @@ final class AutocompleteController {
         if suppression.isSuppressed(app: app, now: now) { hide(); return false }
 
         if !ghost.isEmpty {
-            if shortcuts[.nextWord] == CompletionShortcut(keyCode: 48, modifiers: 0), tabEnabled {
+            let plainTab = CompletionShortcut(keyCode: 48, modifiers: 0)
+            if shortcuts[.nextWord] == plainTab || shortcuts[.acceptAll] == plainTab, tabEnabled {
                 if keyCode == 48, mods == [.maskAlternate] {
                     // ⌥Tab — обычный Tab, даже при видимой подсказке.
                     hide()

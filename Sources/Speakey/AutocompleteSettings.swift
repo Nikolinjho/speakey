@@ -79,11 +79,23 @@ enum AutocompletePrefs {
     static func notifyControls() { NotificationCenter.default.post(name: controlsChanged, object: nil) }
 
     static func shortcut(_ action: CompletionAction) -> CompletionShortcut? {
-        let key = "ac.shortcut.\(action.rawValue)"
-        if let data = d.data(forKey: key) { return try? JSONDecoder().decode(CompletionShortcut.self, from: data) }
-        if action == .nextWord { return CompletionShortcut(keyCode: 48, modifiers: 0) }
-        if action == .acceptAll, acceptAllKeyCode >= 0 { return CompletionShortcut(keyCode: Int64(acceptAllKeyCode), modifiers: 0) }
-        return nil
+        if let data = d.data(forKey: "ac.shortcut.\(action.rawValue)") { return try? JSONDecoder().decode(CompletionShortcut.self, from: data) }
+        guard let fallback = defaultShortcut(action) else { return nil }
+        // Умолчание не отбирает клавишу, которую человек сам назначил другой команде.
+        let taken = CompletionAction.allCases.contains { other in
+            other != action && d.data(forKey: "ac.shortcut.\(other.rawValue)")
+                .flatMap { try? JSONDecoder().decode(CompletionShortcut.self, from: $0) } == fallback
+        }
+        return taken ? nil : fallback
+    }
+
+    /// Tab принимает всю подсказку, → — ближайшее слово.
+    private static func defaultShortcut(_ action: CompletionAction) -> CompletionShortcut? {
+        switch action {
+        case .nextWord: return CompletionShortcut(keyCode: 124, modifiers: 0)
+        case .acceptAll: return CompletionShortcut(keyCode: acceptAllKeyCode >= 0 ? Int64(acceptAllKeyCode) : 48, modifiers: 0)
+        default: return nil
+        }
     }
 
     static var shortcuts: [CompletionAction: CompletionShortcut] {

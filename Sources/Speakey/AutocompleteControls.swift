@@ -41,7 +41,7 @@ struct CompletionShortcut: Codable, Equatable {
         if [.manual, .toggleApp, .toggleGlobal, .alternatives, .synonyms].contains(action) {
             return modifiers & ((1 << 18) | (1 << 19) | (1 << 20)) != 0
         }
-        return modifiers != 0 || [48, 10, 50].contains(keyCode)
+        return modifiers != 0 || [48, 10, 50, 124].contains(keyCode)
     }
 
     static func conflict(_ shortcut: Self, for action: CompletionAction,
